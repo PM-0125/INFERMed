@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Virtualenv
+.venv/
+env/
+.venv.bak/
+.env
+
+# Editor
+.vscode/
+*.code-workspace
+
+# Data & Models
+data/
+*.parquet
+*.csv
+*.tsv
+*.duckdb
+
+# Caches & Indices
+cache/
+qlever-index/
+models/
+*.bin
+*.pt
+*.ckpt
+
+# System files
+.DS_Store

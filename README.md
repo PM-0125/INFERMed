@@ -1,5 +1,7 @@
 # INFERMed: Intelligent Navigator for Evidence-based Retrieval in Medicine
 
+> ⚠️ **Notice**: This system is a work in progress as part of an academic master's thesis. While it uses verified datasets and knowledge sources, it is not intended for direct clinical use without supervision from licensed professionals.
+
 ## Overview
 
 **INFERMed** is a biomedical drug interaction checker built using a **Retrieval-Augmented Generation (RAG)** architecture. It intelligently predicts and explains potential drug–drug interactions by combining pharmacokinetic/pharmacodynamic (PK/PD) knowledge, real-world adverse event reports, and curated clinical datasets. These insights are synthesized using a locally hosted large language model (LLM), offering personalized and context-aware recommendations for different user types.
@@ -146,7 +148,9 @@ INFERMed/
 
 ## 🤝 Contribution & License
 
-Feel free to fork, modify, and contribute to INFERMed. This project aims to serve as a research-grade, explainable assistant for clinicians, patients, and biomedical developers.
+This codebase is part of a personal academic research project and is not intended for public or commercial deployment without explicit permission.
+
+> **Disclaimer:** INFERMed combines deterministic querying and probabilistic language generation to provide informative summaries about drug–drug interactions. While all data sources used are scientifically verified or publicly available, **this tool is not a substitute for medical advice**. All final decisions must be made by **licensed healthcare professionals** or **qualified experts in pharmaceutical safety**. Patients should always consult their doctor or pharmacist before acting on any output from this system.
 
 ---
 
