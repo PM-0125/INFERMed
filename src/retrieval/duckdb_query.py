@@ -1,16 +1,20 @@
+
 import os
 import duckdb
 from duckdb import DuckDBPyConnection
 from typing import List, Optional, Dict, Union
 from functools import lru_cache
 
+
 # Module-level client
 _client: Optional['DuckDBClient'] = None
 
 class DuckDBClient:
     """
-    DuckDB client that registers Parquet-backed views and provides
-    both single and batch query methods without materializing tables.
+    DuckDB client for querying Parquet-backed drug datasets.
+    Registers views for each Parquet file and provides methods for single and batch queries
+    without materializing tables. Supports queries for side effects, interaction scores,
+    DILI risk, DICT rank, DIQT score, and drug targets.
     """
     # SQL templates for single-drug queries
     _sql_templates: Dict[str, str] = {
@@ -60,28 +64,40 @@ class DuckDBClient:
     }
 
     def __init__(self, parquet_dir: str):
-        # Initialize in-memory DuckDB connection
+        """
+        Initialize an in-memory DuckDB connection and register Parquet files as views.
+        Args:
+            parquet_dir: Directory containing the Parquet files.
+        """
         self._con: DuckDBPyConnection = duckdb.connect(database=":memory:")
-        # Register each Parquet file as a DuckDB view
         self._register_views(parquet_dir)
 
     def _register_views(self, base_dir: str) -> None:
+        """
+        Register Parquet files as DuckDB views for querying.
+        Args:
+            base_dir: Directory containing the Parquet files.
+        """
         p = os.path.join
+        # Register twosides view
         self._con.execute(f"""
             CREATE OR REPLACE TEMPORARY VIEW twosides AS
             SELECT * FROM read_parquet('{p(base_dir, 'twosides.parquet')}')
             """)
+        # Register dilirank view
         self._con.execute(f"""
             CREATE OR REPLACE TEMPORARY VIEW dilirank AS
             SELECT "Compound Name" AS drug_name, vDILIConcern AS concern
             FROM read_parquet('{p(base_dir, 'DILIrank-DILIscore.parquet')}')
             """)
+        # Register dictrank view
         self._con.execute(f"""
             CREATE OR REPLACE TEMPORARY VIEW dictrank AS
             SELECT COALESCE("HYALURONIC ACID","Hyaluronic Acid","HYALURONIC ACID.1") AS drug_name,
                    "Unnamed: 7" AS severity
             FROM read_parquet('{p(base_dir, 'DICTRank.parquet')}')
             """)
+        # Register diqt view
         ns_col = 'Astemizole\u00A0(Hismanal)'
         self._con.execute(f"""
             CREATE OR REPLACE TEMPORARY VIEW diqt AS
@@ -89,6 +105,7 @@ class DuckDBClient:
                    CAST("2247" AS DOUBLE) AS score
             FROM read_parquet('{p(base_dir, 'DIQT-Drug-Info.parquet')}')
             """)
+        # Register drugbank view
         self._con.execute(f"""
             CREATE OR REPLACE TEMPORARY VIEW drugbank AS
             SELECT name, interactions
@@ -96,8 +113,15 @@ class DuckDBClient:
             """)
 
     def get_side_effects(self, drug_name: Union[str, List[str]]) -> Union[List[str], Dict[str, List[str]]]:
+        """
+        Get side effects for a drug or list of drugs.
+        Args:
+            drug_name: Drug name (str) or list of drug names.
+        Returns:
+            List of side effects for a single drug, or dict mapping drug to side effects for batch.
+        """
         if isinstance(drug_name, list):
-            # Batch mode
+            # Batch mode: query for multiple drugs
             placeholders = ",".join("?" for _ in drug_name)
             sql = f"""
                 SELECT lower(drug_1_concept_name) AS drug, condition_concept_name
@@ -112,19 +136,34 @@ class DuckDBClient:
                 if se and se not in result[d]:
                     result[d].append(se)
             return result
-        # Single mode
+        # Single mode: query for one drug
         rows = self._con.execute(
             self._sql_templates['get_side_effects'], [drug_name, drug_name]
         ).fetchall()
         return [r[0] for r in rows if r and r[0]]
 
     def get_interaction_score(self, drug1: str, drug2: str) -> float:
+        """
+        Get the interaction score (PRR) between two drugs.
+        Args:
+            drug1: First drug name.
+            drug2: Second drug name.
+        Returns:
+            PRR score as float (0.0 if not found).
+        """
         rows = self._con.execute(
             self._sql_templates['get_interaction_score'], [drug1, drug2, drug2, drug1]
         ).fetchall()
         return rows[0][0] if rows and rows[0] and rows[0][0] is not None else 0.0
 
     def get_dili_risk(self, drug_name: Union[str, List[str]]) -> Union[str, Dict[str, str]]:
+        """
+        Get DILI (Drug-Induced Liver Injury) risk for a drug or list of drugs.
+        Args:
+            drug_name: Drug name (str) or list of drug names.
+        Returns:
+            DILI risk as string for single drug, or dict for batch.
+        """
         if isinstance(drug_name, list):
             placeholders = ",".join("?" for _ in drug_name)
             sql = f"""
@@ -141,6 +180,13 @@ class DuckDBClient:
         return self._map_dili(val)
 
     def get_dict_rank(self, drug_name: Union[str, List[str]]) -> Union[str, Dict[str, str]]:
+        """
+        Get DICT rank (severity) for a drug or list of drugs.
+        Args:
+            drug_name: Drug name (str) or list of drug names.
+        Returns:
+            Severity as string for single drug, or dict for batch.
+        """
         if isinstance(drug_name, list):
             placeholders = ",".join("?" for _ in drug_name)
             sql = f"""
@@ -156,6 +202,13 @@ class DuckDBClient:
         return rows[0][0].lower() if rows and rows[0] and rows[0][0] else 'unknown'
 
     def get_diqt_score(self, drug_name: Union[str, List[str]]) -> Union[Optional[float], Dict[str, Optional[float]]]:
+        """
+        Get DIQT score for a drug or list of drugs.
+        Args:
+            drug_name: Drug name (str) or list of drug names.
+        Returns:
+            Score as float or None for single drug, or dict for batch.
+        """
         if isinstance(drug_name, list):
             placeholders = ",".join("?" for _ in drug_name)
             sql = f"""
@@ -173,6 +226,13 @@ class DuckDBClient:
         return rows[0][0] if rows and rows[0] and rows[0][0] is not None else None
 
     def get_drug_targets(self, drug_name: Union[str, List[str]]) -> Union[List[str], Dict[str, List[str]]]:
+        """
+        Get drug targets/interactions for a drug or list of drugs.
+        Args:
+            drug_name: Drug name (str) or list of drug names.
+        Returns:
+            List of targets for single drug, or dict for batch.
+        """
         if isinstance(drug_name, list):
             placeholders = ",".join("?" for _ in drug_name)
             sql = f"""
@@ -190,6 +250,13 @@ class DuckDBClient:
         return rows[0][0].split(';;')
 
     def _map_dili(self, val: Optional[str]) -> str:
+        """
+        Map DILI concern string to risk category.
+        Args:
+            val: DILI concern string from database.
+        Returns:
+            Risk category ('low', 'medium', 'high', or '').
+        """
         if not val:
             return ''
         rc = val.lower()
@@ -205,13 +272,27 @@ class DuckDBClient:
 
 @lru_cache(maxsize=128)
 def init_duckdb_connection(parquet_dir: str) -> DuckDBPyConnection:
-    """Initialize module-level client. Must be called first!"""
+    """
+    Initialize module-level DuckDB client and connection.
+    Must be called before using other query functions.
+    Args:
+        parquet_dir: Directory containing Parquet files.
+    Returns:
+        DuckDBPyConnection object.
+    """
     global _client
     _client = DuckDBClient(parquet_dir)
     return _client._con
 
 @lru_cache(maxsize=256)
 def get_side_effects(drug_name: str) -> List[str]:
+    """
+    Get side effects for a single drug (cached).
+    Args:
+        drug_name: Drug name.
+    Returns:
+        List of side effects.
+    """
     if _client is None:
         raise RuntimeError('init_duckdb_connection() must be called first')
     res = _client.get_side_effects(drug_name)
@@ -221,12 +302,27 @@ def get_side_effects(drug_name: str) -> List[str]:
 
 @lru_cache(maxsize=256)
 def get_interaction_score(d1: str, d2: str) -> float:
+    """
+    Get interaction score (PRR) between two drugs (cached).
+    Args:
+        d1: First drug name.
+        d2: Second drug name.
+    Returns:
+        PRR score as float.
+    """
     if _client is None:
         raise RuntimeError('init_duckdb_connection() must be called first')
     return _client.get_interaction_score(d1, d2)
 
 @lru_cache(maxsize=256)
 def get_dili_risk(drug_name: str) -> str:
+    """
+    Get DILI risk for a single drug (cached).
+    Args:
+        drug_name: Drug name.
+    Returns:
+        DILI risk as string.
+    """
     if _client is None:
         raise RuntimeError('init_duckdb_connection() must be called first')
     res = _client.get_dili_risk(drug_name)
@@ -236,6 +332,13 @@ def get_dili_risk(drug_name: str) -> str:
 
 @lru_cache(maxsize=256)
 def get_dict_rank(drug_name: str) -> str:
+    """
+    Get DICT rank (severity) for a single drug (cached).
+    Args:
+        drug_name: Drug name.
+    Returns:
+        Severity as string.
+    """
     if _client is None:
         raise RuntimeError('init_duckdb_connection() must be called first')
     res = _client.get_dict_rank(drug_name)
@@ -245,6 +348,13 @@ def get_dict_rank(drug_name: str) -> str:
 
 @lru_cache(maxsize=256)
 def get_diqt_score(drug_name: str) -> Optional[float]:
+    """
+    Get DIQT score for a single drug (cached).
+    Args:
+        drug_name: Drug name.
+    Returns:
+        Score as float or None.
+    """
     if _client is None:
         raise RuntimeError('init_duckdb_connection() must be called first')
     res = _client.get_diqt_score(drug_name)
@@ -254,6 +364,13 @@ def get_diqt_score(drug_name: str) -> Optional[float]:
 
 @lru_cache(maxsize=256)
 def get_drug_targets(drug_name: str) -> List[str]:
+    """
+    Get drug targets/interactions for a single drug (cached).
+    Args:
+        drug_name: Drug name.
+    Returns:
+        List of targets/interactions.
+    """
     if _client is None:
         raise RuntimeError('init_duckdb_connection() must be called first')
     res = _client.get_drug_targets(drug_name)
