@@ -13,6 +13,14 @@ import plotly.express as px
 
 @dataclass(frozen=True)
 class FaersQuery:
+    """
+    Represents a query to the FAERS (FDA Adverse Event Reporting System) API.
+    Attributes:
+        drug: Drug name to query.
+        count_field: Field to count/group by in the API response.
+        search_filters: Optional additional search filters for the API.
+        suffix: Optional suffix for cache key uniqueness.
+    """
     drug: str
     count_field: str
     search_filters: Optional[str] = None
@@ -20,6 +28,7 @@ class FaersQuery:
 
     @property
     def cache_key(self) -> str:
+        """Generate a unique cache key for the query."""
         parts = [self.drug.lower()]
         if self.suffix:
             parts.append(self.suffix.lower())
@@ -29,27 +38,52 @@ class FaersQuery:
 
 @dataclass
 class FaersData:
+    """
+    Stores FAERS data for a drug, including counts of reactions or other fields.
+    Attributes:
+        drug: Drug name.
+        suffix: Suffix for context (e.g., 'reactions', 'age').
+        counts: Counter of term -> count.
+    """
     drug: str
     suffix: Optional[str]
     counts: Counter = field(default_factory=Counter)
 
     @property
     def total_reports(self) -> int:
+        """Return the total number of reports for the drug."""
         return sum(self.counts.values())
 
     def top_k(self, k: int = 5) -> List[Tuple[str, int]]:
+        """Return the top k most common terms and their counts."""
         return self.counts.most_common(k)
 
 
 class OpenFDAClient:
+    """
+    Client for querying the OpenFDA drug event API and caching results locally.
+    Provides methods for retrieving and visualizing drug adverse event data.
+    """
     BASE_URL = "https://api.fda.gov/drug/event.json"
     SUMMARY_LIMIT = 3
 
     def __init__(self, cache_dir: str = "/home/pranjul/mydata/INFERMed/data/openfda"):
+        """
+        Initialize the client and create the cache directory if it doesn't exist.
+        Args:
+            cache_dir: Directory to store cached API responses.
+        """
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
     def _fetch_and_cache_counts(self, query: FaersQuery) -> Dict[str, int]:
+        """
+        Fetch data from the OpenFDA API or load from cache if available.
+        Args:
+            query: FaersQuery object specifying the API query.
+        Returns:
+            Dictionary mapping term/time to count.
+        """
         cache_file = self.cache_dir / f"{query.cache_key}.json"
         if cache_file.exists():
             with open(cache_file, 'r', encoding='utf-8') as f:
@@ -75,6 +109,7 @@ class OpenFDAClient:
                     json.dump(mapping, f)
                 return mapping
             elif resp.status_code == 429:
+                # Rate limit: exponential backoff
                 time.sleep(2 ** attempt)
                 continue
             else:
@@ -85,6 +120,14 @@ class OpenFDAClient:
     _fetch_and_cache = _fetch_and_cache_counts
 
     def fetch_openfda_summary(self, drug_name: str, limit: int = None) -> str:
+        """
+        Fetch a summary of recent FDA event reports for a drug.
+        Args:
+            drug_name: Drug name.
+            limit: Number of reports to summarize (default: SUMMARY_LIMIT).
+        Returns:
+            Summary string of adverse events.
+        """
         lim = limit or self.SUMMARY_LIMIT
         summary_file = self.cache_dir / f"{drug_name.lower()}_summary.json"
         if summary_file.exists():
@@ -123,16 +166,40 @@ class OpenFDAClient:
         return summary
 
     def get_top_reactions(self, drug: str, top_k: int = 5) -> List[Tuple[str, int]]:
+        """
+        Get the top k most common adverse reactions for a drug.
+        Args:
+            drug: Drug name.
+            top_k: Number of top reactions to return.
+        Returns:
+            List of (reaction, count) tuples.
+        """
         q = FaersQuery(drug, 'patient.reaction.reactionmeddrapt.exact', suffix='reactions')
         data = Counter(self._fetch_and_cache_counts(q))
         return data.most_common(top_k)
 
     def get_time_series(self, drug: str, interval: str = 'receivedate') -> List[Tuple[str, int]]:
+        """
+        Get time series data for a drug, grouped by interval (e.g., receivedate).
+        Args:
+            drug: Drug name.
+            interval: Field to group by (default: receivedate).
+        Returns:
+            List of (date, count) tuples sorted by date.
+        """
         q = FaersQuery(drug, interval, suffix='time')
         data = self._fetch_and_cache_counts(q)
         return sorted(data.items(), key=lambda x: x[0])
 
     def get_age_distribution(self, drug: str, bins: Optional[List[int]] = None) -> Dict[str, int]:
+        """
+        Get age distribution for a drug's adverse event reports.
+        Args:
+            drug: Drug name.
+            bins: Optional list of age bins for bucketing.
+        Returns:
+            Dictionary of age bin (or age) to count.
+        """
         q = FaersQuery(drug, 'patient.patientonsetage.exact', suffix='age')
         raw = self._fetch_and_cache_counts(q)
         if not bins:
@@ -151,10 +218,26 @@ class OpenFDAClient:
         return buckets
 
     def get_reporter_breakdown(self, drug: str) -> Dict[str, int]:
+        """
+        Get breakdown of report sources (e.g., physician, consumer) for a drug.
+        Args:
+            drug: Drug name.
+        Returns:
+            Dictionary of reporter type to count.
+        """
         q = FaersQuery(drug, 'primarysource.qualification.exact', suffix='reporter')
         return self._fetch_and_cache_counts(q)
 
     def get_combination_reactions(self, drug1: str, drug2: str, top_k: int = 5) -> List[Tuple[str, int]]:
+        """
+        Get top reactions reported for a combination of two drugs.
+        Args:
+            drug1: First drug name.
+            drug2: Second drug name.
+            top_k: Number of top reactions to return.
+        Returns:
+            List of (reaction, count) tuples.
+        """
         search = (
             f"patient.drug.medicinalproduct:{drug1.upper()}+AND+"
             f"patient.drug.medicinalproduct:{drug2.upper()}"
@@ -169,21 +252,52 @@ class OpenFDAClient:
 
     # Plotting helpers
     def plot_top_reactions(self, drug: str, top_k: int = 5):
+        """
+        Plot a bar chart of the top k reactions for a drug.
+        Args:
+            drug: Drug name.
+            top_k: Number of top reactions to plot.
+        Returns:
+            Plotly Figure object.
+        """
         data = self.get_top_reactions(drug, top_k)
         df = pd.DataFrame(data, columns=['reaction', 'count'])
         return px.bar(df, x='reaction', y='count', title=f"Top {top_k} Reactions for {drug.title()}")
 
     def plot_time_series(self, drug: str, interval: str = 'receivedate'):
+        """
+        Plot a time series of event counts for a drug.
+        Args:
+            drug: Drug name.
+            interval: Field to group by (default: receivedate).
+        Returns:
+            Plotly Figure object.
+        """
         data = self.get_time_series(drug, interval)
         df = pd.DataFrame(data, columns=['date', 'count'])
         return px.line(df, x='date', y='count', title=f"Event Count over Time for {drug.title()}")
 
     def plot_age_distribution(self, drug: str, bins: Optional[List[int]] = None):
+        """
+        Plot a bar chart of age distribution for a drug's adverse event reports.
+        Args:
+            drug: Drug name.
+            bins: Optional list of age bins for bucketing.
+        Returns:
+            Plotly Figure object.
+        """
         dist = self.get_age_distribution(drug, bins)
         df = pd.DataFrame(list(dist.items()), columns=['age_bin', 'count'])
         return px.bar(df, x='age_bin', y='count', title=f"Age Distribution for {drug.title()}")
 
     def plot_reporter_breakdown(self, drug: str):
+        """
+        Plot a pie chart of reporter breakdown for a drug.
+        Args:
+            drug: Drug name.
+        Returns:
+            Plotly Figure object.
+        """
         data = self.get_reporter_breakdown(drug)
         df = pd.DataFrame(list(data.items()), columns=['reporter', 'count'])
         return px.pie(df, names='reporter', values='count', title=f"Reporter Breakdown for {drug.title()}")
