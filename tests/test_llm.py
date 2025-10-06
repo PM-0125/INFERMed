@@ -106,6 +106,62 @@ def test_truncation_notice_for_large_context():
     p = build_prompt(big_ctx, "Doctor")
     assert "[Note: some context was truncated for length.]" in p
 
+def test_manual_demo_print_only():
+    from src.llm.llm_interface import generate_response
+    ctx = {
+        "drugs": {"a":{"name":"warfarin","ids":{}}, "b":{"name":"fluconazole","ids":{}}},
+        "signals": {"mechanistic":{"enzymes":{
+            "a":{"substrate":["CYP2C9"],"inhibitor":[],"inducer":[]},
+            "b":{"substrate":[],"inhibitor":["CYP2C9"],"inducer":[]}
+        }}},
+        "sources": {"duckdb":["TwoSides"], "qlever":["PubChem RDF subset"], "openfda":["FAERS"]},
+    }
+    out = generate_response(ctx, "Doctor", seed=42)
+    print(out["text"])
+
+# --- Optional add-ons below your current tests ---
+
+def test_history_block_is_included_in_prompt():
+    hist = [
+        {"role": "user", "text": "Are DrugA and DrugB safe together?"},
+        {"role": "assistant", "text": "They may interact; monitor."},
+        {"role": "user", "text": "What should I watch for?"}
+    ]
+    p = build_prompt(MINIMAL_CTX, "Patient", history=hist)
+    assert "## HISTORY (previous turns, summarized)" in p
+    # Most recent user line should appear
+    assert "What should I watch for?" in p
+    # Policy block should be present
+    assert "[POLICY]" in p
+
+def test_strip_template_safety_and_single_disclaimer(monkeypatch):
+    """Simulate a model that echoes a template safety line; ensure we strip it and append exactly one disclaimer."""
+    import requests
+
+    class FakeResp:
+        status_code = 200
+        def json(self):
+            return {
+                "response": '...analysis...\n"This is research software; final decisions rest with licensed clinicians."\n',
+                "eval_count": 10,
+                "prompt_eval_count": 100,
+            }
+
+    monkeypatch.setattr(requests, "post", lambda *a, **k: FakeResp(), raising=True)
+
+    out = generate_response(MINIMAL_CTX, "Doctor", seed=1)
+    # The template safety line should be gone
+    assert '"This is research software' not in out["text"]
+    # Our code-appended disclaimer should be present exactly once
+    assert out["text"].count("Disclaimer: Research prototype.") == 1
+
+def test_policy_present_in_prompt_patient_mode():
+    p = build_prompt(MINIMAL_CTX, "Patient")
+    assert "[POLICY]" in p
+    assert "Use ONLY the evidence" in p
+
+
+
 
 def test_sources_block_explicit_when_empty():
     """If sources dict is empty, the prompt should say '(none)' for each."""

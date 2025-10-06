@@ -11,6 +11,14 @@ MODEL_NAME = os.getenv("OLLAMA_MODEL", "mistral-nemo:12b")  # e.g., 'mistral:ins
 TIMEOUT_S = float(os.getenv("OLLAMA_TIMEOUT_S", "60"))
 TEMPLATES_PATH = os.path.join(os.path.dirname(__file__), "prompt_templates.txt")
 
+# Decoding defaults tuned for grounded, low-variance text
+DECODE_DEFAULTS = {
+    "temperature": 0.2,
+    "top_k": 20,              # if model supports; harmless if ignored
+    "top_p": 0.9,             # if model supports; harmless if ignored
+    "repeat_penalty": 1.05,   # if model supports; harmless if ignored
+    "num_ctx": 8192,
+}
 
 # ========== Templates loader ==========
 def _load_templates(path: str) -> Dict[str, str]:
@@ -34,6 +42,10 @@ def _load_templates(path: str) -> Dict[str, str]:
             current = m.group(1).strip().upper()
             buf = []
         else:
+            # Drop any legacy "SAFETY:" sections (we append disclaimers in code)
+            if line.strip().startswith("SAFETY:"):
+                # skip until next template header or EOF by not adding lines
+                continue
             buf.append(line)
     if current is not None:
         blocks[current] = "\n".join(buf).strip()
@@ -51,6 +63,7 @@ def generate_response(
     seed: Optional[int] = None,
     temperature: float = 0.2,
     max_tokens: int = 800,
+    history: Optional[List[Dict[str, str]]] = None,  # NEW: conversational history support
 ) -> Dict[str, Any]:
     """
     Call a local Ollama HTTP endpoint and return:
@@ -59,31 +72,32 @@ def generate_response(
     - Appends a concise mode-specific medical disclaimer.
     - Handles network/timeout errors via a safe fallback.
     - Avoids hallucinated sources by only using passed-in context.
+    - Supports lightweight conversational history (list of {"role":"user"|"assistant", "text": str}).
     """
-    prompt = build_prompt(context or {}, mode)
+    prompt = build_prompt(context or {}, mode, history=history)
 
+    payload_options = {
+        **DECODE_DEFAULTS,
+        "temperature": float(temperature),
+        "num_predict": int(max_tokens),
+        **({"seed": int(seed)} if seed is not None else {}),
+    }
     payload = {
         "model": MODEL_NAME,
         "prompt": prompt,
-        "options": {
-            "temperature": float(temperature),
-            # Some Ollama builds accept num_predict; keep it explicit.
-            "num_predict": int(max_tokens),
-            "num_ctx": 8192,
-            **({"seed": int(seed)} if seed is not None else {}),
-        },
+        "options": payload_options,
         "stream": False,
     }
 
     try:
-        import requests  # lazy import so tests can monkeypatch without dependency at import time
-
+        import requests  # lazy import so tests can monkeypatch at import time
         r = requests.post(f"{OLLAMA_HOST}/api/generate", json=payload, timeout=TIMEOUT_S)
         if r.status_code != 200:
             return _fallback(f"Ollama error {r.status_code}: {r.text[:200]}")
 
         data = r.json()
         text = (data.get("response") or "").strip()
+        text = _strip_template_safety(text)  # remove any template-baked safety lines if present
         return {
             "text": _append_disclaimer(text, mode),
             "usage": {
@@ -101,19 +115,45 @@ def generate_response(
         return _fallback(f"Ollama exception: {e}")
 
 
-def build_prompt(context: Dict[str, Any], mode: str) -> str:
+def build_prompt(
+    context: Dict[str, Any],
+    mode: str,
+    *,
+    history: Optional[List[Dict[str, str]]] = None,  # NEW
+) -> str:
     """
     Build a mode-conditioned prompt from normalized context.
     Enforces:
       - Instruction-first templates.
       - Explicit “No evidence from X” when blocks are empty.
       - Truncation policy prioritizing PK/PD overlaps → FAERS → rest.
+      - Lightweight history framing so follow-ups stay grounded.
     """
     tpl = _select_template(mode)
     blocks = _summarize_context(context or {}, mode)
-    prompt = _fill(tpl, **blocks)
-    if blocks.get("__TRUNCATED__"):
+
+    # Optional conversation history (compact, role-tagged; clipped to budget)
+    hist_block, hist_flag = _format_history(history or [], budget_chars=1200)
+
+    prompt = ""
+    if hist_block:
+        prompt += "## HISTORY (previous turns, summarized)\n" + hist_block + "\n\n"
+
+    prompt += _fill(tpl, **blocks)
+
+    # Grounding policy (auto-appended)
+    policy = (
+        "\n\n[POLICY]\n"
+        "- Use ONLY the evidence listed under CONTEXT and Sources.\n"
+        "- If FAERS has no items, write exactly: 'No evidence from FAERS.'\n"
+        "- Do NOT mention external databases/guidelines unless present in Sources.\n"
+        "- Do NOT invent mechanisms, doses, or monitoring steps not supported by CONTEXT.\n"
+    )
+    prompt += policy
+
+    if blocks.get("__TRUNCATED__") or hist_flag:
         prompt += "\n\n[Note: some context was truncated for length.]"
+
     return prompt
 
 
@@ -137,6 +177,39 @@ def _fill(template: str, **kwargs: str) -> str:
     return out
 
 
+# ========== History formatting ==========
+def _format_history(history: List[Dict[str, str]], budget_chars: int = 1200) -> Tuple[str, bool]:
+    """
+    Turn a list of {"role": "user"|"assistant", "text": str} into a compact block.
+    Clips from the front if over budget (keeps the most recent turns).
+    Returns (block_text, truncated_flag).
+    """
+    if not history:
+        return "", False
+
+    # Normalize and sanitize roles
+    rows: List[str] = []
+    total = 0
+    for h in history:
+        role = (h.get("role") or "").lower()
+        role = "User" if role.startswith("u") else ("Assistant" if role.startswith("a") else "User")
+        text = (h.get("text") or "").strip()
+        rows.append(f"- {role}: {text}")
+
+    # Keep most recent lines within budget
+    truncated = False
+    out: List[str] = []
+    for line in reversed(rows):  # start from newest
+        if total + len(line) + 1 <= budget_chars:
+            out.append(line)
+            total += len(line) + 1
+        else:
+            truncated = True
+            break
+    out.reverse()
+    return "\n".join(out), truncated
+
+
 # ========== Context summarization & truncation ==========
 def _summarize_context(ctx: Dict[str, Any], mode: str) -> Dict[str, str]:
     drugs = ctx.get("drugs", {}) or {}
@@ -153,8 +226,6 @@ def _summarize_context(ctx: Dict[str, Any], mode: str) -> Dict[str, str]:
     caveats_txt = _format_caveats(ctx)
 
     # Truncation policy (approx char budgets, not tokens)
-    # Always keep: drug names/IDs (these live inside the table block), strongest PK/PD overlaps,
-    # then FAERS top-5 per drug, then the rest.
     if (mode or "").lower() in {"doctor", "pharma"}:
         budget = 2400
     else:
@@ -166,31 +237,38 @@ def _summarize_context(ctx: Dict[str, Any], mode: str) -> Dict[str, str]:
         ("PD", pd_len, pd_prio, pd_txt),
         ("FAERS", faers_len, 5, faers_txt),
         ("Flags", len(flags_txt), 10, flags_txt),
-        ("Table", len(table_txt), 20, table_txt),  # includes IDs; still lower priority than core PK/PD/FAERS
+        ("Table", len(table_txt), 20, table_txt),  # includes IDs
         ("Sources", len(sources_txt), 50, sources_txt),
         ("Caveats", len(caveats_txt), 60, caveats_txt),
     ]
 
     used = 0
-    truncated = False
+    truncated_by_budget = False
     kept: Dict[str, str] = {}
 
-    # Sort by priority
     for label, ln, prio, txt in sorted(parts, key=lambda x: x[2]):
         if used + ln <= budget:
             kept[label] = txt
             used += ln
         else:
-            # Try to include a concise slice if it's a long block
             if ln > 220:
                 kept[label] = (txt[:200].rstrip() + " …")
                 used += 203
-                truncated = True
-            else:
-                truncated = True
-                # drop entirely
+            truncated_by_budget = True
 
-    # Extraction helpers
+    # Mark truncation if the *input lists* exceeded display caps (even if final fits)
+    mech = (ctx.get("signals", {}) or {}).get("mechanistic", {}) or {}
+    faers = (ctx.get("signals", {}) or {}).get("faers", {}) or {}
+    input_overflow = False
+    if len(mech.get("targets_a", []) or []) > 8: input_overflow = True
+    if len(mech.get("targets_b", []) or []) > 8: input_overflow = True
+    if len(mech.get("pathways_a", []) or []) > 6: input_overflow = True
+    if len(mech.get("pathways_b", []) or []) > 6: input_overflow = True
+    if len(mech.get("common_pathways", []) or []) > 8: input_overflow = True
+    if len(faers.get("top_reactions_a", []) or []) > 5: input_overflow = True
+    if len(faers.get("top_reactions_b", []) or []) > 5: input_overflow = True
+    if len(faers.get("combo_reactions", []) or []) > 5: input_overflow = True
+
     def g(label: str, default: str = "(truncated or missing)") -> str:
         return kept.get(label, default)
 
@@ -199,12 +277,12 @@ def _summarize_context(ctx: Dict[str, Any], mode: str) -> Dict[str, str]:
         "DRUG_B": drug_b,
         "PK_SUMMARY": g("PK", "(no PK evidence)"),
         "PD_SUMMARY": g("PD", "(no PD evidence)"),
-        "FAERS_SUMMARY": g("FAERS", "No evidence from FAERS (none)"),
+        "FAERS_SUMMARY": g("FAERS", "No evidence from FAERS."),
         "RISK_FLAGS": g("Flags", "(no tabular risk flags)"),
         "EVIDENCE_TABLE": g("Table", "(no evidence table)"),
         "SOURCES": g("Sources", "(no sources listed)"),
         "CAVEATS": g("Caveats", "(none)"),
-        "__TRUNCATED__": "1" if truncated else "",
+        "__TRUNCATED__": "1" if (truncated_by_budget or input_overflow) else "",
     }
 
 
@@ -213,7 +291,7 @@ def _format_pk(ctx: Dict[str, Any]) -> Tuple[str, int, int]:
     """
     Return (text, length, priority).
     Priority is lower (i.e., more important) if there is a plausible enzyme overlap:
-      A substrate X & B inhibitor X, or vice versa.
+      A substrate X & B inhibitor X, or vice versa (and same for inducers).
     """
     mech = (ctx.get("signals", {}) or {}).get("mechanistic", {}) or {}
     enz = mech.get("enzymes", {}) or {}
@@ -297,7 +375,7 @@ def _format_faers(ctx: Dict[str, Any], limit: int = 5) -> Tuple[str, int]:
     def topfmt(key: str, label: str) -> str:
         items = faers.get(key, []) or []
         if not items:
-            return f"{label}: No evidence from FAERS"
+            return f"{label}: No evidence from FAERS."
         top = ", ".join([f"{term} (n={cnt})" for term, cnt in items[:limit]])
         return f"{label}: {top}"
 
@@ -371,6 +449,24 @@ def _format_caveats(ctx: Dict[str, Any]) -> str:
 
 
 # ========== Disclaimers & fallback ==========
+def _strip_template_safety(text: str) -> str:
+    """Remove any safety lines that may have been printed by legacy templates."""
+    if not text:
+        return text
+    patterns = [
+        r'^\s*"This is research software; final decisions rest with licensed clinicians."\s*$',
+        r'^\s*This is research software; final decisions rest with licensed clinicians\.\s*$',
+        r'^\s*Disclaimer:\s*Research prototype\..*$',
+    ]
+    lines = text.splitlines()
+    kept = []
+    for ln in lines:
+        if any(re.match(p, ln.strip()) for p in patterns):
+            continue
+        kept.append(ln)
+    return "\n".join(kept).rstrip()
+
+
 def _append_disclaimer(text: str, mode: str) -> str:
     m = (mode or "").lower()
     if m == "patient":

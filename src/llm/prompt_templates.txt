@@ -25,8 +25,7 @@ RESPONSE STYLE:
 - Short bullet points for actions.
 - Include explicit statements where evidence is missing.
 
-SAFETY:
-End with: "This is research software; final decisions rest with licensed clinicians."
+"
 
 ----
 
@@ -47,8 +46,7 @@ RESPONSE STYLE:
 - 3 parts: Plain-English answer; What to watch for; What to do.
 - Use short sentences. No technical terms unless necessary; explain if used.
 
-SAFETY:
-End with: "Do not start/stop medicines without talking to your doctor or pharmacist."
+"
 
 ----
 
@@ -72,5 +70,4 @@ RESPONSE STYLE:
 - Headings: Overview; Evidence (PK/PD/FAERS); Risk assessment (Low/Med/High, justify); Recommendations.
 - Use compact bullet points and cite evidence origin.
 
-SAFETY:
-End with: "This brief is informational and non-regulatory; defer to internal labeling and PV procedures."
+"
