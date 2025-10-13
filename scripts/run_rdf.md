@@ -40,3 +40,140 @@ lsof -nP -iTCP:7011 -sTCP:LISTEN
 set -a
 source .env
 set +a
+
+
+
+# Project Structure:
+
+INFERMed/
+├── .gitignore
+├── README.md
+├── requirements.txt
+├── data/
+│   ├── duckdb/
+│   ├── openfda/
+│   └── pubchem/
+├── models/
+├── scripts/
+│   └── scaffold.ps1
+├── src/
+│   ├── frontend/
+│   │   └── app.py
+│   ├── llm/
+│   │   ├── __init__.py
+│   │   ├── llm_interface.py
+│   │   ├── prompt_templates.txt
+│   │   └── rag_pipeline.py
+│   ├── retrieval/
+│   │   ├── __init__.py
+│   │   ├── duckdb_query.py
+│   │   ├── openfda_api.py
+│   │   └── qlever_query.py
+│   └── utils/
+│       ├── __init__.py
+│       ├── caching.py
+│       └── pkpd_utils.py
+└── tests/
+    └── test_interactions.py
+    └── test_duckdb_query.py
+    └── test_llm.py
+    └── test_openfda_api.py
+    └── test_qlever_query.py
+
+
+
+🧩 MODULE-WISE DIVISION OF WORK (Chat-Worthy Units)
+
+Each of the following work units can be treated as an independent task—you can open a separate chat and say “Let’s work on Workstream X”, and we’ll focus only on that module.
+
+🔁 [Workstream 1] – DuckDB Parquet Retrieval Module
+
+Files:
+src/retrieval/duckdb_query.py
+
+Tasks:
+Load & query twosides.parquet, DILIrank.parquet, DICTRank.parquet, DIQT.parquet, DrugBankXML.parquet
+Create reusable query functions like:
+get_side_effects(drug_name)
+get_interaction_score(drug1, drug2)
+get_dili_risk(drug_name)
+
+🌐 [Workstream 2] – QLever SPARQL Module
+Files:
+src/retrieval/qlever_query.py
+
+Tasks:
+Build SPARQL query wrappers to hit QLever endpoint
+Implement queries like:
+get_targets(drug_smiles)
+get_common_pathways(drug1, drug2)
+get_metabolism_profile(drug_id)
+
+🌍 [Workstream 3] – OpenFDA API + Caching
+
+Files:
+src/retrieval/openfda_api.py
+
+Tasks:
+Query adverse events by drug name
+Cache results in data/openfda/ as JSON
+
+Implement:
+get_faers_data(drug_name)
+get_common_reactions(drug1, drug2)
+
+🤖 [Workstream 4] – LLM Interface
+
+Files:
+src/llm/llm_interface.py
+src/llm/prompt_templates.txt
+
+Tasks:
+Connect to local Ollama/Mistral endpoint
+Implement generate_response(prompt, mode)
+
+Create prompt templates for:
+Doctor
+Patient
+Pharma
+
+🧠 [Workstream 5] – RAG Orchestrator
+
+Files:
+src/llm/rag_pipeline.py
+
+Tasks:
+Integrate DuckDB, QLever, OpenFDA modules
+Join their outputs into context string
+Call llm_interface.generate_response(...)
+Output formatted answer with traceability
+
+🖥️ [Workstream 6] – Streamlit Frontend
+
+Files:
+src/frontend/app.py
+
+Tasks:
+Input: 2 drug names, select user mode
+Display:
+Summary
+Side effects
+Risk warnings
+Optional: add charts / visual side effect frequency
+
+🧪 [Workstream 7] – Testing & Sample Cases
+
+Files:
+tests/test_interactions.py
+
+Tasks:
+Add known DDI test cases
+Validate results vs. online tools
+Write unit tests for each module
+
+📊 Suggested Execution Order:
+Phase	Workstreams to Start
+✅ Now	[1], [3], [4] (data + OpenFDA + LLM)
+🧠 Mid	[2], [5] (QLever + RAG)
+🖼️ UI	[6]
+✔ Final	[7]

@@ -9,6 +9,8 @@ import requests
 from collections import Counter
 import pandas as pd
 import plotly.express as px
+# add at top with other imports
+from src.utils.caching import load_json, save_json, load_text, save_text
 
 
 @dataclass(frozen=True)
@@ -77,17 +79,13 @@ class OpenFDAClient:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
     def _fetch_and_cache_counts(self, query: FaersQuery) -> Dict[str, int]:
-        """
-        Fetch data from the OpenFDA API or load from cache if available.
-        Args:
-            query: FaersQuery object specifying the API query.
-        Returns:
-            Dictionary mapping term/time to count.
-        """
-        cache_file = self.cache_dir / f"{query.cache_key}.json"
-        if cache_file.exists():
-            with open(cache_file, 'r', encoding='utf-8') as f:
-                return json.load(f)
+        # cache key (filename without extension) remains identical
+        key = query.cache_key
+
+        # try cache
+        cached = load_json(self.cache_dir, key)
+        if cached is not None:
+            return cached
 
         params = {'search': f"patient.drug.medicinalproduct:{query.drug.upper()}"}
         if query.search_filters:
@@ -101,44 +99,41 @@ class OpenFDAClient:
                 results = payload.get('results', []) or []
                 mapping: Dict[str, int] = {}
                 for item in results:
-                    key = item.get('term') or item.get('time')
-                    if key is None:
+                    k = item.get('term') or item.get('time')
+                    if k is None:
                         continue
-                    mapping[key] = item.get('count', 0)
-                with open(cache_file, 'w', encoding='utf-8') as f:
-                    json.dump(mapping, f)
+                    mapping[k] = item.get('count', 0)
+
+                # atomic write via utils
+                save_json(self.cache_dir, key, mapping)
                 return mapping
+
             elif resp.status_code == 429:
-                # Rate limit: exponential backoff
                 time.sleep(2 ** attempt)
                 continue
             else:
                 break
+
         return {}
 
     # alias for backward compatibility
     _fetch_and_cache = _fetch_and_cache_counts
 
-    def fetch_openfda_summary(self, drug_name: str, limit: int = None) -> str:
-        """
-        Fetch a summary of recent FDA event reports for a drug.
-        Args:
-            drug_name: Drug name.
-            limit: Number of reports to summarize (default: SUMMARY_LIMIT).
-        Returns:
-            Summary string of adverse events.
-        """
+    def fetch_openfda_summary(self, drug_name: str, limit: Optional[int] = None) -> str:
         lim = limit or self.SUMMARY_LIMIT
-        summary_file = self.cache_dir / f"{drug_name.lower()}_summary.json"
-        if summary_file.exists():
-            return summary_file.read_text(encoding='utf-8')
+        key = f"{drug_name.lower()}_summary"  # keep the filename: <drug>_summary.json
+
+        # load text summary if cached
+        cached = load_text(self.cache_dir, key)
+        if cached is not None:
+            return cached
 
         def _retrieve(exact: bool) -> List[Dict]:
             params = {
                 'limit': lim,
                 'search': (
-                    f"patient.drug.medicinalproduct.exact:{drug_name}" if exact else
-                    f"patient.drug.medicinalproduct:{drug_name}"
+                    f"patient.drug.medicinalproduct.exact:{drug_name}" if exact
+                    else f"patient.drug.medicinalproduct:{drug_name}"
                 )
             }
             try:
@@ -161,8 +156,11 @@ class OpenFDAClient:
             terms = [e.get('reactionmeddrapt', 'Unknown') for e in effects]
             if terms:
                 lines.append(f"FDA report #{idx}: Common adverse events include {', '.join(terms[:5])}.")
+
         summary = "\n".join(lines)
-        summary_file.write_text(summary, encoding='utf-8')
+
+        # atomic write via utils (still writes to .../<drug>_summary.json)
+        save_text(self.cache_dir, key, summary)
         return summary
 
     def get_top_reactions(self, drug: str, top_k: int = 5) -> List[Tuple[str, int]]:
