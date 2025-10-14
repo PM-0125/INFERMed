@@ -5,46 +5,57 @@ Env:
   CORE_ENDPOINT=<qlever sparql endpoint url for core>
   DISEASE_ENDPOINT=<qlever sparql endpoint url for disease>
 
-Usage (quick):
-  from qlever_query import get_clients_from_env, core_find_exact_by_prefLabel
+Quick usage:
+  from src.retrieval.qlever_query import (
+      get_clients_from_env,
+      core_find_cid_by_exact_label,
+      core_find_cid_by_label_fragment,
+      core_descriptors_for_cids,
+      core_xlogp_threshold,
+      disease_find_by_label_fragment,
+      disease_crossrefs,
+  )
   core, disease = get_clients_from_env()
-  print(core_find_exact_by_prefLabel(core, "Aspirin"))
+  print(core_find_cid_by_exact_label("Aspirin"))
 """
 
-# qlever_query.py
-# Lightweight helpers for querying your local QLever endpoints (core + disease)
-# and shaping results for tests and downstream use.
-# qlever_query.py
 from __future__ import annotations
 
+import logging
 import os
 import re
 import time
-import logging
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, cast
 
 import requests
 
+# ---------------------------------------------------------------------------
+# Logging + endpoints (keep your normalization exactly as you had it)
 LOG = logging.getLogger(__name__)
 logging.basicConfig(level=os.environ.get("QLEVER_CLIENT_LOGLEVEL", "WARNING").upper())
 
 CORE_ENDPOINT = os.getenv("CORE_ENDPOINT", "").rstrip("/") + ("/" if os.getenv("CORE_ENDPOINT") else "")
 DISEASE_ENDPOINT = os.getenv("DISEASE_ENDPOINT", "").rstrip("/") + ("/" if os.getenv("DISEASE_ENDPOINT") else "")
 
+# ---------------------------------------------------------------------------
+# Constants
 PUBCHEM_COMPOUND_NS = "http://rdf.ncbi.nlm.nih.gov/pubchem/compound/"
 SIO = "http://semanticscience.org/resource/"
 SKOS = "http://www.w3.org/2004/02/skos/core#"
 RDFS = "http://www.w3.org/2000/01/rdf-schema#"
 
-
+# ---------------------------------------------------------------------------
+# Errors
 class QLeverError(RuntimeError):
     pass
 
 
 class QLeverTimeout(QLeverError):
-    pass
+    """Server-side cancellation (HTTP 429) or client-side read/connect timeout."""
 
 
+# ---------------------------------------------------------------------------
+# Client
 class QLeverClient:
     def __init__(self, endpoint: str, timeout_s: int = 30, session: Optional[requests.Session] = None):
         if not endpoint:
@@ -57,23 +68,27 @@ class QLeverClient:
     def query(self, sparql: str, retries: int = 0, backoff_s: float = 0.0) -> dict:
         """
         Execute a SPARQL query against a QLever server.
-        - Treat HTTP 429 as QLeverTimeout (server cancelled query).
-        - Treat client-side read/connect timeouts as QLeverTimeout as well,
-          so callers can trigger their fallbacks.
+
+        Behavior:
+        - HTTP 429 (QLever "Operation timed out") -> QLeverTimeout.
+        - Client-side read/connect timeouts -> QLeverTimeout.
+        - Connection errors -> QLeverError.
+        - Other HTTP errors -> QLeverError (with short body snippet).
         """
         last_exc: Optional[Exception] = None
         for attempt in range(retries + 1):
+            resp: Optional[requests.Response] = None
             try:
-                r = self.sess.get(
+                resp = self.sess.get(
                     self.endpoint,
                     params={"query": sparql},
                     headers=self._headers,
                     timeout=self.timeout_s,
                 )
-                if r.status_code == 429:
-                    raise QLeverTimeout(self._extract_server_error(r))
-                r.raise_for_status()
-                return r.json()
+                if resp.status_code == 429:
+                    raise QLeverTimeout(self._extract_server_error(resp))
+                resp.raise_for_status()
+                return resp.json()
 
             except requests.Timeout as e:
                 # Surface client timeouts as QLeverTimeout so callers can fallback.
@@ -92,13 +107,15 @@ class QLeverClient:
 
             except requests.HTTPError as e:
                 body = ""
+                status = resp.status_code if resp is not None else "?"
                 try:
-                    body = r.text[:2000]  # type: ignore[attr-defined]
+                    if resp is not None:
+                        body = resp.text[:2000]
                 except Exception:
                     pass
-                if r.status_code == 429:
-                    raise QLeverTimeout(self._extract_server_error(r))
-                raise QLeverError(f"HTTP {r.status_code} from {self.endpoint}: {body}") from e
+                if status == 429 and resp is not None:
+                    raise QLeverTimeout(self._extract_server_error(resp))
+                raise QLeverError(f"HTTP {status} from {self.endpoint}: {body}") from e
 
         # Should never reach here
         raise QLeverError(f"Unreachable; last exception: {last_exc}")
@@ -116,19 +133,22 @@ class QLeverClient:
             return f"429 from QLever (text): {r.text[:2000]}"
 
 
-def _vals(bindings: List[dict], *cols: str) -> List[Tuple[str, ...]]:
+# ---------------------------------------------------------------------------
+# Utilities
+
+def _vals(bindings: Sequence[Dict[str, Any]], *cols: str) -> List[Tuple[str, ...]]:
+    """Extract (string) tuple rows from SPARQL JSON bindings for the given columns."""
     out: List[Tuple[str, ...]] = []
     for b in bindings:
-        tup = []
-        ok = True
+        row: List[str] = []
         for c in cols:
             cell = b.get(c)
             if not cell:
-                ok = False
                 break
-            tup.append(cell["value"])
-        if ok:
-            out.append(tuple(tup))
+            row.append(cell["value"])
+        else:
+            # only append if we didn't break (all columns present)
+            out.append(tuple(row))
     return out
 
 
@@ -147,6 +167,19 @@ def _ensure_client(which: str) -> QLeverClient:
         return QLeverClient(DISEASE_ENDPOINT, timeout_s=int(os.getenv("QLEVER_TIMEOUT_DISEASE", "30")))
     raise AssertionError("Unknown client requested")
 
+
+def get_clients_from_env() -> Tuple[QLeverClient, QLeverClient]:
+    """Convenience to fetch both clients; raises if env is missing."""
+    return _ensure_client("core"), _ensure_client("disease")
+
+
+def sparql_str(s: str) -> str:
+    s = s.replace("\\", "\\\\").replace('"', '\\"')
+    return f"\"{s}\""
+
+
+# ---------------------------------------------------------------------------
+# CORE helpers
 
 def core_find_cid_by_exact_label(label: str, limit: int = 50) -> List[str]:
     cli = _ensure_client("core")
@@ -174,12 +207,13 @@ SELECT ?cid ?name WHERE {{
 """
     try:
         js = cli.query(q, retries=0)
-        return _vals(js["results"]["bindings"], "cid", "name")
+        return cast(List[Tuple[str, str]], _vals(js["results"]["bindings"], "cid", "name"))
     except QLeverTimeout:
         LOG.warning("Fragment query timed out; falling back to exact label variants for %r", frag)
 
+    # Fallback: probe exact-casing variants (fast)
     candidates = [frag, frag.capitalize(), frag.title(), frag.upper()]
-    seen = set()
+    seen: set[str] = set()
     out: List[Tuple[str, str]] = []
     for c in candidates:
         for cid in core_find_cid_by_exact_label(c, limit=limit):
@@ -216,12 +250,33 @@ ORDER BY ?cid ?key
     return out
 
 
-def core_xlogp_threshold(max_xlogp: float, limit: int = 1000,
-                         must_include_cids: Optional[List[str]] = None) -> Dict[str, float]:
+def _core_get_single_descriptor_value(cid: str, short_key: str) -> Optional[str]:
+    cli = _ensure_client("core")
+    q = f"""
+PREFIX sio:<{SIO}>
+SELECT ?val WHERE {{
+  <{cid}> sio:SIO_000008 ?attr .
+  FILTER(REGEX(STR(?attr), "_{short_key}$"))
+  ?attr sio:SIO_000300 ?val .
+}}
+LIMIT 1
+"""
+    js = cli.query(q)
+    vals = _vals(js["results"]["bindings"], "val")
+    return vals[0][0] if vals else None
+
+
+def core_xlogp_threshold(
+    max_xlogp: float,
+    limit: int = 1000,
+    must_include_cids: Optional[List[str]] = None
+) -> Dict[str, float]:
     """
-    Try to obtain a global slice of compounds with XLogP3 <= threshold.
-    If the global scan times out (common on large indexes), fall back to
-    per-CID lookups for a small must-include list (fast, because ?cid is bound).
+    Return {cid_uri: xlogp} for compounds with XLogP3 <= threshold.
+    If the global scan times out, fall back to per-CID lookups for a small
+    must-include set (fast because ?cid is bound).
+
+    We also scope to the PubChem compound namespace to avoid accidental matches.
     """
     cli = _ensure_client("core")
     q = f"""
@@ -245,6 +300,7 @@ LIMIT {int(limit)}
                 results[cid] = float(x)
             except ValueError:
                 pass
+
         # Ensure key examples are present if they qualify
         for cid in (must_include_cids or [f"{PUBCHEM_COMPOUND_NS}CID2244", f"{PUBCHEM_COMPOUND_NS}CID1000"]):
             if cid not in results:
@@ -257,9 +313,9 @@ LIMIT {int(limit)}
                     except ValueError:
                         pass
         return results
+
     except QLeverTimeout as e:
         LOG.warning("Global XLogP slice timed out; using per-CID fallback: %s", e)
-        # --- Fallback: per-CID lookups (fast) ---------------------------------
         fallback_cids = must_include_cids or [
             f"{PUBCHEM_COMPOUND_NS}CID2244",  # Aspirin
             f"{PUBCHEM_COMPOUND_NS}CID1000",  # Phenylethanolamine
@@ -278,21 +334,8 @@ LIMIT {int(limit)}
         return results
 
 
-def _core_get_single_descriptor_value(cid: str, short_key: str) -> Optional[str]:
-    cli = _ensure_client("core")
-    q = f"""
-PREFIX sio:<{SIO}>
-SELECT ?val WHERE {{
-  <{cid}> sio:SIO_000008 ?attr .
-  FILTER(REGEX(STR(?attr), "_{short_key}$"))
-  ?attr sio:SIO_000300 ?val .
-}}
-LIMIT 1
-"""
-    js = cli.query(q)
-    vals = _vals(js["results"]["bindings"], "val")
-    return vals[0][0] if vals else None
-
+# ---------------------------------------------------------------------------
+# DISEASE helpers
 
 def disease_find_by_label_fragment(fragment: str, limit: int = 50) -> List[Tuple[str, str]]:
     cli = _ensure_client("disease")
@@ -308,7 +351,7 @@ SELECT ?d ?label WHERE {{
 LIMIT {int(limit)}
 """
     js = cli.query(q)
-    return _vals(js["results"]["bindings"], "d", "label")
+    return cast(List[Tuple[str, str]], _vals(js["results"]["bindings"], "d", "label"))
 
 
 def disease_crossrefs(dz_uri: str, limit: int = 1000) -> List[str]:
@@ -324,19 +367,15 @@ LIMIT {int(limit)}
     return [ext for (ext,) in _vals(js["results"]["bindings"], "ext")]
 
 
-def sparql_str(s: str) -> str:
-    s = s.replace("\\", "\\\\").replace('"', '\\"')
-    return f"\"{s}\""
-
-
-# --- Minimal mechanistic stub (PK/PD) -----------------------------------------
+# ---------------------------------------------------------------------------
+# Minimal mechanistic stub (PK/PD)
 # Provides the shape expected by rag_pipeline. Enzymes/targets/pathways are left
-# empty for now; we at least resolve PubChem CIDs + collect a few synonyms.
+# empty for now; but we resolve PubChem CIDs + collect a few synonyms.
 
-def _first_cid_and_synonyms(name: str, limit: int = 25) -> tuple[str | None, dict]:
+def _first_cid_and_synonyms(name: str, limit: int = 25) -> tuple[Optional[str], Dict[str, Any]]:
     """
-    Returns (cid_uri_or_none, ids_dict). ids_dict includes {'pubchem_cid': '12345'} if found.
-    Also returns a small synonym list (best-effort) based on label fragments.
+    Returns (cid_uri_or_none, info_dict).
+    info_dict includes e.g. {"ids": {"pubchem_cid": "2244"}, "synonyms": ["Aspirin", ...]}
     """
     try:
         pairs = core_find_cid_by_label_fragment(name, limit=limit)
@@ -347,32 +386,20 @@ def _first_cid_and_synonyms(name: str, limit: int = 25) -> tuple[str | None, dic
         return None, {}
 
     # Take the first result; gather synonyms (labels) for that same CID
-    cid0, label0 = pairs[0]
-    syns = []
-    for cid, label in pairs:
-        if cid == cid0:
-            syns.append(label)
+    cid0, _ = pairs[0]
+    syns = [label for cid, label in pairs if cid == cid0]
 
     # Extract numeric CID (PubChem URIs look like .../compound/CID2244)
-    cid_num = None
-    try:
-        after = cid0.rsplit("CID", 1)[-1]
-        if after.isdigit():
-            cid_num = after
-        else:
-            # strip non-digits
-            import re as _re
-            m = _re.search(r"CID(\d+)", cid0)
-            if m:
-                cid_num = m.group(1)
-    except Exception:
-        pass
+    cid_num: Optional[str] = None
+    m = re.search(r"CID(\d+)", cid0)
+    if m:
+        cid_num = m.group(1)
 
     ids = {"pubchem_cid": cid_num} if cid_num else {}
     return cid0, {"ids": ids, "synonyms": list(dict.fromkeys(syns))[:20]}
 
 
-def get_mechanistic(drugA: str, drugB: str) -> dict:
+def get_mechanistic(drugA: str, drugB: str) -> Dict[str, Any]:
     """
     Minimal placeholder returning the correct schema:
       {
@@ -387,8 +414,9 @@ def get_mechanistic(drugA: str, drugB: str) -> dict:
 
     When you implement real SPARQL for enzymes/targets/pathways, fill those fields here.
     """
-    caveats = []
-    # Try to ensure core endpoint exists early so callers can interpret caveats
+    caveats: List[str] = []
+
+    # Ensure core endpoint exists early so callers can interpret caveats
     try:
         _ = _ensure_client("core")
     except Exception as e:
@@ -407,7 +435,7 @@ def get_mechanistic(drugA: str, drugB: str) -> dict:
     _, a_info = _first_cid_and_synonyms(drugA)
     _, b_info = _first_cid_and_synonyms(drugB)
 
-    mech = {
+    mech: Dict[str, Any] = {
         "enzymes": {
             "a": {"substrate": [], "inhibitor": [], "inducer": []},
             "b": {"substrate": [], "inhibitor": [], "inducer": []},
@@ -422,5 +450,3 @@ def get_mechanistic(drugA: str, drugB: str) -> dict:
         "caveats": caveats or ["Mechanistic PK/PD not yet implemented; returning IDs/synonyms only."],
     }
     return mech
-
-
