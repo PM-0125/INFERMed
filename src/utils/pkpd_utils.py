@@ -213,14 +213,43 @@ def synthesize_mechanistic(
     """
     Merge mechanistic info, using DuckDB DrugBank targets as PD fallback when QLever
     doesn't provide targets. Keeps shape required by the context schema.
+    Ensures enzymes/targets/pathways are normalized.
     """
     q = qlever_mech or {}
+
+    # --- Enzymes: normalize per role per side ---
+    raw_ez = q.get("enzymes", {}) or {"a": {}, "b": {}}
+    def canon_roles(side_map: Dict[str, Any]) -> Dict[str, List[str]]:
+        return {
+            "substrate": [canonicalize_enzyme(x) for x in (side_map.get("substrate") or [])],
+            "inhibitor": [canonicalize_enzyme(x) for x in (side_map.get("inhibitor") or [])],
+            "inducer":   [canonicalize_enzyme(x) for x in (side_map.get("inducer")   or [])],
+        }
+    enzymes = {
+        "a": canon_roles(raw_ez.get("a", {}) or {}),
+        "b": canon_roles(raw_ez.get("b", {}) or {}),
+    }
+
+    # --- Targets / pathways: normalize whether from QLever or fallback ---
+    t_a = q.get("targets_a")
+    t_b = q.get("targets_b")
+    p_a = q.get("pathways_a")
+    p_b = q.get("pathways_b")
+    cp  = q.get("common_pathways")
+
+    targets_a = canonicalize_list(t_a if t_a else (fallback_targets_a or []))
+    targets_b = canonicalize_list(t_b if t_b else (fallback_targets_b or []))
+    pathways_a = canonicalize_list(p_a or [])
+    pathways_b = canonicalize_list(p_b or [])
+    common_pathways = canonicalize_list(cp or [])
+
     mech: Dict[str, Any] = {
-        "enzymes": q.get("enzymes", {"a": {}, "b": {}}) or {"a": {}, "b": {}},
-        "targets_a": q.get("targets_a") or list(canonicalize_list(fallback_targets_a or [])),
-        "targets_b": q.get("targets_b") or list(canonicalize_list(fallback_targets_b or [])),
-        "pathways_a": q.get("pathways_a", []) or [],
-        "pathways_b": q.get("pathways_b", []) or [],
-        "common_pathways": q.get("common_pathways", []) or [],
+        "enzymes": enzymes,
+        "targets_a": targets_a,
+        "targets_b": targets_b,
+        "pathways_a": pathways_a,
+        "pathways_b": pathways_b,
+        "common_pathways": common_pathways,
     }
     return mech
+
