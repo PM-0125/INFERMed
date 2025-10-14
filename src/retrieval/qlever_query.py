@@ -328,3 +328,99 @@ def sparql_str(s: str) -> str:
     s = s.replace("\\", "\\\\").replace('"', '\\"')
     return f"\"{s}\""
 
+
+# --- Minimal mechanistic stub (PK/PD) -----------------------------------------
+# Provides the shape expected by rag_pipeline. Enzymes/targets/pathways are left
+# empty for now; we at least resolve PubChem CIDs + collect a few synonyms.
+
+def _first_cid_and_synonyms(name: str, limit: int = 25) -> tuple[str | None, dict]:
+    """
+    Returns (cid_uri_or_none, ids_dict). ids_dict includes {'pubchem_cid': '12345'} if found.
+    Also returns a small synonym list (best-effort) based on label fragments.
+    """
+    try:
+        pairs = core_find_cid_by_label_fragment(name, limit=limit)
+    except Exception:
+        return None, {}
+
+    if not pairs:
+        return None, {}
+
+    # Take the first result; gather synonyms (labels) for that same CID
+    cid0, label0 = pairs[0]
+    syns = []
+    for cid, label in pairs:
+        if cid == cid0:
+            syns.append(label)
+
+    # Extract numeric CID (PubChem URIs look like .../compound/CID2244)
+    cid_num = None
+    try:
+        after = cid0.rsplit("CID", 1)[-1]
+        if after.isdigit():
+            cid_num = after
+        else:
+            # strip non-digits
+            import re as _re
+            m = _re.search(r"CID(\d+)", cid0)
+            if m:
+                cid_num = m.group(1)
+    except Exception:
+        pass
+
+    ids = {"pubchem_cid": cid_num} if cid_num else {}
+    return cid0, {"ids": ids, "synonyms": list(dict.fromkeys(syns))[:20]}
+
+
+def get_mechanistic(drugA: str, drugB: str) -> dict:
+    """
+    Minimal placeholder returning the correct schema:
+      {
+        "enzymes": {"a": {...}, "b": {...}},
+        "targets_a": [...], "targets_b": [...],
+        "pathways_a": [...], "pathways_b": [...],
+        "common_pathways": [...],
+        "ids_a": {...}, "ids_b": {...},
+        "synonyms_a": [...], "synonyms_b": [...],
+        "caveats": [...]
+      }
+
+    When you implement real SPARQL for enzymes/targets/pathways, fill those fields here.
+    """
+    caveats = []
+    # Try to ensure core endpoint exists early so callers can interpret caveats
+    try:
+        _ = _ensure_client("core")
+    except Exception as e:
+        return {
+            "enzymes": {"a": {"substrate": [], "inhibitor": [], "inducer": []},
+                        "b": {"substrate": [], "inhibitor": [], "inducer": []}},
+            "targets_a": [], "targets_b": [],
+            "pathways_a": [], "pathways_b": [],
+            "common_pathways": [],
+            "ids_a": {}, "ids_b": {},
+            "synonyms_a": [], "synonyms_b": [],
+            "caveats": [f"QLever CORE unavailable: {e}"],
+        }
+
+    # Resolve CIDs + synonyms (best-effort)
+    _, a_info = _first_cid_and_synonyms(drugA)
+    _, b_info = _first_cid_and_synonyms(drugB)
+
+    mech = {
+        "enzymes": {
+            "a": {"substrate": [], "inhibitor": [], "inducer": []},
+            "b": {"substrate": [], "inhibitor": [], "inducer": []},
+        },
+        "targets_a": [], "targets_b": [],
+        "pathways_a": [], "pathways_b": [],
+        "common_pathways": [],
+        "ids_a": a_info.get("ids", {}),
+        "ids_b": b_info.get("ids", {}),
+        "synonyms_a": a_info.get("synonyms", []),
+        "synonyms_b": b_info.get("synonyms", []),
+        "caveats": caveats or ["Mechanistic PK/PD not yet implemented; returning IDs/synonyms only."],
+    }
+    return mech
+
+
