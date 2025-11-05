@@ -43,6 +43,17 @@ set -a
 source .env
 set +a
 
+# RUnning the frontend
+export PYTHONPATH=.
+streamlit run src/frontend/app.py
+
+# UNIT Testing
+export PYTHONPATH=.
+pytest -q
+# or targeted:
+pytest -q tests/test_llm.py
+pytest -q tests/test_pkpd_utils.py
+pytest -q tests/test_rag_pipeline.py
 
 
 # Project Structure:

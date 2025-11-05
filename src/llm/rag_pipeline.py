@@ -6,6 +6,7 @@ import json
 import hashlib
 from typing import Any, Dict, Tuple, Optional, List
 from datetime import datetime
+from collections.abc import Mapping  # <-- for _jsonify_sets
 
 # Retrieval modules
 from src.retrieval import duckdb_query as dq
@@ -50,6 +51,28 @@ def _pair_key(drugA: str, drugB: str) -> str:
     return f"{min(a,b)}|{max(a,b)}"
 
 
+def _jsonify_sets(obj):
+    """Recursively convert sets to sorted lists so json.dump succeeds."""
+    if isinstance(obj, set):
+        return sorted(obj)
+    if isinstance(obj, list):
+        return [_jsonify_sets(x) for x in obj]
+    if isinstance(obj, tuple):
+        return tuple(_jsonify_sets(x) for x in obj)
+    if isinstance(obj, Mapping):
+        return {k: _jsonify_sets(v) for k, v in obj.items()}
+    return obj
+
+
+def _to_pairs_list(x):
+    """Normalize a list of (term, count) tuples to JSON-stable [[term, count], ...]."""
+    out = []
+    for t in (x or []):
+        if isinstance(t, (list, tuple)) and len(t) == 2:
+            out.append([t[0], t[1]])
+    return out
+
+
 # ----------------- retrieval helpers -----------------
 def _get_qlever_mechanistic_or_stub(drugA: str, drugB: str) -> Dict[str, Any]:
     """
@@ -60,7 +83,7 @@ def _get_qlever_mechanistic_or_stub(drugA: str, drugB: str) -> Dict[str, Any]:
     try:
         if hasattr(ql, "get_mechanistic_enriched"):
             return ql.get_mechanistic_enriched(drugA, drugB)
-    except Exception as e:
+    except Exception:
         # fall through to basic
         pass
 
@@ -68,7 +91,7 @@ def _get_qlever_mechanistic_or_stub(drugA: str, drugB: str) -> Dict[str, Any]:
     try:
         if hasattr(ql, "get_mechanistic"):
             return ql.get_mechanistic(drugA, drugB)
-    except Exception as e:
+    except Exception:
         pass
 
     # Finally stub
@@ -85,7 +108,7 @@ def _get_qlever_mechanistic_or_stub(drugA: str, drugB: str) -> Dict[str, Any]:
 
 
 def _bool_qlever_contributed(mech: Dict[str, Any]) -> bool:
-    """Heuristic: did QLever contribute anything non-empty to mechanistic evidence?"""
+    """Heuristic: did QLever contribute anything non-empty to mechanistic evidence (post-synthesis)?"""
     ez = mech.get("enzymes", {})
     nonempty_ez = any(
         (ez.get(s, {}).get(k) for s in ("a", "b") for k in ("substrate", "inhibitor", "inducer"))
@@ -95,6 +118,18 @@ def _bool_qlever_contributed(mech: Dict[str, Any]) -> bool:
         or mech.get("targets_a") or mech.get("targets_b")
         or mech.get("pathways_a") or mech.get("pathways_b")
         or mech.get("common_pathways")
+    )
+
+
+def _bool_qlever_contributed_raw(raw: Dict[str, Any]) -> bool:
+    """Heuristic on the raw QLever block (pre-synthesis)."""
+    ez = raw.get("enzymes", {})
+    nonempty_ez = any((ez.get(s, {}).get(k) for s in ("a", "b") for k in ("substrate", "inhibitor", "inducer")))
+    return bool(
+        nonempty_ez
+        or raw.get("targets_a") or raw.get("targets_b")
+        or raw.get("pathways_a") or raw.get("pathways_b")
+        or raw.get("common_pathways")
     )
 
 
@@ -147,6 +182,9 @@ def retrieve_and_normalize(
     # 3) QLever mechanistic (enriched/basic/stub)
     qlev = _get_qlever_mechanistic_or_stub(a, b)
 
+    # --- detect QLever raw contribution BEFORE synthesis
+    ql_raw_contrib = _bool_qlever_contributed_raw(qlev)
+
     # 4) Merge QLever + DuckDB targets into a single mechanistic block (normalized)
     mech = synthesize_mechanistic(
         qlever_mech=qlev,
@@ -173,8 +211,25 @@ def retrieve_and_normalize(
     except Exception as e:
         caveats.append(f"OpenFDA retrieval failed: {e}")
 
+    # Enforce FAERS top-K even if client returns more
+    faers_a = (faers_a or [])[:topk_faers]
+    faers_b = (faers_b or [])[:topk_faers]
+    faers_combo = (faers_combo or [])[:topk_faers]
+
+    # Normalize FAERS to JSON-stable lists-of-lists so cache equals fresh
+    faers_a = _to_pairs_list(faers_a)
+    faers_b = _to_pairs_list(faers_b)
+    faers_combo = _to_pairs_list(faers_combo)
+
     # 6) Build normalized context (matches llm_interface expectations)
+    # (post-synthesis contribution, kept for meta/debug)
     ql_contrib = _bool_qlever_contributed(mech)
+
+    # Build caveats with explicit fallback note if QLever RAW contributed nothing
+    caveats_agg = list(dict.fromkeys((qlev.get("caveats") or []) + caveats))
+    if not ql_raw_contrib:
+        caveats_agg.append("QLever mechanistic unavailable; using DuckDB DrugBank targets as PD fallback.")
+
     context: Dict[str, Any] = {
         "drugs": {
             "a": {"name": a, "synonyms": qlev.get("synonyms_a", []), "ids": qlev.get("ids_a", {})},
@@ -201,17 +256,18 @@ def retrieve_and_normalize(
         },
         "sources": {
             "duckdb": ["TwoSides", "DILIrank", "DICTRank", "DIQT", "DrugBank"],
-            # reflect QLever actually contributed; still list the source but caveats will say if empty
-            "qlever": ["PubChem RDF via QLever"] if ql_contrib else ["PubChem RDF via QLever (limited)"],
+            # reflect QLever RAW contribution status
+            "qlever": ["PubChem RDF via QLever"] if ql_raw_contrib else ["PubChem RDF via QLever (limited)"],
             "openfda": ["FAERS via OpenFDA (cached)"],
         },
-        "caveats": list(dict.fromkeys((qlev.get("caveats") or []) + caveats)),
-        "pkpd": summarize_pkpd_risk(a, b, mech),
+        "caveats": caveats_agg,
+        "pkpd": _jsonify_sets(summarize_pkpd_risk(a, b, mech)),  # <-- JSON-safe PK/PD
         "meta": {
             "drug_pair": f"{drugA}|{drugB}",
             "pair_key": _pair_key(drugA, drugB),
             "created_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
             "version": VERSION,
+            "qlever_contributed_raw": ql_raw_contrib,
             "qlever_contributed": ql_contrib,
         },
     }

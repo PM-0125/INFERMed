@@ -22,7 +22,7 @@ Quick usage:
 from __future__ import annotations
 
 import logging
-import os
+import os, random
 import re
 import time
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, cast
@@ -77,16 +77,33 @@ class QLeverClient:
         self.sess = session or requests.Session()
         self._headers = {"Accept": "application/sparql-results+json"}
 
-    def query(self, sparql: str, retries: int = 0, backoff_s: float = 0.0) -> dict:
+        # --- env-configured retry defaults ---
+        self.max_retries: int = int(os.getenv("QLEVER_MAX_RETRIES", "2"))
+        self.retry_backoff: float = float(os.getenv("QLEVER_RETRY_BACKOFF", "0.5"))  # seconds (base)
+        self.retry_jitter: float = float(os.getenv("QLEVER_RETRY_JITTER", "0.2"))    # seconds (0..jitter)
+        self.retry_5xx: bool = os.getenv("QLEVER_RETRY_5XX", "1").lower() in {"1", "true", "yes"}
+
+    def _calc_sleep(self, base: float, attempt: int) -> float:
+        # Exponential backoff with small jitter, capped to 30s
+        sleep = min(30.0, base * (2 ** attempt))
+        if self.retry_jitter > 0:
+            sleep += random.random() * self.retry_jitter
+        return sleep
+
+    def query(self, sparql: str, retries: Optional[int] = None, backoff_s: Optional[float] = None) -> dict:
         """
         Execute a SPARQL query against a QLever server.
 
         Behavior:
-        - HTTP 429 (QLever "Operation timed out") -> QLeverTimeout.
-        - Client-side read/connect timeouts -> QLeverTimeout.
-        - Connection errors -> QLeverError.
+        - HTTP 429 ("Operation timed out") -> retry; if exhausted raise QLeverTimeout.
+        - Client-side read/connect timeouts -> retry; if exhausted raise QLeverTimeout.
+        - Connection errors -> retry; if exhausted raise QLeverError.
+        - Optional retry on 5xx (controlled by QLEVER_RETRY_5XX).
         - Other HTTP errors -> QLeverError (with short body snippet).
         """
+        retries = self.max_retries if retries is None else retries
+        backoff_s = self.retry_backoff if backoff_s is None else backoff_s
+
         last_exc: Optional[Exception] = None
         for attempt in range(retries + 1):
             resp: Optional[requests.Response] = None
@@ -97,39 +114,69 @@ class QLeverClient:
                     headers=self._headers,
                     timeout=self.timeout_s,
                 )
-                if resp.status_code == 429:
-                    raise QLeverTimeout(self._extract_server_error(resp))
-                resp.raise_for_status()
+
+                status = resp.status_code
+                # Handle transient statuses
+                if status == 429 or (500 <= status < 600 and self.retry_5xx):
+                    if attempt < retries:
+                        # Respect Retry-After if present (seconds)
+                        retry_after = 0.0
+                        ra = resp.headers.get("Retry-After")
+                        if ra:
+                            try:
+                                retry_after = float(int(ra))
+                            except Exception:
+                                pass
+                        time.sleep(max(retry_after, self._calc_sleep(backoff_s, attempt)))
+                        continue
+                    # Exhausted retries: classify 429 separately
+                    if status == 429:
+                        raise QLeverTimeout(self._extract_server_error(resp))
+                    body = ""
+                    try:
+                        body = resp.text[:2000]
+                    except Exception:
+                        pass
+                    raise QLeverError(f"HTTP {status} from {self.endpoint}: {body}")
+
+                # Non-retry path
+                if not resp.ok:
+                    body = ""
+                    try:
+                        body = resp.text[:2000]
+                    except Exception:
+                        pass
+                    raise QLeverError(f"HTTP {status} from {self.endpoint}: {body}")
+
                 return resp.json()
 
-            except requests.Timeout as e:
-                # Surface client timeouts as QLeverTimeout so callers can fallback.
+            except (requests.ReadTimeout, requests.ConnectTimeout) as e:
                 last_exc = e
                 if attempt < retries:
-                    time.sleep(backoff_s or 0.2 * (attempt + 1))
+                    time.sleep(self._calc_sleep(backoff_s, attempt))
                     continue
-                raise QLeverTimeout(f"Client-side timeout contacting {self.endpoint}: {e}") from e
+                raise QLeverTimeout(f"Client timeout contacting {self.endpoint}: {e}") from e
 
             except requests.ConnectionError as e:
                 last_exc = e
                 if attempt < retries:
-                    time.sleep(backoff_s or 0.2 * (attempt + 1))
+                    time.sleep(self._calc_sleep(backoff_s, attempt))
                     continue
-                raise QLeverError(f"HTTP error contacting {self.endpoint}: {e}") from e
+                raise QLeverError(f"Connection error contacting {self.endpoint}: {e}") from e
 
-            except requests.HTTPError as e:
+            except requests.RequestException as e:
+                # Any other requests-level error
+                last_exc = e
+                status = getattr(resp, "status_code", "?")
                 body = ""
-                status = resp.status_code if resp is not None else "?"
                 try:
                     if resp is not None:
                         body = resp.text[:2000]
                 except Exception:
                     pass
-                if status == 429 and resp is not None:
-                    raise QLeverTimeout(self._extract_server_error(resp))
                 raise QLeverError(f"HTTP {status} from {self.endpoint}: {body}") from e
 
-        # Should never reach here
+        # Defensive fallback; should not reach
         raise QLeverError(f"Unreachable; last exception: {last_exc}")
 
     @staticmethod
@@ -142,7 +189,10 @@ class QLeverClient:
                         return f"429 from QLever: {j[k]}"
             return f"429 from QLever: {j}"
         except Exception:
-            return f"429 from QLever (text): {r.text[:2000]}"
+            try:
+                return f"429 from QLever (text): {r.text[:2000]}"
+            except Exception:
+                return "429 from QLever (no body)"
 
 
 # ---------------------------------------------------------------------------

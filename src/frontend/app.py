@@ -18,38 +18,26 @@ st.set_page_config(
     layout="wide",
 )
 
-# Subtle DrugBank-like / clinical look
 st.markdown(
     """
     <style>
       :root {
-        --ink: #0b1736;      /* deep navy */
-        --ink-2: #2b3a67;    /* muted blue */
-        --brand: #0ea5e9;    /* cyan/sky */
-        --brand-2: #22d3ee;  /* teal */
-        --bg: #f7fbff;       /* soft medical white-blue */
-        --card: #ffffff;
-        --muted: #6b7280;
+        --ink: #0b1736; --ink-2: #2b3a67; --brand: #0ea5e9; --brand-2: #22d3ee;
+        --bg: #f7fbff; --card: #ffffff; --muted: #6b7280;
       }
       .stApp { background: var(--bg); }
       .app-header { font-size: 1.6rem; font-weight: 700; color: var(--ink); }
       .app-sub { color: var(--muted); margin-top: -0.25rem; }
-      .pill {
-        display:inline-block; padding: 0.15rem 0.6rem; border-radius: 1rem;
-        background: rgba(14,165,233,.1); color: var(--ink-2); font-size: 0.8rem; margin-left: .5rem;
-      }
-      .source-badge {
-        display:inline-block; margin-right:.5rem; padding:.1rem .5rem; border-radius:.6rem;
-        background:#eef6ff; color:#1e40af; font-size:.78rem;
-        border:1px solid #dbeafe;
-      }
+      .pill { display:inline-block; padding: 0.15rem 0.6rem; border-radius: 1rem;
+              background: rgba(14,165,233,.1); color: var(--ink-2); font-size: 0.8rem; margin-left: .5rem; }
+      .source-badge { display:inline-block; margin-right:.5rem; padding:.1rem .5rem; border-radius:.6rem;
+                      background:#eef6ff; color:#1e40af; font-size:.78rem; border:1px solid #dbeafe; }
       .context-card { background: var(--card); padding: 0.9rem 1rem; border-radius: 0.75rem; border: 1px solid #e5e7eb; }
       .small { color: var(--muted); font-size: .85rem; }
       .tight { margin-top: .25rem; }
       .badge-ok { color: #065f46; background: #ecfdf5; border:1px solid #d1fae5; }
       .badge-warn { color: #78350f; background: #fffbeb; border:1px solid #fef3c7; }
       .footer-note { color: var(--muted); font-size: .8rem; }
-      /* Make chat area a bit wider visually */
       [data-testid="stChatMessage"] { max-width: 1100px; margin-left: auto; margin-right: auto; }
     </style>
     """,
@@ -63,11 +51,11 @@ st.divider()
 # ---------- Sidebar Controls ----------
 with st.sidebar:
     st.markdown("### Settings")
-    mode = st.radio("Audience mode", ["Doctor", "Patient", "Pharma"], index=0, help="Changes tone and detail.")
+    mode = st.radio("Audience mode", ["Doctor", "Patient", "Pharma"], index=0)
     temperature = st.slider("Creativity (temperature)", 0.0, 1.0, 0.2, 0.05)
     seed = st.number_input("Seed (for determinism)", value=42, step=1)
-    use_cache_context = st.checkbox("Use context cache", value=True, help="Re-uses retrieval/PKPD synthesis for the same pair.")
-    use_cache_response = st.checkbox("Use response cache", value=False, help="Caches LLM output by context+params.")
+    use_cache_context = st.checkbox("Use context cache", value=True)
+    use_cache_response = st.checkbox("Use response cache", value=False)
     show_evidence = st.checkbox("Show evidence panel", value=True)
     show_raw_json = st.checkbox("Show raw context JSON", value=False)
     st.markdown("---")
@@ -76,14 +64,10 @@ with st.sidebar:
 # ---------- Session State ----------
 MessageList = List[Dict[str, str]]
 if "messages" not in st.session_state:
-    messages: MessageList = []
-    st.session_state.messages = messages
-
+    st.session_state.messages = []
 if "active_pair" not in st.session_state:
-    st.session_state.active_pair = None  # ("drugA|drugB")
-
+    st.session_state.active_pair = None
 if "context_cache" not in st.session_state:
-    context_cache: Dict[str, Dict[str, Any]]
     st.session_state.context_cache = {}
 
 # ---------- Drug Pair Input ----------
@@ -101,14 +85,10 @@ client = OpenFDAClient(cache_dir=str(cache_dir))
 
 # ---------- Chat Area ----------
 st.markdown("#### Chat")
-chat_container = st.container()
-
-# Render history
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# ---------- Input composer ----------
 user_text = st.chat_input("Ask about this drug pair, e.g., 'Is dose adjustment needed?'")
 
 def _summarize_sources(src: Dict[str, Any]) -> str:
@@ -117,10 +97,7 @@ def _summarize_sources(src: Dict[str, Any]) -> str:
     for k in ("duckdb", "qlever", "openfda"):
         vals = src.get(k, []) or []
         label = k
-        if vals:
-            chunks.append(f'<span class="source-badge">{label}: {", ".join(vals)}</span>')
-        else:
-            chunks.append(f'<span class="source-badge">{label}: (none)</span>')
+        chunks.append(f'<span class="source-badge">{label}: {", ".join(vals) if vals else "(none)"}</span>')
     return " ".join(chunks)
 
 def _render_context_topline(ctx: Dict[str, Any]):
@@ -142,11 +119,20 @@ def _render_context_topline(ctx: Dict[str, Any]):
         unsafe_allow_html=True,
     )
 
-def _render_evidence_tabs(ctx: Dict[str, Any]):
+def _ctx_pair_key(ctx: Dict[str, Any]) -> str:
+    try:
+        a = (ctx.get("drugs", {}) or {}).get("a", {}).get("name", "")
+        b = (ctx.get("drugs", {}) or {}).get("b", {}).get("name", "")
+        return "|".join(sorted([str(a).lower(), str(b).lower()]))
+    except Exception:
+        return "unknown|unknown"
+
+def _render_evidence_tabs(ctx: Dict[str, Any], *, key_prefix: str = "main"):
     tabs = st.tabs(["PK/PD", "FAERS", "IDs & Pathways"])
     mech = (ctx.get("signals", {}) or {}).get("mechanistic", {}) or {}
     tabular = (ctx.get("signals", {}) or {}).get("tabular", {}) or {}
     faers = (ctx.get("signals", {}) or {}).get("faers", {}) or {}
+    _pk = _ctx_pair_key(ctx)
 
     with tabs[0]:
         roles = (ctx.get("pkpd") or {}).get("pk_detail", {}).get("roles", {})
@@ -163,18 +149,19 @@ def _render_evidence_tabs(ctx: Dict[str, Any]):
         with left:
             st.write("Top reactions — Drug A")
             if faers.get("top_reactions_a"):
-                st.plotly_chart(client.plot_top_reactions((ctx["drugs"]["a"]["name"])), use_container_width=True)
+                fig_a = client.plot_top_reactions((ctx["drugs"]["a"]["name"]))
+                st.plotly_chart(fig_a, use_container_width=True, key=f"{key_prefix}_plot_a_{_pk}")
             else:
                 st.info("No FAERS data for Drug A.")
             st.write("Top reactions — Drug B")
             if faers.get("top_reactions_b"):
-                st.plotly_chart(client.plot_top_reactions((ctx["drugs"]["b"]["name"])), use_container_width=True)
+                fig_b = client.plot_top_reactions((ctx["drugs"]["b"]["name"]))
+                st.plotly_chart(fig_b, use_container_width=True, key=f"{key_prefix}_plot_b_{_pk}")
             else:
                 st.info("No FAERS data for Drug B.")
         with right:
             st.write("Combination reactions")
             if faers.get("combo_reactions"):
-                # plot combination if your client supports; else, display table
                 st.table(faers.get("combo_reactions"))
             else:
                 st.info("No combination FAERS entries.")
@@ -187,21 +174,14 @@ def _render_evidence_tabs(ctx: Dict[str, Any]):
 
 # ---------- Handle a new user message ----------
 if user_text:
-    # Add user message to history
     st.session_state.messages.append({"role": "user", "content": user_text})
-
-    # Build lightweight history for the LLM (role,text only)
     history = [{"role": m["role"], "text": m["content"]} for m in st.session_state.messages[:-1]]
 
-    # Run the RAG (context is cached on pair by default)
     with st.chat_message("assistant"):
         with st.spinner("Analyzing interactions..."):
             result = run_rag(
-                drug_a,
-                drug_b,
-                mode=mode,
-                seed=int(seed),
-                temperature=float(temperature),
+                drug_a, drug_b,
+                mode=mode, seed=int(seed), temperature=float(temperature),
                 history=history,
                 use_cache_context=use_cache_context,
                 use_cache_response=use_cache_response,
@@ -209,12 +189,10 @@ if user_text:
             answer = result["answer"]
             context = result["context"]
 
-            # Stash context in session by pair for later evidence rendering
             st.session_state.context_cache[pair_key] = context
             st.session_state.active_pair = pair_key
 
             st.markdown(answer["text"])
-
             st.caption(
                 f"Model: {answer.get('meta',{}).get('model','unknown')} · "
                 f"Temp: {answer.get('meta',{}).get('temperature','?')} · "
@@ -224,23 +202,21 @@ if user_text:
             if show_evidence:
                 st.markdown("#### Evidence")
                 _render_context_topline(context)
-                _render_evidence_tabs(context)
+                # Use a unique key prefix for charts rendered within chat
+                _render_evidence_tabs(context, key_prefix=f"chat_{pair_key}")
 
             if show_raw_json:
                 st.markdown("#### Raw context JSON")
                 st.json(context, expanded=False)
 
-    # Append assistant message to history
     st.session_state.messages.append({"role": "assistant", "content": answer["text"]})
 
 # ---------- First-load “Explain” button ----------
 col1, col2, col3 = st.columns([1, 1, 3])
 with col1:
     if st.button("Explain this pair", type="primary", use_container_width=True):
-        starter = "Please explain the interaction, monitoring, and actions."
-        st.session_state.messages.append({"role": "user", "content": starter})
+        st.session_state.messages.append({"role": "user", "content": "Please explain the interaction, monitoring, and actions."})
         st.rerun()
-
 with col2:
     if st.button("Clear chat", use_container_width=True):
         st.session_state.messages.clear()
@@ -253,7 +229,8 @@ if show_evidence and st.session_state.active_pair:
     ctx = st.session_state.context_cache.get(st.session_state.active_pair)
     if ctx:
         _render_context_topline(ctx)
-        _render_evidence_tabs(ctx)
+        # Different prefix from the chat block to avoid duplicate element IDs
+        _render_evidence_tabs(ctx, key_prefix=f"panel_{st.session_state.active_pair}")
 
 st.markdown(
     '<div class="footer-note">© INFERMed — This is research software; final decisions rest with licensed clinicians.</div>',
