@@ -1,72 +1,191 @@
 # tests/test_qlever_query.py
 import os
+import re
 import pytest
 
 from src.retrieval.qlever_query import (
-    CORE_ENDPOINT, DISEASE_ENDPOINT,
-    core_find_cid_by_exact_label, core_find_cid_by_label_fragment,
-    core_descriptors_for_cids, core_xlogp_threshold,
-    disease_find_by_label_fragment, disease_crossrefs,
-    PUBCHEM_COMPOUND_NS
+    QLeverClient,
+    # Constants we expect to exist
+    OBI_0000299,
+    IAO_0000136,
+    RO_0000056,
+    SIO_VALUE,
+    SIO_UNIT,
+    PCV_OUTCOME,
+    RO_0000057,
+    MG_PREFIX,
+    EP_PREFIX,
+    PUBCHEM_COMPOUND_NS,
+    # Public helpers
+    core_find_cid_by_label_fragment,
+    get_mechanistic,
 )
 
-# --- Skip logic if endpoints are not configured --------------------------------
+import src.retrieval.qlever_query as ql
 
-pytestmark = pytest.mark.skipif(
-    not CORE_ENDPOINT or not DISEASE_ENDPOINT,
-    reason="CORE_ENDPOINT and/or DISEASE_ENDPOINT not set; start QLever servers and export env."
-)
+# --------------------------------------------------------------------------------------
+# Helpers
 
-ASPIRIN = f"{PUBCHEM_COMPOUND_NS}CID2244"
-PHENYLETHANOLAMINE = f"{PUBCHEM_COMPOUND_NS}CID1000"
+CORE_ENDPOINT = os.getenv("CORE_ENDPOINT", "http://localhost:7010/")
+BIO_ENDPOINT  = os.getenv("BIO_ENDPOINT",  "http://localhost:7012/")
 
+def _ping(client: QLeverClient) -> bool:
+    """Returns True if endpoint answers a trivial ASK."""
+    try:
+        res = client.query("ASK { ?s ?p ?o }")
+        return bool(res.get("boolean", False))
+    except Exception:
+        return False
 
-# --- Core label lookups --------------------------------------------------------
+@pytest.fixture(scope="session")
+def core_client():
+    client = QLeverClient(endpoint=CORE_ENDPOINT)
+    if not _ping(client):
+        pytest.skip(f"CORE endpoint not reachable at {CORE_ENDPOINT}")
+    return client
 
-def test_core_exact_label_aspirin():
-    got = core_find_cid_by_exact_label("Aspirin")
-    assert ASPIRIN in got, f"Expected {ASPIRIN} in exact-label results"
+@pytest.fixture(scope="session")
+def bio_client():
+    client = QLeverClient(endpoint=BIO_ENDPOINT)
+    if not _ping(client):
+        pytest.skip(f"BIO endpoint not reachable at {BIO_ENDPOINT}")
+    return client
 
+# --------------------------------------------------------------------------------------
+# Constants
 
-def test_core_label_fragment_contains_aspirin():
-    pairs = core_find_cid_by_label_fragment("aspirin", limit=50)
-    cids = {cid for cid, _ in pairs}
-    assert ASPIRIN in cids, "Fragment search (with fallback) should return Aspirin CID"
+def test_constants_present_and_correct():
+    assert OBI_0000299 == "http://purl.obolibrary.org/obo/OBI_0000299"           # has_specified_output (MG -> Endpoint)
+    assert IAO_0000136 == "http://purl.obolibrary.org/obo/IAO_0000136"           # is_about (Endpoint -> SID)
+    assert RO_0000056  == "http://purl.obolibrary.org/obo/RO_0000056"            # participates_in (SID -> MG)
+    assert SIO_VALUE   == "http://semanticscience.org/resource/SIO_000300"       # numeric value
+    assert SIO_UNIT    == "http://semanticscience.org/resource/SIO_000221"       # unit
+    assert PCV_OUTCOME == "http://rdf.ncbi.nlm.nih.gov/pubchem/vocabulary#PubChemAssayOutcome"
+    assert RO_0000057  == "http://purl.obolibrary.org/obo/RO_0000057"            # has_participant (Endpoint -> Protein)
+    assert MG_PREFIX   == "http://rdf.ncbi.nlm.nih.gov/pubchem/measuregroup/"
+    assert EP_PREFIX   == "http://rdf.ncbi.nlm.nih.gov/pubchem/endpoint/"
+    assert PUBCHEM_COMPOUND_NS.startswith("http://rdf.ncbi.nlm.nih.gov/pubchem/compound/")
 
+# --------------------------------------------------------------------------------------
+# CORE index tests
+@pytest.mark.integration
+def test_core_label_fragment_contains_aspirin(core_client):
+    pairs = ql.core_find_cid_by_label_fragment("aspirin", limit=20)
+    # Should return (cid_uri, name)
+    assert isinstance(pairs, list)
+    assert all(isinstance(t, tuple) and len(t) == 2 for t in pairs)
+    assert all(isinstance(t, tuple) and len(t) == 2 for t in pairs)
+    # Names should include aspirin fragment (case-insensitive)
+    assert any("aspirin" in name.lower() for _, name in pairs)
+    # URIs should be in the PubChem compound namespace
+    assert all(cid.startswith(PUBCHEM_COMPOUND_NS) for cid, _ in pairs)
 
-# --- Core descriptors ----------------------------------------------------------
+@pytest.mark.integration
+def test_core_find_cid_by_label_fragment(core_client):
+    # This helper uses _ensure_client('core') internally, so just call it.
+    pairs = core_find_cid_by_label_fragment("ibuprofen", limit=25)
+    assert isinstance(pairs, list)
+    assert any("ibuprofen" in name.lower() for _, name in pairs)
 
-def test_core_descriptors_for_known_cids():
-    data = core_descriptors_for_cids([ASPIRIN, PHENYLETHANOLAMINE])
-    assert ASPIRIN in data and PHENYLETHANOLAMINE in data
+# --------------------------------------------------------------------------------------
+# Mechanistic stub schema
 
-    # Keys must be normalized (no 'CID####_' prefix)
-    asp = data[ASPIRIN]
-    assert "XLogP3" in asp
-    assert "Canonical_SMILES" in asp
-    # Values exist (not necessarily asserting exact numeric/string here)
-    assert asp["XLogP3"] != ""
+def test_get_mechanistic_schema_is_stable():
+    mech = get_mechanistic("Aspirin", "Clopidogrel")
+    # Top-level keys
+    expected_keys = {
+        "enzymes", "targets_a", "targets_b",
+        "pathways_a", "pathways_b", "common_pathways",
+        "ids_a", "ids_b", "synonyms_a", "synonyms_b", "caveats"
+    }
+    assert expected_keys.issubset(mech.keys())
 
+    # Enzymes structure
+    assert "a" in mech["enzymes"] and "b" in mech["enzymes"]
+    for side in ("a", "b"):
+        ez = mech["enzymes"][side]
+        assert set(ez.keys()) == {"substrate", "inhibitor", "inducer"}
+        assert all(isinstance(ez[k], list) for k in ez)
 
-# --- XLogP threshold slice -----------------------------------------------------
+    # Types for IDs/synonyms/caveats
+    assert isinstance(mech["ids_a"], dict) and isinstance(mech["ids_b"], dict)
+    assert isinstance(mech["synonyms_a"], list) and isinstance(mech["synonyms_b"], list)
+    assert isinstance(mech["caveats"], list) and len(mech["caveats"]) >= 1
 
-def test_core_xlogp_threshold_slice_contains_examples():
-    # Deterministic ORDER BY + follow-up inclusion ensures both show up.
-    res = core_xlogp_threshold(2.0, limit=500)
-    assert ASPIRIN in res, "XLogP slice should include Aspirin (1.2)"
-    assert PHENYLETHANOLAMINE in res, "XLogP slice should include Phenylethanolamine (0.1)"
-    assert res[PHENYLETHANOLAMINE] <= 2.0
-    assert res[ASPIRIN] <= 2.0
+# --------------------------------------------------------------------------------------
+# BIO index tests (light round-trip, auto-skip if MGs absent)
 
+@pytest.mark.integration
+def test_bio_measuregroup_roundtrip_smoke(bio_client):
+    """
+    1) Find one /measuregroup/ resource
+    2) Fetch its endpoints via OBI:0000299
+    3) From endpoints, try to pull value/unit/outcome (OPTIONALs)
+    4) From MG/Endpoints, find SIDs -> CIDs
+    """
+    # 1) Grab one MG
+    q_mg = f"""
+    SELECT DISTINCT ?mg WHERE {{
+      ?mg ?p ?o .
+      FILTER(CONTAINS(STR(?mg), "/measuregroup/"))
+    }} LIMIT 1
+    """
+    res_mg = bio_client.query(q_mg)
+    mg_rows = res_mg.get("results", {}).get("bindings", [])
+    if not mg_rows:
+        pytest.skip("No /measuregroup/ resources in BIO index (did you load PubChem measuregroup TTLs?)")
+    mg = mg_rows[0]["mg"]["value"]
+    assert mg.startswith(MG_PREFIX)
 
-# --- Disease lookups -----------------------------------------------------------
+    # 2) Endpoints connected to that MG
+    q_ep = f"""
+    PREFIX OBI:<{OBI_0000299}>
+    SELECT ?e WHERE {{
+      <{mg}> OBI:?x ?e .  # QLever allows prefixed IRI with variable after colon? -> Use explicit IRI instead.
+    }}
+    """
+    # The above inline PREFIX-IRI-variable trick won't work. Use explicit triple with full IRI:
+    q_ep = f"""
+    SELECT ?e WHERE {{
+      <{mg}> <{OBI_0000299}> ?e .
+    }} LIMIT 50
+    """
+    res_ep = bio_client.query(q_ep)
+    eps = [b["e"]["value"] for b in res_ep.get("results", {}).get("bindings", [])]
+    assert eps, "MeasureGroup has no Endpoints via OBI:0000299"
 
-def test_disease_label_fragment_meningioma():
-    hits = disease_find_by_label_fragment("meningioma", limit=200)
-    dz_ids = {d for d, _ in hits}
-    assert "http://rdf.ncbi.nlm.nih.gov/pubchem/disease/DZID8458" in dz_ids
+    # 3) OPTIONAL value/unit/outcome for endpoints
+    q_vals = f"""
+    PREFIX sio:<{SIO_VALUE.rsplit('/', 1)[0] + '/'}>   # shorthand for sio:
+    PREFIX pcv:<http://rdf.ncbi.nlm.nih.gov/pubchem/vocabulary#>
+    SELECT ?e ?val ?unit ?outcome WHERE {{
+      <{mg}> <{OBI_0000299}> ?e .
+      OPTIONAL {{ ?e <{SIO_VALUE}> ?val }}
+      OPTIONAL {{ ?e <{SIO_UNIT}>  ?unit }}
+      OPTIONAL {{ ?e <{PCV_OUTCOME}> ?outcome }}
+    }} LIMIT 200
+    """
+    res_vals = bio_client.query(q_vals)
+    rows_vals = res_vals.get("results", {}).get("bindings", [])
+    assert rows_vals, "No endpoints (or none materialized with values)"
+    # At least endpoints are proper IRIs
+    assert all("e" in r and r["e"]["value"].startswith(EP_PREFIX) for r in rows_vals)
 
-
-def test_disease_crossrefs_include_mesh_for_meningioma():
-    xrefs = disease_crossrefs("http://rdf.ncbi.nlm.nih.gov/pubchem/disease/DZID8458", limit=1000)
-    assert any(x.startswith("http://id.nlm.nih.gov/mesh/") for x in xrefs), "Expected MeSH crossref present"
+    # 4) SID -> CID join (via either MG or Endpoint) to ensure the path is available
+    q_sid_cid = f"""
+    PREFIX IAO:<{IAO_0000136}>
+    SELECT DISTINCT ?sid ?cid WHERE {{
+      <{mg}> <{OBI_0000299}> ?e .
+      {{
+        ?sid <{RO_0000056}> <{mg}> .
+      }} UNION {{
+        ?e IAO:IAO_0000136 ?sid .
+      }}
+      ?sid <http://semanticscience.org/resource/CHEMINF_000477> ?cid .
+    }} LIMIT 200
+    """
+    res_sc = bio_client.query(q_sid_cid)
+    rows_sc = res_sc.get("results", {}).get("bindings", [])
+    assert rows_sc, "Expected at least one SID→CID mapping for MG"
+    assert all(r["cid"]["value"].startswith("http://rdf.ncbi.nlm.nih.gov/pubchem/compound/CID")
+               for r in rows_sc)

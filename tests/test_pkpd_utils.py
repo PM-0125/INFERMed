@@ -1,5 +1,4 @@
 # tests/test_pkpd_utils.py
-import math
 import pytest
 
 from src.utils.pkpd_utils import (
@@ -27,6 +26,17 @@ def test_canonicalize_list_dedup_and_topk():
     vals = ["A", "  a ", "B", "b", "C", "c", "D"]
     out = canonicalize_list(vals, topk=3)
     assert out == ["a", "b", "c"]  # dedup + normalized + topk kept in first-seen order
+
+
+def test_canonicalize_list_accepts_dict_items():
+    vals = [
+        {"label": "EGFR", "uri": "http://egfr"},
+        {"label": "egfr", "uri": "dup"},
+        {"uri": "http://no-label"},  # falls back to uri
+    ]
+    out = canonicalize_list(vals)
+    assert out[0] == "egfr"
+    assert "http://no-label" in out  # uri fallback path
 
 
 # ---------------------- PK roles & overlaps ----------------------
@@ -57,10 +67,10 @@ def test_extract_roles_and_overlap_detection():
 
 # ---------------------- PD overlap ----------------------
 
-def test_pd_overlap_scores_and_lists():
+def test_pd_overlap_scores_and_lists_with_dict_targets():
     mech = {
-        "targets_a": ["Target1", "Target2", "TargetX"],
-        "targets_b": ["target1", "target2", "other"],
+        "targets_a": [{"label": "Target1"}, {"label": "Target2"}, {"label": "TargetX"}],
+        "targets_b": [{"label": "target1"}, {"label": "target2"}, {"label": "other"}],
         "pathways_a": ["PathA", "PathB"],
         "pathways_b": ["pathA", "zzz"],
     }
@@ -115,12 +125,12 @@ def test_topk_faers_basic_and_empty_and_malformed():
 
 # ---------------------- mechanistic merge ----------------------
 
-def test_synthesize_mechanistic_with_fallback_targets():
+def test_synthesize_mechanistic_with_fallback_targets_and_dicts():
     qlever_mech = {
         "enzymes": {"a": {"substrate": ["CYP3A4"], "inhibitor": [], "inducer": []},
                     "b": {"substrate": [], "inhibitor": [], "inducer": []}},
         "targets_a": [],  # empty -> should use fallback
-        "targets_b": ["EGFR"],  # present -> should be kept
+        "targets_b": [{"label": "EGFR"}, {"uri": "http://unlabeled"}],  # present -> should be kept & normalized
         "pathways_a": [],
         "pathways_b": [],
         "common_pathways": [],
@@ -131,6 +141,8 @@ def test_synthesize_mechanistic_with_fallback_targets():
 
     assert mech["enzymes"]["a"]["substrate"] == ["cyp3a4"] or "cyp3a4" in mech["enzymes"]["a"]["substrate"]
     assert mech["targets_a"] == ["hmgcr", "pcsk9"]  # fallback applied & normalized
-    assert mech["targets_b"] == ["egfr"]            # kept from qlever
+    # dict-shaped targets normalized (label preferred, uri fallback)
+    assert "egfr" in mech["targets_b"]
+    assert "http://unlabeled" in mech["targets_b"]
     assert mech["pathways_a"] == []
     assert mech["common_pathways"] == []

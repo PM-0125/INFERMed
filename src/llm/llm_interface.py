@@ -44,7 +44,6 @@ def _load_templates(path: str) -> Dict[str, str]:
         else:
             # Drop any legacy "SAFETY:" sections (we append disclaimers in code)
             if line.strip().startswith("SAFETY:"):
-                # skip until next template header or EOF by not adding lines
                 continue
             buf.append(line)
     if current is not None:
@@ -63,7 +62,7 @@ def generate_response(
     seed: Optional[int] = None,
     temperature: float = 0.2,
     max_tokens: int = 800,
-    history: Optional[List[Dict[str, str]]] = None,  # NEW: conversational history support
+    history: Optional[List[Dict[str, str]]] = None,  # conversational history support
 ) -> Dict[str, Any]:
     """
     Call a local Ollama HTTP endpoint and return:
@@ -119,7 +118,7 @@ def build_prompt(
     context: Dict[str, Any],
     mode: str,
     *,
-    history: Optional[List[Dict[str, str]]] = None,  # NEW
+    history: Optional[List[Dict[str, str]]] = None,
 ) -> str:
     """
     Build a mode-conditioned prompt from normalized context.
@@ -210,6 +209,23 @@ def _format_history(history: List[Dict[str, str]], budget_chars: int = 1200) -> 
     return "\n".join(out), truncated
 
 
+# ========== Small coercion helper ==========
+def _as_str_list(xs: Any) -> List[str]:
+    """
+    Coerce lists that may contain dicts ({'label','uri'}) or strings into clean strings.
+    Removes empties and trims whitespace.
+    """
+    out: List[str] = []
+    for x in xs or []:
+        if isinstance(x, dict):
+            s = (x.get("label") or x.get("uri") or "").strip()
+        else:
+            s = str(x).strip()
+        if s:
+            out.append(s)
+    return out
+
+
 # ========== Context summarization & truncation ==========
 def _summarize_context(ctx: Dict[str, Any], mode: str) -> Dict[str, str]:
     drugs = ctx.get("drugs", {}) or {}
@@ -292,14 +308,22 @@ def _format_pk(ctx: Dict[str, Any]) -> Tuple[str, int, int]:
     Return (text, length, priority).
     Priority is lower (i.e., more important) if there is a plausible enzyme overlap:
       A substrate X & B inhibitor X, or vice versa (and same for inducers).
+    Prefer precomputed context['pkpd']['pk_summary'] when present.
     """
+    pkpd = (ctx.get("pkpd") or {})
+    if pkpd.get("pk_summary"):
+        txt = str(pkpd["pk_summary"])
+        prio = 0 if any(x in txt.lower() for x in ("inhibition", "induction")) else 3
+        return txt, len(txt), prio
+
     mech = (ctx.get("signals", {}) or {}).get("mechanistic", {}) or {}
     enz = mech.get("enzymes", {}) or {}
     a = enz.get("a", {}) or {}
     b = enz.get("b", {}) or {}
 
     def part(lbl: str, items: List[str]) -> str:
-        return f"{lbl}=" + (", ".join(sorted(set(items))) if items else "none")
+        clean = sorted(set(_as_str_list(items)))
+        return f"{lbl}=" + (", ".join(clean) if clean else "none")
 
     a_str = "; ".join(
         [
@@ -318,12 +342,12 @@ def _format_pk(ctx: Dict[str, Any]) -> Tuple[str, int, int]:
     ) or "No enzyme data for Drug B"
 
     # Detect key overlaps (substrate vs inhibitor/inducer)
-    a_sub = set(a.get("substrate", []) or [])
-    b_sub = set(b.get("substrate", []) or [])
-    a_inh = set(a.get("inhibitor", []) or [])
-    b_inh = set(b.get("inhibitor", []) or [])
-    a_ind = set(a.get("inducer", []) or [])
-    b_ind = set(b.get("inducer", []) or [])
+    a_sub = set(_as_str_list(a.get("substrate", [])))
+    b_sub = set(_as_str_list(b.get("substrate", [])))
+    a_inh = set(_as_str_list(a.get("inhibitor", [])))
+    b_inh = set(_as_str_list(b.get("inhibitor", [])))
+    a_ind = set(_as_str_list(a.get("inducer", [])))
+    b_ind = set(_as_str_list(b.get("inducer", [])))
 
     inhib_overlap = (a_sub & b_inh) | (b_sub & a_inh)
     indu_overlap = (a_sub & b_ind) | (b_sub & a_ind)
@@ -344,11 +368,18 @@ def _format_pd(ctx: Dict[str, Any]) -> Tuple[str, int, int]:
     """
     Return (text, length, priority).
     Elevate priority if there are common pathways or overlapping targets.
+    Prefer precomputed context['pkpd']['pd_summary'] when present.
     """
+    pkpd = (ctx.get("pkpd") or {})
+    if pkpd.get("pd_summary"):
+        txt = str(pkpd["pd_summary"])
+        prio = 1 if ("overlapping" in txt.lower() or "pathways" in txt.lower()) else 4
+        return txt, len(txt), prio
+
     mech = (ctx.get("signals", {}) or {}).get("mechanistic", {}) or {}
-    cp = mech.get("common_pathways", []) or []
-    ta = mech.get("targets_a", []) or []
-    tb = mech.get("targets_b", []) or []
+    cp = _as_str_list(mech.get("common_pathways", []))
+    ta = _as_str_list(mech.get("targets_a", []))
+    tb = _as_str_list(mech.get("targets_b", []))
     overlap_targets = sorted(set(ta) & set(tb))
 
     parts = []
@@ -423,12 +454,18 @@ def _format_evidence_table(ctx: Dict[str, Any], mode: str) -> str:
         return ("; ".join(parts)) or "(no IDs)"
 
     mech = (ctx.get("signals", {}) or {}).get("mechanistic", {}) or {}
+
+    ta = _as_str_list(mech.get("targets_a", []))[:8]
+    tb = _as_str_list(mech.get("targets_b", []))[:8]
+    pa = _as_str_list(mech.get("pathways_a", []))[:6]
+    pb = _as_str_list(mech.get("pathways_b", []))[:6]
+
     lines = [
         f"A IDs: {ids('a')} | B IDs: {ids('b')}",
-        f"A targets: {', '.join(mech.get('targets_a', [])[:8]) or '(none)'}",
-        f"B targets: {', '.join(mech.get('targets_b', [])[:8]) or '(none)'}",
-        f"A pathways: {', '.join(mech.get('pathways_a', [])[:6]) or '(none)'}",
-        f"B pathways: {', '.join(mech.get('pathways_b', [])[:6]) or '(none)'}",
+        f"A targets: {', '.join(ta) if ta else '(none)'}",
+        f"B targets: {', '.join(tb) if tb else '(none)'}",
+        f"A pathways: {', '.join(pa) if pa else '(none)'}",
+        f"B pathways: {', '.join(pb) if pb else '(none)'}",
     ]
     return " | ".join(lines)
 
