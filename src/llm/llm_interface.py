@@ -1,22 +1,27 @@
 # src/llm/llm_interface.py
 from __future__ import annotations
 
+import json
 import os
 import re
+import time
 from typing import Any, Dict, List, Optional, Tuple
 
 # ========== Configuration ==========
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-MODEL_NAME = os.getenv("OLLAMA_MODEL", "mistral-nemo:12b")  # e.g., 'mistral:instruct'
+MODEL_NAME = os.getenv("OLLAMA_MODEL", "Elixpo/LlamaMedicine")
 TIMEOUT_S = float(os.getenv("OLLAMA_TIMEOUT_S", "60"))
-TEMPLATES_PATH = os.path.join(os.path.dirname(__file__), "prompt_templates.txt")
+TEMPLATES_PATH = os.getenv(
+    "PROMPT_TEMPLATES",
+    os.path.join(os.path.dirname(__file__), "prompt_templates.txt"),
+)
 
 # Decoding defaults tuned for grounded, low-variance text
 DECODE_DEFAULTS = {
     "temperature": 0.2,
-    "top_k": 20,              # if model supports; harmless if ignored
-    "top_p": 0.9,             # if model supports; harmless if ignored
-    "repeat_penalty": 1.05,   # if model supports; harmless if ignored
+    "top_k": 20,            # harmless if the model ignores it
+    "top_p": 0.9,           # harmless if the model ignores it
+    "repeat_penalty": 1.05, # harmless if the model ignores it
     "num_ctx": 8192,
 }
 
@@ -42,7 +47,7 @@ def _load_templates(path: str) -> Dict[str, str]:
             current = m.group(1).strip().upper()
             buf = []
         else:
-            # Drop any legacy "SAFETY:" sections (we append disclaimers in code)
+            # Drop any legacy "SAFETY:" lines (we append disclaimers in code)
             if line.strip().startswith("SAFETY:"):
                 continue
             buf.append(line)
@@ -96,7 +101,7 @@ def generate_response(
 
         data = r.json()
         text = (data.get("response") or "").strip()
-        text = _strip_template_safety(text)  # remove any template-baked safety lines if present
+        text = _strip_template_safety(text)
         return {
             "text": _append_disclaimer(text, mode),
             "usage": {
@@ -107,6 +112,7 @@ def generate_response(
                 "model": MODEL_NAME,
                 "temperature": temperature,
                 "seed": seed,
+                "ts": int(time.time()),
             },
         }
     except Exception as e:
@@ -124,12 +130,20 @@ def build_prompt(
     Build a mode-conditioned prompt from normalized context.
     Enforces:
       - Instruction-first templates.
-      - Explicit “No evidence from X” when blocks are empty.
+      - Explicit “No evidence from FAERS.” when blocks are empty.
       - Truncation policy prioritizing PK/PD overlaps → FAERS → rest.
       - Lightweight history framing so follow-ups stay grounded.
+      - Template placeholders supported:
+          {{DRUG_A}}, {{DRUG_B}}, {{PK_SUMMARY}}, {{PD_SUMMARY}},
+          {{FAERS_SUMMARY}}, {{RISK_FLAGS}}, {{EVIDENCE_TABLE}},
+          {{SOURCES}}, {{CAVEATS}}, {{USER_QUESTION}}, {{RAW_CONTEXT_JSON}}
     """
     tpl = _select_template(mode)
     blocks = _summarize_context(context or {}, mode)
+
+    # Inject optional extras used by templates
+    blocks["USER_QUESTION"] = _extract_user_question(context)
+    blocks["RAW_CONTEXT_JSON"] = _compact_json(context, max_chars=3000)
 
     # Optional conversation history (compact, role-tagged; clipped to budget)
     hist_block, hist_flag = _format_history(history or [], budget_chars=1200)
@@ -158,9 +172,20 @@ def build_prompt(
 
 # ========== Template helpers ==========
 def _select_template(mode: str) -> str:
-    key = (mode or "").strip().upper()
+    # Normalize and map common aliases
+    key = (mode or "").strip().lower()
+    if key in {"doc", "doctor", "physician", "clinician"}:
+        key = "DOCTOR"
+    elif key in {"patient", "pt"}:
+        key = "PATIENT"
+    elif key in {"pharma", "pv", "safety"}:
+        key = "PHARMA"
+    else:
+        key = key.upper()
+
     if key not in TEMPLATES:
-        key = "PATIENT"  # safe default tone
+        # Safe default tone
+        key = "PATIENT"
     return TEMPLATES.get(key, "")
 
 
@@ -186,19 +211,20 @@ def _format_history(history: List[Dict[str, str]], budget_chars: int = 1200) -> 
     if not history:
         return "", False
 
-    # Normalize and sanitize roles
     rows: List[str] = []
     total = 0
     for h in history:
         role = (h.get("role") or "").lower()
         role = "User" if role.startswith("u") else ("Assistant" if role.startswith("a") else "User")
         text = (h.get("text") or "").strip()
+        if not text:
+            continue
         rows.append(f"- {role}: {text}")
 
     # Keep most recent lines within budget
     truncated = False
     out: List[str] = []
-    for line in reversed(rows):  # start from newest
+    for line in reversed(rows):  # newest first
         if total + len(line) + 1 <= budget_chars:
             out.append(line)
             total += len(line) + 1
@@ -209,12 +235,9 @@ def _format_history(history: List[Dict[str, str]], budget_chars: int = 1200) -> 
     return "\n".join(out), truncated
 
 
-# ========== Small coercion helper ==========
+# ========== Small helpers ==========
 def _as_str_list(xs: Any) -> List[str]:
-    """
-    Coerce lists that may contain dicts ({'label','uri'}) or strings into clean strings.
-    Removes empties and trims whitespace.
-    """
+    """Coerce lists that may contain dicts ({'label','uri'}) or strings into clean strings."""
     out: List[str] = []
     for x in xs or []:
         if isinstance(x, dict):
@@ -224,6 +247,25 @@ def _as_str_list(xs: Any) -> List[str]:
         if s:
             out.append(s)
     return out
+
+
+def _extract_user_question(ctx: Dict[str, Any]) -> str:
+    q = (
+        ((ctx.get("meta") or {}).get("question"))
+        or ctx.get("query")
+        or ""
+    )
+    return str(q).strip()
+
+
+def _compact_json(obj: Any, max_chars: int = 3000) -> str:
+    try:
+        s = json.dumps(obj, ensure_ascii=False, separators=(",", ":"), default=str)
+    except Exception:
+        s = "{}"
+    if len(s) > max_chars:
+        s = s[: max_chars - 1] + "…"
+    return s
 
 
 # ========== Context summarization & truncation ==========
@@ -242,7 +284,7 @@ def _summarize_context(ctx: Dict[str, Any], mode: str) -> Dict[str, str]:
     caveats_txt = _format_caveats(ctx)
 
     # Truncation policy (approx char budgets, not tokens)
-    if (mode or "").lower() in {"doctor", "pharma"}:
+    if (mode or "").lower() in {"doctor", "physician", "pharma", "pv", "safety"}:
         budget = 2400
     else:
         budget = 1500  # patient = simpler, shorter
@@ -506,9 +548,9 @@ def _strip_template_safety(text: str) -> str:
 
 def _append_disclaimer(text: str, mode: str) -> str:
     m = (mode or "").lower()
-    if m == "patient":
+    if m in {"patient", "pt"}:
         d = "\n\nNote: This is informational and not medical advice. Always consult your doctor or pharmacist."
-    elif m == "doctor":
+    elif m in {"doctor", "physician", "clinician"}:
         d = "\n\nDisclaimer: Research prototype. Use alongside clinical judgment and approved labeling."
     else:
         d = "\n\nDisclaimer: Informational, non-regulatory summary; defer to internal PV/labeling."
@@ -516,9 +558,7 @@ def _append_disclaimer(text: str, mode: str) -> str:
 
 
 def _fallback(msg: str) -> Dict[str, Any]:
-    """
-    Safe user-facing fallback, patient-tone disclaimer.
-    """
+    """Safe user-facing fallback, patient-tone disclaimer."""
     text = f"Unable to generate a full explanation right now. {msg}"
     return {
         "text": _append_disclaimer(text, "patient"),

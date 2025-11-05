@@ -580,29 +580,50 @@ def bio_measuregroup_summary(mg_uri: str) -> Dict[str, Any]:
 # ------------------------------
 
 def _first_cid_and_synonyms(name: str, limit: int = 25) -> tuple[Optional[str], Dict[str, Any]]:
-    """Best-effort CID resolution + synonyms using existing CORE helper(s).
-    Returns (cid_uri_or_none, info_dict) where info_dict may include
-    {"ids": {"pubchem_cid": "2244"}, "synonyms": ["Aspirin", ...]}
     """
-    try:
-        # Assumes your module already exposes this function (tested earlier).
-        pairs = core_find_cid_by_label_fragment(name, limit=limit)  # type: ignore[name-defined]
-    except Exception:
-        return None, {}
+    Best-effort CID resolution + synonyms.
+    Tries fast exact-label probes first (several casings), then falls back to the
+    slower CONTAINS(...) fragment scan only if nothing is found.
+
+    Returns (cid_uri_or_none, info_dict) where info_dict may include:
+      {"ids": {"pubchem_cid": "2244"}, "synonyms": ["Aspirin", ...]}
+    """
+    pairs: List[Any] = []
+
+    # 1) FAST PATH: exact label lookups (QLever answer is quick and avoids 30s timeouts)
+    for s in {name, name.capitalize(), name.upper(), name.lower()}:
+        try:
+            pairs = core_find_cid_by_exact_label(s)  # already in this module
+        except Exception:
+            pairs = []
+        if pairs:
+            break
+
+    # 2) FALLBACK: slower fragment scan if exact lookups returned nothing
+    if not pairs:
+        try:
+            pairs = core_find_cid_by_label_fragment(name, limit=limit)
+        except Exception:
+            pairs = []
 
     if not pairs:
         return None, {}
 
-    # First result's CID + gather all labels for that same CID
+    # First result's CID + gather labels for that same CID as lightweight "synonyms"
     cid0, _ = pairs[0]
     syns = [label for cid, label in pairs if cid == cid0]
 
+    # Extract numeric CID (PubChem URIs look like .../compound/CID2244)
     cid_num: Optional[str] = None
     m = re.search(r"CID(\d+)", cid0 or "")
     if m:
         cid_num = m.group(1)
-    ids = {"pubchem_cid": cid_num} if cid_num else {}
-    return cid0, {"ids": ids, "synonyms": list(dict.fromkeys(syns))[:20]}
+
+    info: Dict[str, Any] = {
+        "ids": {"pubchem_cid": cid_num} if cid_num else {},
+        "synonyms": list(dict.fromkeys(syns))[:20],
+    }
+    return cid0, info
 
 
 def get_mechanistic(drugA: str, drugB: str) -> Dict[str, Any]:
