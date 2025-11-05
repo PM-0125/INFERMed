@@ -18,6 +18,7 @@ BIO_IDX="$QLIDX/bioactivity/bioactivity"   # for later, once done
 # Start servers (adjust ports if you like)
 ./ServerMain -i "$CORE_IDX" -p 7010 &
 ./ServerMain -i "$DISEASE_IDX" -p 7011 &
+./ServerMain -i "$BIO_IDX" -p 7012 &
 
 # later:
 # ./ServerMain -i "$BIO_IDX" -p 7012 &     
@@ -29,6 +30,7 @@ export BIO_ENDPOINT="http://localhost:7012/"   # once bioactivity is up
 # Kill Server:
 pkill -f 'ServerMain -i .*core/core'      # stop core
 pkill -f 'ServerMain -i .*disease/disease' # stop disease
+pkill -f 'ServerMain -i .*bioactivity/bioactivity'  #stop bioactivity
 
 # To check if server is occupied:
 ss -ltnp | grep -E ':7010|:7011'

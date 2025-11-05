@@ -43,6 +43,18 @@ PUBCHEM_COMPOUND_NS = "http://rdf.ncbi.nlm.nih.gov/pubchem/compound/"
 SIO = "http://semanticscience.org/resource/"
 SKOS = "http://www.w3.org/2004/02/skos/core#"
 RDFS = "http://www.w3.org/2000/01/rdf-schema#"
+OBI_0000299 = "http://purl.obolibrary.org/obo/OBI_0000299" # has_specified_output (MG -> Endpoint)
+IAO_0000136 = "http://purl.obolibrary.org/obo/IAO_0000136" # is_about (Endpoint -> SID)
+RO_0000056 = "http://purl.obolibrary.org/obo/RO_0000056" # participates_in (SID -> MG)
+SIO_VALUE = "http://semanticscience.org/resource/SIO_000300" # numeric value
+SIO_UNIT = "http://semanticscience.org/resource/SIO_000221" # unit
+PCV_OUTCOME = "http://rdf.ncbi.nlm.nih.gov/pubchem/vocabulary#PubChemAssayOutcome"
+RO_0000057 = "http://purl.obolibrary.org/obo/RO_0000057" # has_participant (Endpoint -> Protein/Gene)
+
+
+# --- IRI prefixes for fast-bounded searches ---
+MG_PREFIX = "http://rdf.ncbi.nlm.nih.gov/pubchem/measuregroup/"
+EP_PREFIX = "http://rdf.ncbi.nlm.nih.gov/pubchem/endpoint/"
 
 # ---------------------------------------------------------------------------
 # Errors
@@ -177,6 +189,32 @@ def sparql_str(s: str) -> str:
     s = s.replace("\\", "\\\\").replace('"', '\\"')
     return f"\"{s}\""
 
+
+def _get_bio_endpoint() -> Optional[str]:
+    """Return BIO_ENDPOINT from env or None if unset."""
+    return os.environ.get("BIO_ENDPOINT") or None
+
+
+
+
+def _bio_query(query: str) -> Dict[str, Any]:
+    """Issue a SPARQL query to BIO_ENDPOINT and return parsed JSON.
+    Non-throwing: returns {} on error or if requests is unavailable.
+    """
+    endpoint = _get_bio_endpoint()
+    if not endpoint or requests is None:
+        return {}
+    try:
+        r = requests.get(
+        endpoint,
+        params={"query": query},
+        headers={"Accept": "application/sparql-results+json"},
+        timeout=30,
+        )
+        r.raise_for_status()
+        return r.json()
+    except Exception:
+        return {}
 
 # ---------------------------------------------------------------------------
 # CORE helpers
@@ -366,60 +404,172 @@ LIMIT {int(limit)}
     js = cli.query(q)
     return [ext for (ext,) in _vals(js["results"]["bindings"], "ext")]
 
+# ------------------------------
+# BIO helper functions
+# ------------------------------
 
-# ---------------------------------------------------------------------------
-# Minimal mechanistic stub (PK/PD)
-# Provides the shape expected by rag_pipeline. Enzymes/targets/pathways are left
-# empty for now; but we resolve PubChem CIDs + collect a few synonyms.
+def bio_find_measuregroups_by_aid(aid: str, limit: int = 5) -> List[str]:
+    """Return up to `limit` MeasureGroup IRIs whose endpoints mention the given AID token.
+    Bounded by MG/Endpoint prefixes for speed.
+    """
+    aid = aid.strip()
+    if not aid.startswith("AID"):
+        aid = f"AID{aid}"
+    q = f"""
+PREFIX OBI:<http://purl.obolibrary.org/obo/>
+SELECT DISTINCT ?mg WHERE {{
+  ?mg OBI:OBI_0000299 ?e .
+  FILTER(STRSTARTS(STR(?mg), "{MG_PREFIX}"))
+  FILTER(STRSTARTS(STR(?e),  "{EP_PREFIX}"))
+  FILTER(CONTAINS(STR(?e), "{aid}"))
+}}
+LIMIT {limit}
+"""
+    data = _bio_query(q)
+    return [b["mg"]["value"] for b in data.get("results", {}).get("bindings", [])]
+
+
+def bio_measuregroup_endpoints(mg_uri: str) -> List[Dict[str, Any]]:
+    """Return endpoints under a MeasureGroup with value/unit/outcome (+unit rdfs:label when present)."""
+    q = f"""
+PREFIX OBI:<http://purl.obolibrary.org/obo/>
+PREFIX sio:<http://semanticscience.org/resource/>
+PREFIX pcv:<http://rdf.ncbi.nlm.nih.gov/pubchem/vocabulary#>
+PREFIX rdfs:<http://www.w3.org/2000/01/rdf-schema#>
+SELECT ?e ?val ?unit ?unit_label ?outcome WHERE {{
+  <{mg_uri}> OBI:OBI_0000299 ?e .
+  OPTIONAL {{ ?e sio:SIO_000300 ?val }}
+  OPTIONAL {{ ?e sio:SIO_000221 ?unit . OPTIONAL {{ ?unit rdfs:label ?unit_label }} }}
+  OPTIONAL {{ ?e pcv:PubChemAssayOutcome ?outcome }}
+}}
+LIMIT 1000
+"""
+    data = _bio_query(q)
+    out: List[Dict[str, Any]] = []
+    for b in data.get("results", {}).get("bindings", []):
+        out.append({
+            "endpoint": b.get("e", {}).get("value"),
+            "value": b.get("val", {}).get("value"),
+            "unit": b.get("unit", {}).get("value"),
+            "unit_label": b.get("unit_label", {}).get("value"),
+            "outcome": b.get("outcome", {}).get("value"),
+        })
+    return out
+
+
+def bio_measuregroup_sid_cid(mg_uri: str) -> List[Dict[str, str]]:
+    """Return SIDs and mapped CIDs for a MeasureGroup using both RO:0000056 and IAO:0000136 paths."""
+    q = f"""
+PREFIX OBI:<http://purl.obolibrary.org/obo/>
+PREFIX IAO:<http://purl.obolibrary.org/obo/>
+PREFIX sio:<http://semanticscience.org/resource/>
+SELECT DISTINCT ?sid ?cid WHERE {{
+  <{mg_uri}> OBI:OBI_0000299 ?e .
+  {{ ?sid <{RO_0000056}> <{mg_uri}> }} UNION {{ ?e <{IAO_0000136}> ?sid }} .
+  ?sid <http://semanticscience.org/resource/CHEMINF_000477> ?cid .
+}}
+LIMIT 5000
+"""
+    data = _bio_query(q)
+    return [{"sid": b["sid"]["value"], "cid": b["cid"]["value"]}
+            for b in data.get("results", {}).get("bindings", [])]
+
+
+def bio_measuregroup_proteins(mg_uri: str) -> List[Dict[str, Optional[str]]]:
+    """Return (endpoint, protein_uri, optional label) from RO:0000057 edges."""
+    q = f"""
+PREFIX OBI:<http://purl.obolibrary.org/obo/>
+PREFIX rdfs:<http://www.w3.org/2000/01/rdf-schema#>
+SELECT DISTINCT ?e ?prot ?prot_label WHERE {{
+  <{mg_uri}> OBI:OBI_0000299 ?e .
+  ?e <{RO_0000057}> ?prot .
+  OPTIONAL {{ ?prot rdfs:label ?prot_label }}
+}}
+LIMIT 2000
+"""
+    data = _bio_query(q)
+    return [{
+        "endpoint": b.get("e", {}).get("value"),
+        "protein": b.get("prot", {}).get("value"),
+        "protein_label": b.get("prot_label", {}).get("value"),
+    } for b in data.get("results", {}).get("bindings", [])]
+
+
+def bio_measuregroup_endpoints_to_bioassay(mg_uri: str) -> List[Dict[str, str]]:
+    """Map endpoints back to their BioAssay IRI using regex/BIND to extract the AID token."""
+    q = f"""
+PREFIX OBI:<http://purl.obolibrary.org/obo/>
+SELECT ?e ?aidTok ?bioassay WHERE {{
+  <{mg_uri}> OBI:OBI_0000299 ?e .
+  BIND(REPLACE(STR(?e), ".*/.*_(AID[0-9]+)_.*", "$1") AS ?aidTok)
+  BIND(IRI(CONCAT("http://rdf.ncbi.nlm.nih.gov/pubchem/bioassay/", ?aidTok)) AS ?bioassay)
+}}
+LIMIT 5000
+"""
+    data = _bio_query(q)
+    return [{
+        "endpoint": b.get("e", {}).get("value"),
+        "aid": b.get("aidTok", {}).get("value"),
+        "bioassay": b.get("bioassay", {}).get("value"),
+    } for b in data.get("results", {}).get("bindings", [])]
+
+
+def bio_measuregroup_summary(mg_uri: str) -> Dict[str, Any]:
+    """Convenience wrapper that bundles endpoints, sid/cid mappings, proteins and endpoint→assay links."""
+    return {
+        "measuregroup": mg_uri,
+        "endpoints": bio_measuregroup_endpoints(mg_uri),
+        "sid_cid": bio_measuregroup_sid_cid(mg_uri),
+        "proteins": bio_measuregroup_proteins(mg_uri),
+        "endpoint_to_bioassay": bio_measuregroup_endpoints_to_bioassay(mg_uri),
+    }
+
+
+# ------------------------------
+# Minimal mechanistic stub for RAG
+# ------------------------------
 
 def _first_cid_and_synonyms(name: str, limit: int = 25) -> tuple[Optional[str], Dict[str, Any]]:
-    """
-    Returns (cid_uri_or_none, info_dict).
-    info_dict includes e.g. {"ids": {"pubchem_cid": "2244"}, "synonyms": ["Aspirin", ...]}
+    """Best-effort CID resolution + synonyms using existing CORE helper(s).
+    Returns (cid_uri_or_none, info_dict) where info_dict may include
+    {"ids": {"pubchem_cid": "2244"}, "synonyms": ["Aspirin", ...]}
     """
     try:
-        pairs = core_find_cid_by_label_fragment(name, limit=limit)
+        # Assumes your module already exposes this function (tested earlier).
+        pairs = core_find_cid_by_label_fragment(name, limit=limit)  # type: ignore[name-defined]
     except Exception:
         return None, {}
 
     if not pairs:
         return None, {}
 
-    # Take the first result; gather synonyms (labels) for that same CID
+    # First result's CID + gather all labels for that same CID
     cid0, _ = pairs[0]
     syns = [label for cid, label in pairs if cid == cid0]
 
-    # Extract numeric CID (PubChem URIs look like .../compound/CID2244)
     cid_num: Optional[str] = None
-    m = re.search(r"CID(\d+)", cid0)
+    m = re.search(r"CID(\d+)", cid0 or "")
     if m:
         cid_num = m.group(1)
-
     ids = {"pubchem_cid": cid_num} if cid_num else {}
     return cid0, {"ids": ids, "synonyms": list(dict.fromkeys(syns))[:20]}
 
 
 def get_mechanistic(drugA: str, drugB: str) -> Dict[str, Any]:
+    """Non-breaking minimal schema for RAG. Populates IDs/synonyms and leaves PK/PD empty.
+    Fields:
+      enzymes: substrate/inhibitor/inducer per A/B
+      targets_a/targets_b: []
+      pathways_a/pathways_b/common_pathways: []
+      ids_a/ids_b, synonyms_a/synonyms_b
+      caveats: list of notes
     """
-    Minimal placeholder returning the correct schema:
-      {
-        "enzymes": {"a": {...}, "b": {...}},
-        "targets_a": [...], "targets_b": [...],
-        "pathways_a": [...], "pathways_b": [...],
-        "common_pathways": [...],
-        "ids_a": {...}, "ids_b": {...},
-        "synonyms_a": [...], "synonyms_b": [...],
-        "caveats": [...]
-      }
+    caveats: List[str] = []  # type: ignore[name-defined]
 
-    When you implement real SPARQL for enzymes/targets/pathways, fill those fields here.
-    """
-    caveats: List[str] = []
-
-    # Ensure core endpoint exists early so callers can interpret caveats
+    # Ensure CORE is available for CID lookups (best-effort)
     try:
-        _ = _ensure_client("core")
-    except Exception as e:
+        _ = _ensure_client("core")  # type: ignore[name-defined]
+    except Exception as e:  # pragma: no cover
         return {
             "enzymes": {"a": {"substrate": [], "inhibitor": [], "inducer": []},
                         "b": {"substrate": [], "inhibitor": [], "inducer": []}},
@@ -431,7 +581,7 @@ def get_mechanistic(drugA: str, drugB: str) -> Dict[str, Any]:
             "caveats": [f"QLever CORE unavailable: {e}"],
         }
 
-    # Resolve CIDs + synonyms (best-effort)
+    # Resolve IDs/synonyms
     _, a_info = _first_cid_and_synonyms(drugA)
     _, b_info = _first_cid_and_synonyms(drugB)
 
@@ -447,6 +597,52 @@ def get_mechanistic(drugA: str, drugB: str) -> Dict[str, Any]:
         "ids_b": b_info.get("ids", {}),
         "synonyms_a": a_info.get("synonyms", []),
         "synonyms_b": b_info.get("synonyms", []),
-        "caveats": caveats or ["Mechanistic PK/PD not yet implemented; returning IDs/synonyms only."],
+        "caveats": caveats or [
+            "Mechanistic PK/PD not yet implemented; returning IDs/synonyms only.",
+        ],
     }
+    return mech
+
+
+def get_mechanistic_enriched(
+    drugA: str,
+    drugB: str,
+    mg_list_a: Optional[List[str]] = None,
+    mg_list_b: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """Optional enrichment that uses BIO MeasureGroups (if provided) to populate targets_* with proteins.
+    This function does not alter the original get_mechanistic() behavior and can be used by RAG when MGs are known.
+    """
+    mech = get_mechanistic(drugA, drugB)
+
+    # Helper to convert protein rows to compact target dicts
+    def _targets_from_mgs(mg_list: List[str]) -> List[Dict[str, str]]:
+        targets: List[Dict[str, str]] = []
+        seen = set()
+        for mg in mg_list:
+            for row in bio_measuregroup_proteins(mg):  # type: ignore[name-defined]
+                uri = row.get("protein")
+                if not uri:
+                    continue
+                # Ensure both uri and label are plain str (no None) to satisfy the type
+                uri = str(uri)
+                label = row.get("protein_label") or uri
+                label = str(label)
+                if uri not in seen:
+                    seen.add(uri)
+                    targets.append({"uri": uri, "label": label})
+        return targets
+
+    try:
+        if mg_list_a:
+            mech["targets_a"] = _targets_from_mgs(mg_list_a)
+        if mg_list_b:
+            mech["targets_b"] = _targets_from_mgs(mg_list_b)
+        if mg_list_a or mg_list_b:
+            mech.setdefault("caveats", []).append(
+                "Targets derived from BIO endpoints via RO:0000057; interpret as putative."
+            )
+    except Exception:
+        mech.setdefault("caveats", []).append("BIO enrichment failed; returning base schema.")
+
     return mech

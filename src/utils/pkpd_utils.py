@@ -32,14 +32,12 @@ _CANON_BY_ALIAS: Dict[str, str] = {
     alias: canon for canon, aliases in _CYP_SYNONYMS.items() for alias in aliases
 }
 
-
 def _norm_text(s: str) -> str:
     """Lowercase, trim, collapse whitespace, Unicode NFKC normalize."""
     s = unicodedata.normalize("NFKC", s or "")
     s = s.lower().strip()
     s = re.sub(r"\s+", " ", s)
     return s
-
 
 def canonicalize_enzyme(name: str) -> str:
     """
@@ -49,16 +47,28 @@ def canonicalize_enzyme(name: str) -> str:
     a = _norm_text(name)
     return _CANON_BY_ALIAS.get(a, a)
 
-
-def canonicalize_list(values: Iterable[str], *, topk: int | None = None) -> List[str]:
+def _stringify_item(v: Any) -> str:
     """
-    Normalize a list of strings (dedup, order preserved by first occurrence).
-    Optionally cap to topk items.
+    Convert item to string for canonicalization.
+    - dict -> use 'label' if present else 'uri' else ''
+    - other -> str(v)
+    """
+    if isinstance(v, dict):
+        return str(v.get("label") or v.get("uri") or "")
+    return str(v)
+
+def canonicalize_list(values: Iterable[Any], *, topk: int | None = None) -> List[str]:
+    """
+    Normalize a list of strings (or dicts with 'label'/'uri'):
+      - stringify (dict label→uri→''),
+      - lowercase + trim + collapse spaces,
+      - deduplicate preserving first occurrence,
+      - optional topk cap.
     """
     seen: Set[str] = set()
     out: List[str] = []
     for v in values or []:
-        c = _norm_text(v)
+        c = _norm_text(_stringify_item(v))
         if not c or c in seen:
             continue
         seen.add(c)
@@ -66,7 +76,6 @@ def canonicalize_list(values: Iterable[str], *, topk: int | None = None) -> List
         if topk and len(out) >= topk:
             break
     return out
-
 
 # --------------------------------------------------------------------------------------
 # PK roles & overlaps
@@ -86,12 +95,11 @@ def extract_pk_roles(mech: Dict[str, Any]) -> Dict[str, Dict[str, Set[str]]]:
     for side in ("a", "b"):
         side_map = ez.get(side, {}) or {}
         roles[side] = {
-            "substrate": {canonicalize_enzyme(x) for x in side_map.get("substrate", [])},
-            "inhibitor": {canonicalize_enzyme(x) for x in side_map.get("inhibitor", [])},
-            "inducer":   {canonicalize_enzyme(x) for x in side_map.get("inducer",   [])},
+            "substrate": {canonicalize_enzyme(_stringify_item(x)) for x in side_map.get("substrate", [])},
+            "inhibitor": {canonicalize_enzyme(_stringify_item(x)) for x in side_map.get("inhibitor", [])},
+            "inducer":   {canonicalize_enzyme(_stringify_item(x)) for x in side_map.get("inducer",   [])},
         }
     return roles
-
 
 def detect_pk_overlaps(roles: Dict[str, Dict[str, Set[str]]]) -> Dict[str, Set[str]]:
     """
@@ -106,7 +114,6 @@ def detect_pk_overlaps(roles: Dict[str, Dict[str, Set[str]]]) -> Dict[str, Set[s
     induc = (a.get("substrate", set()) & b.get("inducer", set()))   | (b.get("substrate", set()) & a.get("inducer", set()))
     shared = a.get("substrate", set()) & b.get("substrate", set())
     return {"inhibition": inhib, "induction": induc, "shared_substrate": shared}
-
 
 # --------------------------------------------------------------------------------------
 # PD overlap
@@ -131,7 +138,6 @@ def pd_overlap(mech: Dict[str, Any], *, target_topk: int = 32, path_topk: int = 
     # A tiny heuristic score: equal weight targets and pathways, saturate at 10 each.
     score = min(1.0, 0.5 * (len(common_targets) / 10.0) + 0.5 * (len(common_paths) / 10.0))
     return {"overlap_targets": common_targets, "overlap_pathways": common_paths, "pd_score": round(score, 3)}
-
 
 # --------------------------------------------------------------------------------------
 # Synthesis (compact summaries for LLM)
@@ -166,7 +172,6 @@ def summarize_pkpd_risk(drugA: str, drugB: str, mech: Dict[str, Any]) -> Dict[st
         "pd_detail": pd,
     }
 
-
 # --------------------------------------------------------------------------------------
 # FAERS compact formatting
 # --------------------------------------------------------------------------------------
@@ -183,7 +188,6 @@ def topk_faers(faers: Dict[str, Any], k: int = 5) -> Dict[str, str]:
                 t, c = it
                 out.append((str(t), int(c)))
             except Exception:
-                # skip malformed rows silently
                 continue
         return out
 
@@ -199,7 +203,6 @@ def topk_faers(faers: Dict[str, Any], k: int = 5) -> Dict[str, str]:
         "combo": fmt(faers.get("combo_reactions")),
     }
 
-
 # --------------------------------------------------------------------------------------
 # Glue helper: safely combine QLever + DuckDB PD targets
 # --------------------------------------------------------------------------------------
@@ -207,23 +210,24 @@ def topk_faers(faers: Dict[str, Any], k: int = 5) -> Dict[str, str]:
 def synthesize_mechanistic(
     qlever_mech: Dict[str, Any] | None,
     *,
-    fallback_targets_a: Iterable[str] | None = None,
-    fallback_targets_b: Iterable[str] | None = None,
+    fallback_targets_a: Iterable[Any] | None = None,
+    fallback_targets_b: Iterable[Any] | None = None,
 ) -> Dict[str, Any]:
     """
     Merge mechanistic info, using DuckDB DrugBank targets as PD fallback when QLever
     doesn't provide targets. Keeps shape required by the context schema.
-    Ensures enzymes/targets/pathways are normalized.
+    Ensures enzymes/targets/pathways are normalized and that any dict-shaped targets
+    (with {'uri','label'}) are converted to normalized label strings.
     """
     q = qlever_mech or {}
 
-    # --- Enzymes: normalize per role per side ---
+    # --- Enzymes: normalize per role per side (stringify to be safe) ---
     raw_ez = q.get("enzymes", {}) or {"a": {}, "b": {}}
     def canon_roles(side_map: Dict[str, Any]) -> Dict[str, List[str]]:
         return {
-            "substrate": [canonicalize_enzyme(x) for x in (side_map.get("substrate") or [])],
-            "inhibitor": [canonicalize_enzyme(x) for x in (side_map.get("inhibitor") or [])],
-            "inducer":   [canonicalize_enzyme(x) for x in (side_map.get("inducer")   or [])],
+            "substrate": [canonicalize_enzyme(_stringify_item(x)) for x in (side_map.get("substrate") or [])],
+            "inhibitor": [canonicalize_enzyme(_stringify_item(x)) for x in (side_map.get("inhibitor") or [])],
+            "inducer":   [canonicalize_enzyme(_stringify_item(x)) for x in (side_map.get("inducer")   or [])],
         }
     enzymes = {
         "a": canon_roles(raw_ez.get("a", {}) or {}),
@@ -252,4 +256,3 @@ def synthesize_mechanistic(
         "common_pathways": common_pathways,
     }
     return mech
-

@@ -10,7 +10,7 @@ from datetime import datetime
 # Retrieval modules
 from src.retrieval import duckdb_query as dq
 from src.retrieval.openfda_api import OpenFDAClient
-from src.retrieval import qlever_query as ql  # defines get_mechanistic()
+from src.retrieval import qlever_query as ql  # may expose get_mechanistic_enriched / get_mechanistic
 
 # PK/PD synthesis utilities
 from src.utils.pkpd_utils import (
@@ -22,7 +22,7 @@ from src.utils.pkpd_utils import (
 from src.llm.llm_interface import generate_response, MODEL_NAME as LLM_MODEL_NAME
 
 # ----------------- versioning & caching -----------------
-VERSION = 2  # bump to invalidate old cached contexts when schema/logic changes
+VERSION = 3  # bump when schema/logic changes to invalidate old cached contexts
 
 CACHE_DIR = os.path.join("data", "cache")
 CTX_DIR   = os.path.join(CACHE_DIR, "contexts")
@@ -53,23 +53,49 @@ def _pair_key(drugA: str, drugB: str) -> str:
 # ----------------- retrieval helpers -----------------
 def _get_qlever_mechanistic_or_stub(drugA: str, drugB: str) -> Dict[str, Any]:
     """
-    Try QLever.get_mechanistic(); on error, return a minimal stub.
-    The stub leaves enzymes/targets/pathways empty; PD targets will be filled from
-    DuckDB DrugBank via synthesize_mechanistic().
+    Prefer ql.get_mechanistic_enriched(), fall back to ql.get_mechanistic().
+    On error, return a minimal stub. synthesize_mechanistic() will add PD fallbacks.
     """
+    # Try enriched first (if available)
     try:
-        return ql.get_mechanistic(drugA, drugB)
+        if hasattr(ql, "get_mechanistic_enriched"):
+            return ql.get_mechanistic_enriched(drugA, drugB)
     except Exception as e:
-        return {
-            "enzymes": {"a": {"substrate": [], "inhibitor": [], "inducer": []},
-                        "b": {"substrate": [], "inhibitor": [], "inducer": []}},
-            "targets_a": [], "targets_b": [],
-            "pathways_a": [], "pathways_b": [],
-            "common_pathways": [],
-            "ids_a": {}, "ids_b": {},
-            "synonyms_a": [], "synonyms_b": [],
-            "caveats": [f"QLever mechanistic unavailable: {e} — using DuckDB DrugBank targets as PD fallback."],
-        }
+        # fall through to basic
+        pass
+
+    # Then try basic
+    try:
+        if hasattr(ql, "get_mechanistic"):
+            return ql.get_mechanistic(drugA, drugB)
+    except Exception as e:
+        pass
+
+    # Finally stub
+    return {
+        "enzymes": {"a": {"substrate": [], "inhibitor": [], "inducer": []},
+                    "b": {"substrate": [], "inhibitor": [], "inducer": []}},
+        "targets_a": [], "targets_b": [],
+        "pathways_a": [], "pathways_b": [],
+        "common_pathways": [],
+        "ids_a": {}, "ids_b": {},
+        "synonyms_a": [], "synonyms_b": [],
+        "caveats": ["QLever mechanistic unavailable; using DuckDB DrugBank targets as PD fallback."],
+    }
+
+
+def _bool_qlever_contributed(mech: Dict[str, Any]) -> bool:
+    """Heuristic: did QLever contribute anything non-empty to mechanistic evidence?"""
+    ez = mech.get("enzymes", {})
+    nonempty_ez = any(
+        (ez.get(s, {}).get(k) for s in ("a", "b") for k in ("substrate", "inhibitor", "inducer"))
+    )
+    return bool(
+        nonempty_ez
+        or mech.get("targets_a") or mech.get("targets_b")
+        or mech.get("pathways_a") or mech.get("pathways_b")
+        or mech.get("common_pathways")
+    )
 
 
 # ----------------- public pipeline -----------------
@@ -81,6 +107,8 @@ def retrieve_and_normalize(
     openfda_cache: str = "data/openfda",
     topk_side_effects: int = 25,
     topk_faers: int = 10,
+    topk_targets: int = 32,
+    topk_pathways: int = 24,
 ) -> Dict[str, Any]:
     """Fetch raw evidence, normalize/synthesize PK/PD, and build the LLM context."""
     caveats: List[str] = []
@@ -89,7 +117,6 @@ def retrieve_and_normalize(
     try:
         dq.init_duckdb_connection(parquet_dir)
     except Exception as e:
-        # If DuckDB can't init, we still want to return a minimal context
         caveats.append(f"DuckDB init failed: {e}")
 
     a, b = drugA, drugB
@@ -117,15 +144,22 @@ def retrieve_and_normalize(
     except Exception as e:
         caveats.append(f"DuckDB retrieval failed: {e}")
 
-    # 3) QLever mechanistic (or stub)
+    # 3) QLever mechanistic (enriched/basic/stub)
     qlev = _get_qlever_mechanistic_or_stub(a, b)
 
-    # 4) Merge QLever + DuckDB targets into a single mechanistic block
+    # 4) Merge QLever + DuckDB targets into a single mechanistic block (normalized)
     mech = synthesize_mechanistic(
         qlever_mech=qlev,
         fallback_targets_a=db_targets_a,
         fallback_targets_b=db_targets_b,
     )
+
+    # 4b) Trim mechanistic lists to keep context lean for the LLM
+    mech["targets_a"] = mech.get("targets_a", [])[:topk_targets]
+    mech["targets_b"] = mech.get("targets_b", [])[:topk_targets]
+    mech["pathways_a"] = mech.get("pathways_a", [])[:topk_pathways]
+    mech["pathways_b"] = mech.get("pathways_b", [])[:topk_pathways]
+    mech["common_pathways"] = mech.get("common_pathways", [])[:topk_pathways]
 
     # 5) FAERS via OpenFDA (cached)
     faers_a: List[tuple] = []
@@ -140,6 +174,7 @@ def retrieve_and_normalize(
         caveats.append(f"OpenFDA retrieval failed: {e}")
 
     # 6) Build normalized context (matches llm_interface expectations)
+    ql_contrib = _bool_qlever_contributed(mech)
     context: Dict[str, Any] = {
         "drugs": {
             "a": {"name": a, "synonyms": qlev.get("synonyms_a", []), "ids": qlev.get("ids_a", {})},
@@ -166,7 +201,8 @@ def retrieve_and_normalize(
         },
         "sources": {
             "duckdb": ["TwoSides", "DILIrank", "DICTRank", "DIQT", "DrugBank"],
-            "qlever": ["PubChem RDF subset"],  # stub or real behind get_mechanistic
+            # reflect QLever actually contributed; still list the source but caveats will say if empty
+            "qlever": ["PubChem RDF via QLever"] if ql_contrib else ["PubChem RDF via QLever (limited)"],
             "openfda": ["FAERS via OpenFDA (cached)"],
         },
         "caveats": list(dict.fromkeys((qlev.get("caveats") or []) + caveats)),
@@ -176,6 +212,7 @@ def retrieve_and_normalize(
             "pair_key": _pair_key(drugA, drugB),
             "created_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
             "version": VERSION,
+            "qlever_contributed": ql_contrib,
         },
     }
 
@@ -191,6 +228,8 @@ def get_context_cached(
     force_refresh: bool = False,
     topk_side_effects: int = 25,
     topk_faers: int = 10,
+    topk_targets: int = 32,
+    topk_pathways: int = 24,
 ) -> Tuple[Dict[str, Any], str]:
     """
     Cache the normalized context (structured JSON) because retrieval is slow.
@@ -209,6 +248,8 @@ def get_context_cached(
         openfda_cache=openfda_cache,
         topk_side_effects=topk_side_effects,
         topk_faers=topk_faers,
+        topk_targets=topk_targets,
+        topk_pathways=topk_pathways,
     )
     with open(path, "w", encoding="utf-8") as f:
         json.dump(ctx, f, ensure_ascii=False, indent=2)
@@ -260,6 +301,8 @@ def run_rag(
     use_cache_response: bool = False,
     topk_side_effects: int = 25,
     topk_faers: int = 10,
+    topk_targets: int = 32,
+    topk_pathways: int = 24,
 ) -> Dict[str, Any]:
     """High-level entry point the UI can call."""
     if use_cache_context:
@@ -270,6 +313,8 @@ def run_rag(
             openfda_cache=openfda_cache,
             topk_side_effects=topk_side_effects,
             topk_faers=topk_faers,
+            topk_targets=topk_targets,
+            topk_pathways=topk_pathways,
         )
     else:
         context = retrieve_and_normalize(
@@ -279,6 +324,8 @@ def run_rag(
             openfda_cache=openfda_cache,
             topk_side_effects=topk_side_effects,
             topk_faers=topk_faers,
+            topk_targets=topk_targets,
+            topk_pathways=topk_pathways,
         )
 
     if use_cache_response:
