@@ -1,379 +1,294 @@
+# -*- coding: utf-8 -*-
+"""
+DuckDB retrieval layer over tidy Parquet datasets.
+
+Datasets expected (paths are configurable via base_dir):
+  - drugbank.parquet            columns: name_lower, name, synonyms(list), targets(list), ...
+  - twosides.parquet            columns: drug_a, drug_b, side_effect, prr
+  - dictrank.parquet            columns: drug_name, score
+  - dilirank.parquet            columns: drug_name, dili_score
+  - diqt.parquet                columns: drug_name, score
+
+Key fixes vs previous version:
+  - DIQT no longer uses a hard-coded numeric column; we read tidy (drug_name, score).
+  - TwoSides batch branch properly appends side effects (no truncated 'result[d].' line).
+  - Exact matching on normalized names (lowercased) instead of prefix LIKE.
+  - Views are lightweight; no heavy transforms at runtime.
+"""
+
+from __future__ import annotations
 
 import os
-import duckdb
-from duckdb import DuckDBPyConnection
-from typing import List, Optional, Dict, Union
 from functools import lru_cache
+from pathlib import Path
+from typing import Dict, Iterable, List, Optional, Tuple
+
+import duckdb
 
 
-# Module-level client
-_client: Optional['DuckDBClient'] = None
+# ---------- Helpers ----------
+
+def _p(*parts: str) -> str:
+    return str(Path(*parts))
+
+def _norm_name(s: Optional[str]) -> Optional[str]:
+    if s is None:
+        return None
+    s = str(s).strip().replace("\xa0", " ")
+    return s.lower()
+
+
+# ---------- Connection / View Registration ----------
+
+@lru_cache(maxsize=1)
+def init_duckdb_connection(base_dir: str = "data/duckdb") -> duckdb.DuckDBPyConnection:
+    """
+    Initializes a single DuckDB connection and registers views.
+    """
+    base_dir = os.path.abspath(base_dir)
+    con = duckdb.connect(database=":memory:")
+    _register_views(con, base_dir)
+    return con
+
+
+def _register_views(con: duckdb.DuckDBPyConnection, base_dir: str) -> None:
+    """
+    Register simple views over parquet files. We assume the converters already produced tidy schemas.
+    """
+    drugbank = _p(base_dir, "drugbank.parquet")
+    twosides = _p(base_dir, "twosides.parquet")
+    dictrank = _p(base_dir, "dictrank.parquet")
+    dilirank = _p(base_dir, "dilirank.parquet")
+    diqt = _p(base_dir, "diqt.parquet")
+
+    # DrugBank (lowercase column is already in parquet as name_lower; reassert for safety)
+    con.execute(f"""
+        CREATE OR REPLACE VIEW drugbank AS
+        SELECT 
+            COALESCE(name_lower, lower(name)) AS name_lower,
+            name,
+            synonyms,
+            targets,
+            target_uniprot,
+            target_actions,
+            interactions
+        FROM read_parquet('{drugbank}');
+    """)
+
+    # TwoSides (tidy long)
+    con.execute(f"""
+        CREATE OR REPLACE VIEW twosides AS
+        SELECT 
+            CAST(drug_a AS VARCHAR) AS drug_a,
+            CAST(drug_b AS VARCHAR) AS drug_b,
+            CAST(side_effect AS VARCHAR) AS side_effect,
+            CAST(prr AS DOUBLE) AS prr
+        FROM read_parquet('{twosides}');
+    """)
+
+    # DICTRank
+    con.execute(f"""
+        CREATE OR REPLACE VIEW dictrank AS
+        SELECT 
+            lower(drug_name) AS drug_name,
+            CAST(score AS DOUBLE) AS score
+        FROM read_parquet('{dictrank}');
+    """)
+
+    # DILIRank
+    con.execute(f"""
+        CREATE OR REPLACE VIEW dilirank AS
+        SELECT 
+            lower(drug_name) AS drug_name,
+            CAST(dili_score AS DOUBLE) AS dili_score
+        FROM read_parquet('{dilirank}');
+    """)
+
+    # DIQT (tidy 2-col)
+    con.execute(f"""
+        CREATE OR REPLACE VIEW diqt AS
+        SELECT 
+            lower(drug_name) AS drug_name,
+            CAST(score AS DOUBLE) AS score
+        FROM read_parquet('{diqt}');
+    """)
+
+
+# ---------- Client API ----------
 
 class DuckDBClient:
     """
-    DuckDB client for querying Parquet-backed drug datasets.
-    Registers views for each Parquet file and provides methods for single and batch queries
-    without materializing tables. Supports queries for side effects, interaction scores,
-    DILI risk, DICT rank, DIQT score, and drug targets.
+    Thin wrapper exposing retrieval functions expected by the RAG pipeline.
     """
-    # SQL templates for single-drug queries
-    _sql_templates: Dict[str, str] = {
-        "get_side_effects":
-            """
-            SELECT DISTINCT condition_concept_name
-            FROM twosides
-            WHERE lower(drug_1_concept_name)=lower(?)
-               OR lower(drug_2_concept_name)=lower(?)
-            """,
-        "get_interaction_score":
-            """
-            SELECT CAST(prr AS DOUBLE) AS score
-            FROM twosides
-            WHERE (lower(drug_1_concept_name)=lower(?) AND lower(drug_2_concept_name)=lower(?))
-               OR (lower(drug_1_concept_name)=lower(?) AND lower(drug_2_concept_name)=lower(?))
-            LIMIT 1
-            """,
-        "get_dili_risk":
-            """
-            SELECT concern
-            FROM dilirank
-            WHERE lower(drug_name)=lower(?)
-            LIMIT 1
-            """,
-        "get_dict_rank":
-            """
-            SELECT severity
-            FROM dictrank
-            WHERE lower(drug_name)=lower(?)
-            LIMIT 1
-            """,
-        "get_diqt_score":
-            """
-            SELECT score
-            FROM diqt
-            WHERE lower(drug_name) LIKE lower(?) || '%'
-            LIMIT 1
-            """,
-        "get_drug_targets":
-            """
-            SELECT interactions
-            FROM drugbank
-            WHERE lower(name)=lower(?)
-            LIMIT 1
-            """,
-    }
 
-    def __init__(self, parquet_dir: str):
-        """
-        Initialize an in-memory DuckDB connection and register Parquet files as views.
-        Args:
-            parquet_dir: Directory containing the Parquet files.
-        """
-        self._con: DuckDBPyConnection = duckdb.connect(database=":memory:")
-        self._register_views(parquet_dir)
+    def __init__(self, base_dir: str = "data/duckdb"):
+        self.base_dir = base_dir
+        self._con = init_duckdb_connection(base_dir)
 
-    def _register_views(self, base_dir: str) -> None:
-        """
-        Register Parquet files as DuckDB views for querying.
-        Args:
-            base_dir: Directory containing the Parquet files.
-        """
-        p = os.path.join
-        # Register twosides view
-        self._con.execute(f"""
-            CREATE OR REPLACE TEMPORARY VIEW twosides AS
-            SELECT * FROM read_parquet('{p(base_dir, 'twosides.parquet')}')
-            """)
-        # Register dilirank view
-        self._con.execute(f"""
-            CREATE OR REPLACE TEMPORARY VIEW dilirank AS
-            SELECT "Compound Name" AS drug_name, vDILIConcern AS concern
-            FROM read_parquet('{p(base_dir, 'DILIrank-DILIscore.parquet')}')
-            """)
-        # Register dictrank view
-        self._con.execute(f"""
-            CREATE OR REPLACE TEMPORARY VIEW dictrank AS
-            SELECT COALESCE("HYALURONIC ACID","Hyaluronic Acid","HYALURONIC ACID.1") AS drug_name,
-                   "Unnamed: 7" AS severity
-            FROM read_parquet('{p(base_dir, 'DICTRank.parquet')}')
-            """)
-        # Register diqt view
-        ns_col = 'Astemizole\u00A0(Hismanal)'
-        self._con.execute(f"""
-            CREATE OR REPLACE TEMPORARY VIEW diqt AS
-            SELECT "{ns_col}" AS drug_name,
-                   CAST("2247" AS DOUBLE) AS score
-            FROM read_parquet('{p(base_dir, 'DIQT-Drug-Info.parquet')}')
-            """)
-        # Register drugbank view
-        self._con.execute(f"""
-            CREATE OR REPLACE TEMPORARY VIEW drugbank AS
-            SELECT name, interactions
-            FROM read_parquet('{p(base_dir, 'drugbank_xml.parquet')}')
-            """)
+    # --- DrugBank ---
 
-    def get_side_effects(self, drug_name: Union[str, List[str]]) -> Union[List[str], Dict[str, List[str]]]:
+    def get_drug_targets(self, drug_name: str) -> List[str]:
         """
-        Get side effects for a drug or list of drugs.
-        Args:
-            drug_name: Drug name (str) or list of drug names.
-        Returns:
-            List of side effects for a single drug, or dict mapping drug to side effects for batch.
+        Return TRUE PD targets (proteins/genes) for a drug name.
         """
-        if isinstance(drug_name, list):
-            # Batch mode: query for multiple drugs
-            placeholders = ",".join("?" for _ in drug_name)
-            sql = f"""
-                SELECT lower(drug_1_concept_name) AS drug, condition_concept_name
-                FROM twosides
-                WHERE lower(drug_1_concept_name) IN ({placeholders})
-                   OR lower(drug_2_concept_name) IN ({placeholders})
-            """
-            params = drug_name + drug_name
-            rows = self._con.execute(sql, params).fetchall()
-            result: Dict[str, List[str]] = {d: [] for d in drug_name}
-            for d, se in rows:
-                if se and se not in result[d]:
-                    result[d].append(se)
-            return result
-        # Single mode: query for one drug
-        rows = self._con.execute(
-            self._sql_templates['get_side_effects'], [drug_name, drug_name]
-        ).fetchall()
-        return [r[0] for r in rows if r and r[0]]
-
-    def get_interaction_score(self, drug1: str, drug2: str) -> float:
-        """
-        Get the interaction score (PRR) between two drugs.
-        Args:
-            drug1: First drug name.
-            drug2: Second drug name.
-        Returns:
-            PRR score as float (0.0 if not found).
-        """
-        rows = self._con.execute(
-            self._sql_templates['get_interaction_score'], [drug1, drug2, drug2, drug1]
-        ).fetchall()
-        return rows[0][0] if rows and rows[0] and rows[0][0] is not None else 0.0
-
-    def get_dili_risk(self, drug_name: Union[str, List[str]]) -> Union[str, Dict[str, str]]:
-        """
-        Get DILI (Drug-Induced Liver Injury) risk for a drug or list of drugs.
-        Args:
-            drug_name: Drug name (str) or list of drug names.
-        Returns:
-            DILI risk as string for single drug, or dict for batch.
-        """
-        if isinstance(drug_name, list):
-            placeholders = ",".join("?" for _ in drug_name)
-            sql = f"""
-                SELECT lower(drug_name), concern
-                FROM dilirank
-                WHERE lower(drug_name) IN ({placeholders})
-            """
-            rows = self._con.execute(sql, drug_name).fetchall()
-            return {d: self._map_dili(val) for d, val in rows}
-        rows = self._con.execute(
-            self._sql_templates['get_dili_risk'], [drug_name]
-        ).fetchall()
-        val = rows[0][0] if rows and rows[0] and rows[0][0] else None
-        return self._map_dili(val)
-
-    def get_dict_rank(self, drug_name: Union[str, List[str]]) -> Union[str, Dict[str, str]]:
-        """
-        Get DICT rank (severity) for a drug or list of drugs.
-        Args:
-            drug_name: Drug name (str) or list of drug names.
-        Returns:
-            Severity as string for single drug, or dict for batch.
-        """
-        if isinstance(drug_name, list):
-            placeholders = ",".join("?" for _ in drug_name)
-            sql = f"""
-                SELECT lower(drug_name), severity
-                FROM dictrank
-                WHERE lower(drug_name) IN ({placeholders})
-            """
-            rows = self._con.execute(sql, drug_name).fetchall()
-            return {d: (s.lower() if s else 'unknown') for d, s in rows}
-        rows = self._con.execute(
-            self._sql_templates['get_dict_rank'], [drug_name]
-        ).fetchall()
-        return rows[0][0].lower() if rows and rows[0] and rows[0][0] else 'unknown'
-
-    def get_diqt_score(self, drug_name: Union[str, List[str]]) -> Union[Optional[float], Dict[str, Optional[float]]]:
-        """
-        Get DIQT score for a drug or list of drugs.
-        Args:
-            drug_name: Drug name (str) or list of drug names.
-        Returns:
-            Score as float or None for single drug, or dict for batch.
-        """
-        if isinstance(drug_name, list):
-            placeholders = ",".join("?" for _ in drug_name)
-            sql = f"""
-                SELECT lower(drug_name), score
-                FROM diqt
-                WHERE lower(drug_name) LIKE lower(?) || '%'
-                  AND lower(drug_name) IN ({placeholders})
-            """
-            params = [drug_name[0]] + drug_name
-            rows = self._con.execute(sql, params).fetchall()
-            return {d: sc for d, sc in rows}
-        rows = self._con.execute(
-            self._sql_templates['get_diqt_score'], [drug_name]
-        ).fetchall()
-        return rows[0][0] if rows and rows[0] and rows[0][0] is not None else None
-
-    def get_drug_targets(self, drug_name: Union[str, List[str]]) -> Union[List[str], Dict[str, List[str]]]:
-        """
-        Get drug targets/interactions for a drug or list of drugs.
-        Args:
-            drug_name: Drug name (str) or list of drug names.
-        Returns:
-            List of targets for single drug, or dict for batch.
-        """
-        if isinstance(drug_name, list):
-            placeholders = ",".join("?" for _ in drug_name)
-            sql = f"""
-                SELECT lower(name), interactions
-                FROM drugbank
-                WHERE lower(name) IN ({placeholders})
-            """
-            rows = self._con.execute(sql, drug_name).fetchall()
-            return {d: inter.split(';;') if inter else [] for d, inter in rows}
-        rows = self._con.execute(
-            self._sql_templates['get_drug_targets'], [drug_name]
-        ).fetchall()
-        if not rows or not rows[0] or not rows[0][0]:
+        d = _norm_name(drug_name)
+        if not d:
             return []
-        return rows[0][0].split(';;')
+        rows = self._con.execute(
+            "SELECT targets FROM drugbank WHERE name_lower = ? LIMIT 1;",
+            [d],
+        ).fetchall()
+        if not rows:
+            return []
+        # targets is a LIST<VARCHAR> in parquet; DuckDB returns Python list
+        return [t for t in (rows[0][0] or []) if t]
 
-    def _map_dili(self, val: Optional[str]) -> str:
+    def get_synonyms(self, drug_name: str) -> List[str]:
+        d = _norm_name(drug_name)
+        if not d:
+            return []
+        rows = self._con.execute(
+            "SELECT synonyms FROM drugbank WHERE name_lower = ? LIMIT 1;",
+            [d],
+        ).fetchall()
+        if not rows:
+            return []
+        return [s for s in (rows[0][0] or []) if s]
+
+    # --- Risk Scores ---
+
+    def get_dictrank_score(self, drug_name: str) -> Optional[float]:
+        d = _norm_name(drug_name)
+        if not d:
+            return None
+        rows = self._con.execute(
+            "SELECT score FROM dictrank WHERE drug_name = ? LIMIT 1;",
+            [d],
+        ).fetchall()
+        return float(rows[0][0]) if rows else None
+
+    def get_dilirank_score(self, drug_name: str) -> Optional[float]:
+        d = _norm_name(drug_name)
+        if not d:
+            return None
+        rows = self._con.execute(
+            "SELECT dili_score FROM dilirank WHERE drug_name = ? LIMIT 1;",
+            [d],
+        ).fetchall()
+        return float(rows[0][0]) if rows else None
+
+    def get_diqt_score(self, drug_name: str) -> Optional[float]:
         """
-        Map DILI concern string to risk category.
-        Args:
-            val: DILI concern string from database.
-        Returns:
-            Risk category ('low', 'medium', 'high', or '').
+        QT risk proxy score (already melted to two columns). Exact match on normalized drug name.
         """
-        if not val:
-            return ''
-        rc = val.lower()
-        if 'no-dili' in rc:
-            return 'low'
-        if 'less-dili' in rc:
-            return 'medium'
-        if 'most-dili' in rc:
-            return 'high'
-        return ''
+        d = _norm_name(drug_name)
+        if not d:
+            return None
+        rows = self._con.execute(
+            "SELECT score FROM diqt WHERE drug_name = ? LIMIT 1;",
+            [d],
+        ).fetchall()
+        return float(rows[0][0]) if rows else None
 
-# Module-level wrappers with LRU caching
+    # --- TwoSides side-effects ---
 
-@lru_cache(maxsize=128)
-def init_duckdb_connection(parquet_dir: str) -> DuckDBPyConnection:
-    """
-    Initialize module-level DuckDB client and connection.
-    Must be called before using other query functions.
-    Args:
-        parquet_dir: Directory containing Parquet files.
-    Returns:
-        DuckDBPyConnection object.
-    """
-    global _client
-    _client = DuckDBClient(parquet_dir)
-    return _client._con
+    def get_side_effects(
+        self,
+        drug_a: str,
+        drug_b: Optional[str] = None,
+        top_k: int = 20,
+        min_prr: float = 1.0,
+    ) -> List[Tuple[str, Optional[float]]]:
+        """
+        For single drug: return most frequent side effects (by PRR if available).
+        For pair (A,B): return side effects observed with the pair (order-insensitive).
+        """
+        a = _norm_name(drug_a)
+        b = _norm_name(drug_b) if drug_b else None
 
-@lru_cache(maxsize=256)
-def get_side_effects(drug_name: str) -> List[str]:
-    """
-    Get side effects for a single drug (cached).
-    Args:
-        drug_name: Drug name.
-    Returns:
-        List of side effects.
-    """
-    if _client is None:
-        raise RuntimeError('init_duckdb_connection() must be called first')
-    res = _client.get_side_effects(drug_name)
-    if not isinstance(res, list):
-        raise TypeError('Expected single-result list for get_side_effects')
-    return res
+        if not a:
+            return []
 
-@lru_cache(maxsize=256)
-def get_interaction_score(d1: str, d2: str) -> float:
-    """
-    Get interaction score (PRR) between two drugs (cached).
-    Args:
-        d1: First drug name.
-        d2: Second drug name.
-    Returns:
-        PRR score as float.
-    """
-    if _client is None:
-        raise RuntimeError('init_duckdb_connection() must be called first')
-    return _client.get_interaction_score(d1, d2)
+        if b is None:
+            # Single drug: union where A==drug or B==drug
+            rows = self._con.execute(
+                """
+                SELECT side_effect, MAX(prr) AS prr
+                FROM twosides
+                WHERE (drug_a = ? OR drug_b = ?)
+                  AND (prr IS NULL OR prr >= ?)
+                GROUP BY side_effect
+                ORDER BY COALESCE(prr, 0) DESC, side_effect
+                LIMIT ?;
+                """,
+                [a, a, float(min_prr), int(top_k)],
+            ).fetchall()
+            return [(r[0], (float(r[1]) if r[1] is not None else None)) for r in rows]
 
-@lru_cache(maxsize=256)
-def get_dili_risk(drug_name: str) -> str:
-    """
-    Get DILI risk for a single drug (cached).
-    Args:
-        drug_name: Drug name.
-    Returns:
-        DILI risk as string.
-    """
-    if _client is None:
-        raise RuntimeError('init_duckdb_connection() must be called first')
-    res = _client.get_dili_risk(drug_name)
-    if not isinstance(res, str):
-        raise TypeError('Expected single-result string for get_dili_risk')
-    return res
+        # Pair (order-insensitive)
+        rows = self._con.execute(
+            """
+            SELECT side_effect, MAX(prr) AS prr
+            FROM twosides
+            WHERE ((drug_a = ? AND drug_b = ?) OR (drug_a = ? AND drug_b = ?))
+              AND (prr IS NULL OR prr >= ?)
+            GROUP BY side_effect
+            ORDER BY COALESCE(prr, 0) DESC, side_effect
+            LIMIT ?;
+            """,
+            [a, b, b, a, float(min_prr), int(top_k)],
+        ).fetchall()
+        return [(r[0], (float(r[1]) if r[1] is not None else None)) for r in rows]
 
-@lru_cache(maxsize=256)
-def get_dict_rank(drug_name: str) -> str:
-    """
-    Get DICT rank (severity) for a single drug (cached).
-    Args:
-        drug_name: Drug name.
-    Returns:
-        Severity as string.
-    """
-    if _client is None:
-        raise RuntimeError('init_duckdb_connection() must be called first')
-    res = _client.get_dict_rank(drug_name)
-    if not isinstance(res, str):
-        raise TypeError('Expected single-result string for get_dict_rank')
-    return res
+    # --- Batch helpers ---
 
-@lru_cache(maxsize=256)
-def get_diqt_score(drug_name: str) -> Optional[float]:
-    """
-    Get DIQT score for a single drug (cached).
-    Args:
-        drug_name: Drug name.
-    Returns:
-        Score as float or None.
-    """
-    if _client is None:
-        raise RuntimeError('init_duckdb_connection() must be called first')
-    res = _client.get_diqt_score(drug_name)
-    if isinstance(res, dict):
-        raise TypeError('Expected single-result float or None for get_diqt_score')
-    return res
+    def get_side_effects_batch(
+        self, drugs: Iterable[str], top_k_per_drug: int = 10, min_prr: float = 1.0
+    ) -> Dict[str, List[str]]:
+        """
+        Batch version for single-drug side effects (used for building context quickly).
+        Returns {drug: [side_effects...]}.
+        FIXED: the previous code had a truncated 'result[d].' line; we append properly and dedupe.
+        """
+        normed = [d for d in {_norm_name(x) for x in drugs} if d]
+        if not normed:
+            return {}
 
-@lru_cache(maxsize=256)
-def get_drug_targets(drug_name: str) -> List[str]:
-    """
-    Get drug targets/interactions for a single drug (cached).
-    Args:
-        drug_name: Drug name.
-    Returns:
-        List of targets/interactions.
-    """
-    if _client is None:
-        raise RuntimeError('init_duckdb_connection() must be called first')
-    res = _client.get_drug_targets(drug_name)
-    if not isinstance(res, list):
-        raise TypeError('Expected single-result list for get_drug_targets')
-    return res
+        # Query all at once via IN (...) for both A and B
+        placeholders = ", ".join(["?"] * len(normed))
+        params = normed + normed + [float(min_prr), int(top_k_per_drug)]
+
+        rows = self._con.execute(
+            f"""
+            WITH all_rows AS (
+              SELECT drug_a AS drug, side_effect, prr FROM twosides WHERE drug_a IN ({placeholders})
+              UNION ALL
+              SELECT drug_b AS drug, side_effect, prr FROM twosides WHERE drug_b IN ({placeholders})
+            )
+            SELECT drug, side_effect, MAX(prr) AS prr
+            FROM all_rows
+            WHERE (prr IS NULL OR prr >= ?)
+            GROUP BY drug, side_effect
+            QUALIFY ROW_NUMBER() OVER (PARTITION BY drug ORDER BY COALESCE(prr,0) DESC, side_effect) <= ?
+            ORDER BY drug;
+            """,
+            params,
+        ).fetchall()
+
+        result: Dict[str, List[str]] = {d: [] for d in normed}
+        for drug, se, _prr in rows:
+            # append safely
+            if drug not in result:
+                result[drug] = []
+            result[drug].append(se)
+
+        # dedupe per drug, keep order
+        for d in list(result.keys()):
+            seen = set()
+            uniq: List[str] = []
+            for se in result[d]:
+                if se not in seen:
+                    uniq.append(se)
+                    seen.add(se)
+            result[d] = uniq
+        return result

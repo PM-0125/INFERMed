@@ -1,6 +1,15 @@
 [theme]
-base = "light"
-primaryColor = "#0ea5e9"
-backgroundColor = "#f7fbff"
-secondaryBackgroundColor = "#ffffff"
-textColor = "#0b1736"
+# Medical-friendly color scheme inspired by DrugBank/PubChem
+primaryColor = "#1E88E5"  # Medical blue
+backgroundColor = "#F5F7FA"  # Light gray background
+secondaryBackgroundColor = "#FFFFFF"  # White cards
+textColor = "#1A1A1A"  # Dark text
+font = "sans serif"
+
+[server]
+headless = true
+enableCORS = false
+enableXsrfProtection = true
+
+[browser]
+gatherUsageStats = false

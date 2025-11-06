@@ -84,7 +84,6 @@ def _get_qlever_mechanistic_or_stub(drugA: str, drugB: str) -> Dict[str, Any]:
         if hasattr(ql, "get_mechanistic_enriched"):
             return ql.get_mechanistic_enriched(drugA, drugB)
     except Exception:
-        # fall through to basic
         pass
 
     # Then try basic
@@ -154,28 +153,44 @@ def retrieve_and_normalize(
     except Exception as e:
         caveats.append(f"DuckDB init failed: {e}")
 
+    # NEW: instantiate DuckDBClient for method-based API
+    db = dq.DuckDBClient(parquet_dir)
+
     a, b = drugA, drugB
 
     # 2) DuckDB: signals + DrugBank targets (PD fallback)
-    prr = dili_a = dili_b = dict_a = dict_b = None
+    prr_pair = None
+    dili_a = dili_b = dict_a = dict_b = None
     diqt_a = diqt_b = None
-    se_a: List[str] = []
-    se_b: List[str] = []
+    se_a_raw: List[tuple] = []
+    se_b_raw: List[tuple] = []
+    se_pair_raw: List[tuple] = []
     db_targets_a: List[str] = []
     db_targets_b: List[str] = []
 
     try:
-        prr          = dq.get_interaction_score(a, b)
-        dili_a       = dq.get_dili_risk(a) or "unknown"
-        dili_b       = dq.get_dili_risk(b) or "unknown"
-        dict_a       = dq.get_dict_rank(a) or "unknown"
-        dict_b       = dq.get_dict_rank(b) or "unknown"
-        diqt_a       = dq.get_diqt_score(a)
-        diqt_b       = dq.get_diqt_score(b)
-        se_a         = dq.get_side_effects(a)[:topk_side_effects]
-        se_b         = dq.get_side_effects(b)[:topk_side_effects]
-        db_targets_a = dq.get_drug_targets(a)  # list[str]
-        db_targets_b = dq.get_drug_targets(b)  # list[str]
+        # TwoSides side effects (single-drug & pair)
+        se_a_raw    = db.get_side_effects(a, top_k=topk_side_effects) or []
+        se_b_raw    = db.get_side_effects(b, top_k=topk_side_effects) or []
+        se_pair_raw = db.get_side_effects(a, b, top_k=topk_side_effects) or []
+
+        # Simple proxy for "pair PRR": take the maximum PRR observed among pair side effects
+        if se_pair_raw:
+            prrs = [p for (_, p) in se_pair_raw if p is not None]
+            prr_pair = max(prrs) if prrs else None
+
+        # Risk scores
+        dili_a = db.get_dilirank_score(a)  # float or None
+        dili_b = db.get_dilirank_score(b)
+        dict_a = db.get_dictrank_score(a)
+        dict_b = db.get_dictrank_score(b)
+        diqt_a = db.get_diqt_score(a)
+        diqt_b = db.get_diqt_score(b)
+
+        # DrugBank targets (PD fallback)
+        db_targets_a = db.get_drug_targets(a) or []
+        db_targets_b = db.get_drug_targets(b) or []
+
     except Exception as e:
         caveats.append(f"DuckDB retrieval failed: {e}")
 
@@ -222,13 +237,16 @@ def retrieve_and_normalize(
     faers_combo = _to_pairs_list(faers_combo)
 
     # 6) Build normalized context (matches llm_interface expectations)
-    # (post-synthesis contribution, kept for meta/debug)
     ql_contrib = _bool_qlever_contributed(mech)
 
     # Build caveats with explicit fallback note if QLever RAW contributed nothing
     caveats_agg = list(dict.fromkeys((qlev.get("caveats") or []) + caveats))
     if not ql_raw_contrib:
         caveats_agg.append("QLever mechanistic unavailable; using DuckDB DrugBank targets as PD fallback.")
+
+    # For UI/debug parity: keep side_effects as strings (not tuples)
+    side_effects_a = [t for (t, _p) in se_a_raw]
+    side_effects_b = [t for (t, _p) in se_b_raw]
 
     context: Dict[str, Any] = {
         "drugs": {
@@ -237,13 +255,13 @@ def retrieve_and_normalize(
         },
         "signals": {
             "tabular": {
-                "prr": prr,
-                "side_effects_a": se_a,
-                "side_effects_b": se_b,
-                "dili_a": dili_a or "unknown",
-                "dili_b": dili_b or "unknown",
-                "dict_a": dict_a or "unknown",
-                "dict_b": dict_b or "unknown",
+                "prr": prr_pair,                 # pair PRR proxy (max PRR among pair side-effects), may be None
+                "side_effects_a": side_effects_a,
+                "side_effects_b": side_effects_b,
+                "dili_a": dili_a if dili_a is not None else "unknown",
+                "dili_b": dili_b if dili_b is not None else "unknown",
+                "dict_a": dict_a if dict_a is not None else "unknown",
+                "dict_b": dict_b if dict_b is not None else "unknown",
                 "diqt_a": diqt_a,
                 "diqt_b": diqt_b,
             },
@@ -256,12 +274,11 @@ def retrieve_and_normalize(
         },
         "sources": {
             "duckdb": ["TwoSides", "DILIrank", "DICTRank", "DIQT", "DrugBank"],
-            # reflect QLever RAW contribution status
             "qlever": ["PubChem RDF via QLever"] if ql_raw_contrib else ["PubChem RDF via QLever (limited)"],
             "openfda": ["FAERS via OpenFDA (cached)"],
         },
         "caveats": caveats_agg,
-        "pkpd": _jsonify_sets(summarize_pkpd_risk(a, b, mech)),  # <-- JSON-safe PK/PD
+        "pkpd": _jsonify_sets(summarize_pkpd_risk(a, b, mech)),  # JSON-safe PK/PD
         "meta": {
             "drug_pair": f"{drugA}|{drugB}",
             "pair_key": _pair_key(drugA, drugB),
@@ -359,6 +376,7 @@ def run_rag(
     topk_faers: int = 10,
     topk_targets: int = 32,
     topk_pathways: int = 24,
+    model_name: Optional[str] = None,  # Override default model
 ) -> Dict[str, Any]:
     """High-level entry point the UI can call."""
     if use_cache_context:
@@ -384,13 +402,16 @@ def run_rag(
             topk_pathways=topk_pathways,
         )
 
+    # Use provided model_name or fall back to default
+    selected_model = model_name or LLM_MODEL_NAME
+
     if use_cache_response:
         answer = get_response_cached(
             context,
             mode=mode,
             seed=seed,
             temperature=temperature,
-            model_name=LLM_MODEL_NAME,
+            model_name=selected_model,
         )
     else:
         answer = generate_response(
@@ -399,6 +420,7 @@ def run_rag(
             seed=seed,
             temperature=temperature,
             history=history or [],
+            model_name=selected_model,
         )
 
     return {"context": context, "answer": answer}

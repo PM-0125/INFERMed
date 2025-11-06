@@ -7,10 +7,19 @@ import re
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
+# Try to load .env file if python-dotenv is available
+try:
+    from dotenv import load_dotenv
+    # Load .env from project root (go up from src/llm to project root)
+    env_path = os.path.join(os.path.dirname(__file__), "..", "..", ".env")
+    load_dotenv(env_path, override=False)  # Don't override existing env vars
+except ImportError:
+    pass  # python-dotenv not installed, skip
+
 # ========== Configuration ==========
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-MODEL_NAME = os.getenv("OLLAMA_MODEL", "mistral-nemo:12b")
-TIMEOUT_S = float(os.getenv("OLLAMA_TIMEOUT_S", "60"))
+MODEL_NAME = os.getenv("OLLAMA_MODEL", "gpt-oss")
+TIMEOUT_S = float(os.getenv("OLLAMA_TIMEOUT_S", "1000"))
 TEMPLATES_PATH = os.getenv(
     "PROMPT_TEMPLATES",
     os.path.join(os.path.dirname(__file__), "prompt_templates.txt"),
@@ -23,6 +32,46 @@ DECODE_DEFAULTS = {
     "top_p": 0.9,           # harmless if the model ignores it
     "repeat_penalty": 1.05, # harmless if the model ignores it
     "num_ctx": 8192,
+}
+
+# Allow unlimited tokens by default unless user overrides
+DEFAULT_NUM_PREDICT = int(os.getenv("OLLAMA_NUM_PREDICT", "-1"))  # -1 == unlimited for Ollama
+
+# -------- Minimal built-in templates (used only if file is missing) --------
+DEFAULT_TEMPLATES: Dict[str, str] = {
+    "DOCTOR": (
+        "[TEMPLATE:DOCTOR]\n"
+        "SYSTEM:\nYou are a clinical pharmacologist. Be specific, grounded, and actionable.\n\n"
+        "USER:\nEvaluate potential interactions between {{DRUG_A}} and {{DRUG_B}}.\n\n"
+        "CONTEXT:\n"
+        "- PK: {{PK_SUMMARY}}\n- PD: {{PD_SUMMARY}}\n- FAERS: {{FAERS_SUMMARY}}\n"
+        "- Risk flags: {{RISK_FLAGS}}\n- Evidence: {{EVIDENCE_TABLE}}\n"
+        "- Sources: {{SOURCES}}\n- Caveats: {{CAVEATS}}\n- History: {{HISTORY}}\n\n"
+        "RESPONSE STYLE:\n"
+        "1) Assessment\n2) Mechanism & rationale\n3) Expected clinical effects\n"
+        "4) Monitoring / actions\n5) Evidence & uncertainty\n"
+    ),
+    "PATIENT": (
+        "[TEMPLATE:PATIENT]\n"
+        "SYSTEM:\nYou are a trusted pharmacist counseling a patient. Be clear and calm.\n\n"
+        "USER:\nCan I take {{DRUG_A}} and {{DRUG_B}} together?\n\n"
+        "CONTEXT:\n"
+        "- What to know: {{PK_SUMMARY}} / {{PD_SUMMARY}}\n- Reports (associative): {{FAERS_SUMMARY}}\n"
+        "- Risk flags: {{RISK_FLAGS}}\n- Sources: {{SOURCES}}\n- Caveats: {{CAVEATS}}\n- History: {{HISTORY}}\n\n"
+        "RESPONSE STYLE:\n"
+        "Short answer; What to watch for; What to do; Extra notes.\n"
+    ),
+    "PHARMA": (
+        "[TEMPLATE:PHARMA]\n"
+        "SYSTEM:\nYou are preparing a pharmacovigilance risk brief for safety teams.\n\n"
+        "USER:\nPrepare a risk brief for {{DRUG_A}} + {{DRUG_B}}.\n\n"
+        "CONTEXT:\n"
+        "- PK: {{PK_SUMMARY}}\n- PD: {{PD_SUMMARY}}\n- FAERS: {{FAERS_SUMMARY}}\n"
+        "- Risk flags: {{RISK_FLAGS}}\n- Evidence: {{EVIDENCE_TABLE}}\n- Sources: {{SOURCES}}\n"
+        "- Caveats: {{CAVEATS}}\n- History: {{HISTORY}}\n\n"
+        "RESPONSE STYLE:\n"
+        "Overview; Evidence summary; Risk assessment; Recommendations; Limitations.\n"
+    ),
 }
 
 # ========== Templates loader ==========
@@ -55,9 +104,9 @@ def _load_templates(path: str) -> Dict[str, str]:
         blocks[current] = "\n".join(buf).strip()
     return blocks
 
-
-TEMPLATES = _load_templates(TEMPLATES_PATH)
-
+# Try to load from file first; fall back to built-ins if empty/missing
+_loaded = _load_templates(TEMPLATES_PATH)
+TEMPLATES = _loaded if _loaded else {k: v.split("\n", 1)[1].strip() for k, v in DEFAULT_TEMPLATES.items()}
 
 # ========== Public API ==========
 def generate_response(
@@ -66,8 +115,9 @@ def generate_response(
     *,
     seed: Optional[int] = None,
     temperature: float = 0.2,
-    max_tokens: int = 800,
+    max_tokens: Optional[int] = None,  # None => unlimited (or env override)
     history: Optional[List[Dict[str, str]]] = None,  # conversational history support
+    model_name: Optional[str] = None,  # Override default model
 ) -> Dict[str, Any]:
     """
     Call a local Ollama HTTP endpoint and return:
@@ -77,17 +127,24 @@ def generate_response(
     - Handles network/timeout errors via a safe fallback.
     - Avoids hallucinated sources by only using passed-in context.
     - Supports lightweight conversational history (list of {"role":"user"|"assistant", "text": str}).
+    - model_name: Optional model name override (defaults to OLLAMA_MODEL env var or "gpt-oss").
     """
     prompt = build_prompt(context or {}, mode, history=history)
+
+    # Use provided model_name, or fall back to environment/default
+    selected_model = model_name or MODEL_NAME
+
+    # Decide num_predict: explicit arg > env > unlimited (-1)
+    num_predict = int(max_tokens) if (max_tokens is not None) else DEFAULT_NUM_PREDICT
 
     payload_options = {
         **DECODE_DEFAULTS,
         "temperature": float(temperature),
-        "num_predict": int(max_tokens),
+        "num_predict": num_predict,
         **({"seed": int(seed)} if seed is not None else {}),
     }
     payload = {
-        "model": MODEL_NAME,
+        "model": selected_model,
         "prompt": prompt,
         "options": payload_options,
         "stream": False,
@@ -109,7 +166,7 @@ def generate_response(
                 "prompt_eval_count": data.get("prompt_eval_count"),
             },
             "meta": {
-                "model": MODEL_NAME,
+                "model": selected_model,
                 "temperature": temperature,
                 "seed": seed,
                 "ts": int(time.time()),
@@ -163,7 +220,7 @@ def build_prompt(
     # Grounding policy (auto-appended)
     policy = (
         "\n\n[POLICY]\n"
-        "- Base your answer primarily on the evidence listed under CONTEXT and Sources.\n"
+        "- Use ONLY the evidence listed under CONTEXT and Sources. Base your answer primarily on this evidence.\n"
         "- If FAERS has no items for a given section, say so explicitly (see instructions below).\n"
         "- You may add general, widely accepted clinical considerations "
         "(e.g. elderly are more sensitive to CNS depressants, renal impairment increases exposure of renally cleared drugs), "
@@ -190,21 +247,29 @@ def build_prompt(
 
 # ========== Template helpers ==========
 def _select_template(mode: str) -> str:
-    # Normalize and map common aliases
-    key = (mode or "").strip().lower()
-    if key in {"doc", "doctor", "physician", "clinician"}:
+    """
+    Resolve the template by mode (aliases allowed).
+    Fallback policy:
+      - Unknown mode -> DOCTOR tone
+      - Missing template body -> DOCTOR tone (built-in if file absent)
+    """
+    key_raw = (mode or "").strip().lower()
+    if key_raw in {"doc", "doctor", "physician", "clinician"}:
         key = "DOCTOR"
-    elif key in {"patient", "pt"}:
+    elif key_raw in {"patient", "pt"}:
         key = "PATIENT"
-    elif key in {"pharma", "pv", "safety"}:
+    elif key_raw in {"pharma", "pv", "safety", "pharmacovigilance", "pharmaceuticals"}:
         key = "PHARMA"
     else:
-        key = key.upper()
+        key = (mode or "").strip().upper() or "DOCTOR"
 
-    if key not in TEMPLATES:
-        # Safe default tone
-        key = "PATIENT"
-    return TEMPLATES.get(key, "")
+    # Prefer requested key; if not present, fall back to DOCTOR; if still missing, return any available
+    if key in TEMPLATES and TEMPLATES[key].strip():
+        return TEMPLATES[key]
+    if "DOCTOR" in TEMPLATES and TEMPLATES["DOCTOR"].strip():
+        return TEMPLATES["DOCTOR"]
+    # Absolute last resort: a tiny neutral template
+    return "SYSTEM:\nYou are a helpful assistant.\n\nUSER:\nProvide a grounded summary.\n\nCONTEXT:\n{{PK_SUMMARY}}\n{{PD_SUMMARY}}\n{{FAERS_SUMMARY}}\n"
 
 
 def _fill(template: str, **kwargs: str) -> str:
@@ -390,8 +455,6 @@ def _format_pk(ctx: Dict[str, Any]) -> Tuple[str, int, int]:
     - Priority is lower (i.e., more important) if there is a plausible enzyme overlap:
       A substrate X & B inhibitor X, or vice versa (and same for inducers).
     - Prefer precomputed context['pkpd']['pk_summary'] when present.
-    - If there is no clear overlap in the retrieved mechanistic data, we say so explicitly,
-      instead of forcing 'none detected' as a 'Key PK overlap'.
     """
     pkpd = (ctx.get("pkpd") or {})
     if pkpd.get("pk_summary"):

@@ -20,28 +20,38 @@ __all__ = [
 # Normalization utilities
 # --------------------------------------------------------------------------------------
 
-# Extendable synonym table for common CYPs (lowercased, whitespace-normalized)
+# Extendable synonym table for common CYPs & key Phase II/transporters (lowercased, whitespace/hyphen-normalized)
 _CYP_SYNONYMS: Dict[str, Set[str]] = {
-    "cyp3a4": {"cyp3a4", "cytochrome p450 3a4", "cyp 3a4", "p450 3a4"},
-    "cyp2c9": {"cyp2c9", "cytochrome p450 2c9", "cyp 2c9", "p450 2c9"},
-    "cyp2d6": {"cyp2d6", "cytochrome p450 2d6", "cyp 2d6", "p450 2d6"},
-    "cyp1a2": {"cyp1a2", "cytochrome p450 1a2", "cyp 1a2", "p450 1a2"},
-    "cyp2c19": {"cyp2c19", "cytochrome p450 2c19", "cyp 2c19", "p450 2c19"},
+    "cyp3a4":  {"cyp3a4", "cytochrome p450 3a4", "cyp 3a4", "p450 3a4"},
+    "cyp3a5":  {"cyp3a5", "cytochrome p450 3a5", "cyp 3a5", "p450 3a5"},
+    "cyp2c9":  {"cyp2c9", "cytochrome p450 2c9", "cyp 2c9", "p450 2c9"},
+    "cyp2d6":  {"cyp2d6", "cytochrome p450 2d6", "cyp 2d6", "p450 2d6"},
+    "cyp1a2":  {"cyp1a2", "cytochrome p450 1a2", "cyp 1a2", "p450 1a2"},
+    "cyp2c19": {"cyp2c19","cytochrome p450 2c19","cyp 2c19","p450 2c19"},
+    # UGT (phase II)
+    "ugt1a1":  {"ugt1a1","ugt 1a1","uridine diphospho glucuronosyltransferase 1a1"},
+    # Transporters
+    "abcb1":   {"abcb1","p gp","p-gp","pgp","p glycoprotein","p-glycoprotein","mdr1"},
+    "slco1b1": {"slco1b1","oatp1b1","oatp 1b1"},
+    "abcg2":   {"abcg2","bcrp","breast cancer resistance protein"},
 }
+# Flatten alias→canonical map
 _CANON_BY_ALIAS: Dict[str, str] = {
     alias: canon for canon, aliases in _CYP_SYNONYMS.items() for alias in aliases
 }
 
+_HYPHEN_SPACE = re.compile(r"[\s\-]+")
+
 def _norm_text(s: str) -> str:
-    """Lowercase, trim, collapse whitespace, Unicode NFKC normalize."""
+    """Lowercase, trim, collapse whitespace/hyphens, Unicode NFKC normalize."""
     s = unicodedata.normalize("NFKC", s or "")
     s = s.lower().strip()
-    s = re.sub(r"\s+", " ", s)
+    s = _HYPHEN_SPACE.sub(" ", s)
     return s
 
 def canonicalize_enzyme(name: str) -> str:
     """
-    Map an enzyme name/synonym to a canonical token when known (e.g., 'CYP3A4' → 'cyp3a4').
+    Map an enzyme/transporter name/synonym to a canonical token (e.g., 'P-gp' → 'abcb1').
     Unknown strings are normalized and returned as-is.
     """
     a = _norm_text(name)
@@ -61,7 +71,7 @@ def canonicalize_list(values: Iterable[Any], *, topk: int | None = None) -> List
     """
     Normalize a list of strings (or dicts with 'label'/'uri'):
       - stringify (dict label→uri→''),
-      - lowercase + trim + collapse spaces,
+      - lowercase + trim + collapse spaces/hyphens,
       - deduplicate preserving first occurrence,
       - optional topk cap.
     """
@@ -88,7 +98,7 @@ def extract_pk_roles(mech: Dict[str, Any]) -> Dict[str, Dict[str, Set[str]]]:
         'a': {'substrate': [...], 'inhibitor': [...], 'inducer': [...]},
         'b': {'substrate': [...], 'inhibitor': [...], 'inducer': [...]},
       }
-    produce canonical enzyme sets per role, per side.
+    produce canonical enzyme/transporters sets per role, per side.
     """
     ez = (mech or {}).get("enzymes", {}) or {}
     roles: Dict[str, Dict[str, Set[str]]] = {}
@@ -135,7 +145,7 @@ def pd_overlap(mech: Dict[str, Any], *, target_topk: int = 32, path_topk: int = 
     pb = set(canonicalize_list((mech or {}).get("pathways_b", []), topk=path_topk))
     common_targets = sorted(ta & tb)
     common_paths = sorted(pa & pb)
-    # A tiny heuristic score: equal weight targets and pathways, saturate at 10 each.
+    # Heuristic score: equal weight targets and pathways, saturate at 10 each.
     score = min(1.0, 0.5 * (len(common_targets) / 10.0) + 0.5 * (len(common_paths) / 10.0))
     return {"overlap_targets": common_targets, "overlap_pathways": common_paths, "pd_score": round(score, 3)}
 
