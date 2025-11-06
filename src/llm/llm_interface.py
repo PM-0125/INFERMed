@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 # ========== Configuration ==========
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-MODEL_NAME = os.getenv("OLLAMA_MODEL", "Elixpo/LlamaMedicine")
+MODEL_NAME = os.getenv("OLLAMA_MODEL", "mistral-nemo:12b")
 TIMEOUT_S = float(os.getenv("OLLAMA_TIMEOUT_S", "60"))
 TEMPLATES_PATH = os.getenv(
     "PROMPT_TEMPLATES",
@@ -130,23 +130,29 @@ def build_prompt(
     Build a mode-conditioned prompt from normalized context.
     Enforces:
       - Instruction-first templates.
-      - Explicit “No evidence from FAERS.” when blocks are empty.
+      - Explicit FAERS wording when blocks are empty.
       - Truncation policy prioritizing PK/PD overlaps → FAERS → rest.
       - Lightweight history framing so follow-ups stay grounded.
-      - Template placeholders supported:
-          {{DRUG_A}}, {{DRUG_B}}, {{PK_SUMMARY}}, {{PD_SUMMARY}},
-          {{FAERS_SUMMARY}}, {{RISK_FLAGS}}, {{EVIDENCE_TABLE}},
-          {{SOURCES}}, {{CAVEATS}}, {{USER_QUESTION}}, {{RAW_CONTEXT_JSON}}
+
+      Template placeholders supported:
+        {{DRUG_A}}, {{DRUG_B}}, {{PK_SUMMARY}}, {{PD_SUMMARY}},
+        {{FAERS_SUMMARY}}, {{RISK_FLAGS}}, {{EVIDENCE_TABLE}},
+        {{SOURCES}}, {{CAVEATS}}, {{USER_QUESTION}}, {{RAW_CONTEXT_JSON}},
+        {{HISTORY}}
     """
+    history = history or []
     tpl = _select_template(mode)
+
+    # Compact history (for MODE note + optional template usage)
+    hist_block, hist_flag = _format_history(history, budget_chars=1200)
+
+    # Summarize context blocks
     blocks = _summarize_context(context or {}, mode)
 
     # Inject optional extras used by templates
-    blocks["USER_QUESTION"] = _extract_user_question(context)
+    blocks["USER_QUESTION"] = _extract_user_question(context, history)
     blocks["RAW_CONTEXT_JSON"] = _compact_json(context, max_chars=3000)
-
-    # Optional conversation history (compact, role-tagged; clipped to budget)
-    hist_block, hist_flag = _format_history(history or [], budget_chars=1200)
+    blocks["HISTORY"] = hist_block or "No prior conversation."
 
     prompt = ""
     if hist_block:
@@ -157,10 +163,22 @@ def build_prompt(
     # Grounding policy (auto-appended)
     policy = (
         "\n\n[POLICY]\n"
-        "- Use ONLY the evidence listed under CONTEXT and Sources.\n"
-        "- If FAERS has no items, write exactly: 'No evidence from FAERS.'\n"
-        "- Do NOT mention external databases/guidelines unless present in Sources.\n"
-        "- Do NOT invent mechanisms, doses, or monitoring steps not supported by CONTEXT.\n"
+        "- Base your answer primarily on the evidence listed under CONTEXT and Sources.\n"
+        "- If FAERS has no items for a given section, say so explicitly (see instructions below).\n"
+        "- You may add general, widely accepted clinical considerations "
+        "(e.g. elderly are more sensitive to CNS depressants, renal impairment increases exposure of renally cleared drugs), "
+        "but clearly label these as general considerations.\n"
+        "- Do NOT propose specific numeric dose changes, percentage adjustments, titration schedules, "
+        "or explicit INR targets unless those exact numbers appear in CONTEXT. "
+        "Use qualitative language instead, such as 'dose reduction may be needed' or 'closer INR monitoring is advised'.\n"
+        "- Do NOT invent specific study results or guideline statements that are not supported by CONTEXT.\n"
+        "- Do NOT name specific alternative medicines unless they are explicitly mentioned in CONTEXT or Sources; "
+        "you may suggest drug classes instead (e.g. 'an antifungal with less CYP inhibition').\n"
+        "- If you mention a potential PK mechanism that is not clearly supported by the mechanistic evidence in CONTEXT "
+        "(e.g. a known CYP interaction from general pharmacology knowledge), "
+        "explicitly mark it as 'general pharmacology knowledge, not directly observed in the retrieved datasets'.\n"
+        "- Avoid contradictions: do not say 'no PK overlap' and then immediately describe a PK overlap. "
+        "If evidence is weak or conflicting, say 'PK overlap uncertain; possible mechanism is…'.\n"
     )
     prompt += policy
 
@@ -202,7 +220,9 @@ def _fill(template: str, **kwargs: str) -> str:
 
 
 # ========== History formatting ==========
-def _format_history(history: List[Dict[str, str]], budget_chars: int = 1200) -> Tuple[str, bool]:
+def _format_history(
+    history: List[Dict[str, str]], budget_chars: int = 1200
+) -> Tuple[str, bool]:
     """
     Turn a list of {"role": "user"|"assistant", "text": str} into a compact block.
     Clips from the front if over budget (keeps the most recent turns).
@@ -249,12 +269,22 @@ def _as_str_list(xs: Any) -> List[str]:
     return out
 
 
-def _extract_user_question(ctx: Dict[str, Any]) -> str:
-    q = (
-        ((ctx.get("meta") or {}).get("question"))
-        or ctx.get("query")
-        or ""
-    )
+def _extract_user_question(
+    ctx: Dict[str, Any], history: Optional[List[Dict[str, str]]] = None
+) -> str:
+    """
+    Prefer the last user message from history as the current question.
+    Fall back to context['meta']['question'] or ctx['query'].
+    """
+    history = history or []
+    for msg in reversed(history):
+        role = (msg.get("role") or "").lower()
+        if role.startswith("u"):  # user
+            t = (msg.get("text") or "").strip()
+            if t:
+                return t
+
+    q = ((ctx.get("meta") or {}).get("question")) or ctx.get("query") or ""
     return str(q).strip()
 
 
@@ -318,14 +348,22 @@ def _summarize_context(ctx: Dict[str, Any], mode: str) -> Dict[str, str]:
     mech = (ctx.get("signals", {}) or {}).get("mechanistic", {}) or {}
     faers = (ctx.get("signals", {}) or {}).get("faers", {}) or {}
     input_overflow = False
-    if len(mech.get("targets_a", []) or []) > 8: input_overflow = True
-    if len(mech.get("targets_b", []) or []) > 8: input_overflow = True
-    if len(mech.get("pathways_a", []) or []) > 6: input_overflow = True
-    if len(mech.get("pathways_b", []) or []) > 6: input_overflow = True
-    if len(mech.get("common_pathways", []) or []) > 8: input_overflow = True
-    if len(faers.get("top_reactions_a", []) or []) > 5: input_overflow = True
-    if len(faers.get("top_reactions_b", []) or []) > 5: input_overflow = True
-    if len(faers.get("combo_reactions", []) or []) > 5: input_overflow = True
+    if len(mech.get("targets_a", []) or []) > 8:
+        input_overflow = True
+    if len(mech.get("targets_b", []) or []) > 8:
+        input_overflow = True
+    if len(mech.get("pathways_a", []) or []) > 6:
+        input_overflow = True
+    if len(mech.get("pathways_b", []) or []) > 6:
+        input_overflow = True
+    if len(mech.get("common_pathways", []) or []) > 8:
+        input_overflow = True
+    if len(faers.get("top_reactions_a", []) or []) > 5:
+        input_overflow = True
+    if len(faers.get("top_reactions_b", []) or []) > 5:
+        input_overflow = True
+    if len(faers.get("combo_reactions", []) or []) > 5:
+        input_overflow = True
 
     def g(label: str, default: str = "(truncated or missing)") -> str:
         return kept.get(label, default)
@@ -348,9 +386,12 @@ def _summarize_context(ctx: Dict[str, Any], mode: str) -> Dict[str, str]:
 def _format_pk(ctx: Dict[str, Any]) -> Tuple[str, int, int]:
     """
     Return (text, length, priority).
-    Priority is lower (i.e., more important) if there is a plausible enzyme overlap:
+
+    - Priority is lower (i.e., more important) if there is a plausible enzyme overlap:
       A substrate X & B inhibitor X, or vice versa (and same for inducers).
-    Prefer precomputed context['pkpd']['pk_summary'] when present.
+    - Prefer precomputed context['pkpd']['pk_summary'] when present.
+    - If there is no clear overlap in the retrieved mechanistic data, we say so explicitly,
+      instead of forcing 'none detected' as a 'Key PK overlap'.
     """
     pkpd = (ctx.get("pkpd") or {})
     if pkpd.get("pk_summary"):
@@ -394,15 +435,21 @@ def _format_pk(ctx: Dict[str, Any]) -> Tuple[str, int, int]:
     inhib_overlap = (a_sub & b_inh) | (b_sub & a_inh)
     indu_overlap = (a_sub & b_ind) | (b_sub & a_ind)
 
-    overlaps = []
+    overlaps: List[str] = []
     if inhib_overlap:
         overlaps.append("inhibition at " + ", ".join(sorted(inhib_overlap)))
     if indu_overlap:
         overlaps.append("induction at " + ", ".join(sorted(indu_overlap)))
 
-    overlap_txt = ", ".join(overlaps) if overlaps else "none detected"
-    txt = f"{a_str}. {b_str}. Key PK overlap: {overlap_txt}"
-    prio = 0 if overlaps else 3  # stronger priority when overlaps exist
+    if overlaps:
+        overlap_txt = ", ".join(sorted(overlaps))
+        key_line = f"Key PK overlap in retrieved mechanistic data: {overlap_txt}"
+        prio = 0
+    else:
+        key_line = "No strong PK overlap detected in the retrieved mechanistic data."
+        prio = 3
+
+    txt = f"{a_str}. {b_str}. {key_line}"
     return txt, len(txt), prio
 
 
@@ -441,20 +488,37 @@ def _format_pd(ctx: Dict[str, Any]) -> Tuple[str, int, int]:
 
 def _format_faers(ctx: Dict[str, Any], limit: int = 5) -> Tuple[str, int]:
     """
-    Produce compact FAERS lines for A, B, and combo. If no data, say so explicitly.
+    Produce compact FAERS lines for A, B, and combo.
+    For single drugs, 'No FAERS data in the queried subset' is used when empty.
+    For the combination, distinguish 'no co-reports' from general 'no FAERS signals'.
     """
     faers = (ctx.get("signals", {}) or {}).get("faers", {}) or {}
 
-    def topfmt(key: str, label: str) -> str:
-        items = faers.get(key, []) or []
+    a_items = faers.get("top_reactions_a", []) or []
+    b_items = faers.get("top_reactions_b", []) or []
+    combo_items = faers.get("combo_reactions", []) or []
+
+    def fmt_single(label: str, items: List[Tuple[str, int]]) -> str:
         if not items:
-            return f"{label}: No evidence from FAERS."
+            return f"{label}: No FAERS data in the queried subset."
         top = ", ".join([f"{term} (n={cnt})" for term, cnt in items[:limit]])
         return f"{label}: {top}"
 
-    a = topfmt("top_reactions_a", "Drug A")
-    b = topfmt("top_reactions_b", "Drug B")
-    combo = topfmt("combo_reactions", "Combo")
+    a = fmt_single("Drug A", a_items)
+    b = fmt_single("Drug B", b_items)
+
+    if combo_items:
+        combo = "Combo: " + ", ".join(
+            [f"{term} (n={cnt})" for term, cnt in combo_items[:limit]]
+        )
+    else:
+        if a_items or b_items:
+            combo = (
+                "Combo: No specific FAERS co-reports for this pair were found "
+                "in the subset queried; adverse events are derived from single-drug reports."
+            )
+        else:
+            combo = "Combo: No FAERS data in the queried subset for either drug."
 
     txt = " | ".join([a, b, combo])
     return txt, len(txt)
