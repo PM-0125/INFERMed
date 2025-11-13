@@ -192,6 +192,32 @@ def convert_drugbank_xml(xml_path: str, out_parquet: str, xsd_path: Optional[str
                 acts = t.xpath(".//db:actions/db:action/text()", namespaces=NS)
                 target_actions.extend([_norm_name_lower(a) for a in acts if a])
 
+            # Extract enzyme data (NEW) - store as enzyme->actions mapping
+            # Each enzyme can have multiple actions, so we store as JSON-like structure
+            # Format: [{"enzyme": "CYP3A4", "actions": ["substrate", "inhibitor"]}, ...]
+            enzyme_data = []
+            for e in el.xpath(".//db:enzymes/db:enzyme", namespaces=NS):
+                ename = _xp(e, "./db:name/text()")
+                if ename:
+                    # Get enzyme actions (substrate, inhibitor, inducer) for THIS enzyme
+                    eacts = e.xpath(".//db:actions/db:action/text()", namespaces=NS)
+                    actions = [_norm_name_lower(a) for a in eacts if a]
+                    if actions:
+                        enzyme_data.append({"enzyme": _norm_name(ename), "actions": actions})
+                    else:
+                        # If no actions specified, still record the enzyme
+                        enzyme_data.append({"enzyme": _norm_name(ename), "actions": []})
+            
+            # For backward compatibility, also store as flat lists
+            enzymes = [ed["enzyme"] for ed in enzyme_data]
+            enzyme_actions = []
+            for ed in enzyme_data:
+                enzyme_actions.extend(ed["actions"])  # Flatten all actions
+            # Also store structured data as JSON string for proper mapping
+            import json
+            # Always create JSON string, even if empty list (for consistency)
+            enzyme_action_map = json.dumps(enzyme_data) if enzyme_data else json.dumps([])
+
             ddi_names = el.xpath(".//db:drug-interactions/db:drug-interaction/db:name/text()", namespaces=NS)
             interactions = [_norm_name(x) for x in ddi_names if x]
 
@@ -204,6 +230,8 @@ def convert_drugbank_xml(xml_path: str, out_parquet: str, xsd_path: Optional[str
                 "targets": sorted(set([t for t in targets if t])),
                 "target_uniprot": sorted(set([u for u in target_uniprot if u])),
                 "target_actions": sorted(set([a for a in target_actions if a])),
+                "enzymes": sorted(set([e for e in enzymes if e])),  # NEW
+                "enzyme_actions": sorted(set([a for a in enzyme_actions if a])),  # NEW
                 "interactions": sorted(set([i for i in interactions if i])),
             })
 
@@ -263,6 +291,27 @@ def convert_drugbank_xml(xml_path: str, out_parquet: str, xsd_path: Optional[str
                            [a.text for a in t.xpath(".//actions/action") if a is not None and a.text]
                     target_actions.extend([_norm_name_lower(a) for a in acts if a])
 
+                # Extract enzyme data with proper mapping (same as lxml path)
+                enzyme_data = []
+                e_nodes = el.xpath(".//db:enzymes/db:enzyme", namespaces=nsmap) or el.xpath(".//enzymes/enzyme")
+                for e in e_nodes:
+                    ename = _xp(e, "./db:name/text()") or (e.find("./name") is not None and e.find("./name").text)
+                    if ename:
+                        eacts = e.xpath(".//db:actions/db:action/text()", namespaces=nsmap) or \
+                               [a.text for a in e.xpath(".//actions/action") if a is not None and a.text]
+                        actions = [_norm_name_lower(a) for a in eacts if a]
+                        if actions:
+                            enzyme_data.append({"enzyme": _norm_name(ename), "actions": actions})
+                        else:
+                            enzyme_data.append({"enzyme": _norm_name(ename), "actions": []})
+                
+                enzymes = [ed["enzyme"] for ed in enzyme_data]
+                enzyme_actions = []
+                for ed in enzyme_data:
+                    enzyme_actions.extend(ed["actions"])
+                import json
+                enzyme_action_map = json.dumps(enzyme_data) if enzyme_data else None
+                
                 ddi_names = el.xpath(".//db:drug-interactions/db:drug-interaction/db:name/text()", namespaces=nsmap) or \
                             [n.text for n in el.xpath(".//drug-interactions/drug-interaction/name") if n is not None and n.text]
                 interactions = [_norm_name(x) for x in ddi_names if x]
@@ -276,6 +325,9 @@ def convert_drugbank_xml(xml_path: str, out_parquet: str, xsd_path: Optional[str
                     "targets": sorted(set([t for t in targets if t])),
                     "target_uniprot": sorted(set([u for u in target_uniprot if u])),
                     "target_actions": sorted(set([a for a in target_actions if a])),
+                    "enzymes": sorted(set([e for e in enzymes if e])),
+                    "enzyme_actions": sorted(set([a for a in enzyme_actions if a])),
+                    "enzyme_action_map": enzyme_action_map,  # Structured mapping
                     "interactions": sorted(set([i for i in interactions if i])),
                 })
 
@@ -344,6 +396,28 @@ def convert_drugbank_xml(xml_path: str, out_parquet: str, xsd_path: Optional[str
                 acts = [a.text for a in _findall(t, ".//{"+db_ns+"}action", ".//action") if a is not None and a.text]
                 target_actions.extend([_norm_name_lower(a) for a in acts if a])
 
+            # Extract enzyme data (NEW) - store as enzyme->actions mapping
+            enzyme_data = []
+            e_nodes = _findall(el, ".//{"+db_ns+"}enzymes/{"+db_ns+"}enzyme", ".//enzymes/enzyme")
+            for e in e_nodes:
+                en = _find(e, ".//{"+db_ns+"}name", "name")
+                ename = _norm_name(en.text) if (en is not None and en.text) else None
+                if ename:
+                    eacts = [a.text for a in _findall(e, ".//{"+db_ns+"}action", ".//action") if a is not None and a.text]
+                    actions = [_norm_name_lower(a) for a in eacts if a]
+                    if actions:
+                        enzyme_data.append({"enzyme": ename, "actions": actions})
+                    else:
+                        enzyme_data.append({"enzyme": ename, "actions": []})
+            
+            enzymes = [ed["enzyme"] for ed in enzyme_data]
+            enzyme_actions = []
+            for ed in enzyme_data:
+                enzyme_actions.extend(ed["actions"])
+            import json
+            # Always create JSON string, even if empty list (for consistency)
+            enzyme_action_map = json.dumps(enzyme_data) if enzyme_data else json.dumps([])
+
             interactions = []
             ddi_nodes = _findall(
                 el,
@@ -363,6 +437,8 @@ def convert_drugbank_xml(xml_path: str, out_parquet: str, xsd_path: Optional[str
                 "targets": sorted(set([t for t in targets if t])),
                 "target_uniprot": sorted(set([u for u in target_uniprot if u])),
                 "target_actions": sorted(set([a for a in target_actions if a])),
+                "enzymes": sorted(set([e for e in enzymes if e])),  # NEW
+                "enzyme_actions": sorted(set([a for a in enzyme_actions if a])),  # NEW
                 "interactions": sorted(set([i for i in interactions if i])),
             })
 
@@ -381,14 +457,23 @@ def convert_drugbank_xml(xml_path: str, out_parquet: str, xsd_path: Optional[str
     # Assemble DataFrame and ensure all expected columns exist
     expected = [
         "drugbank_id","name","name_lower","synonyms","atc_codes",
-        "targets","target_uniprot","target_actions","interactions"
+        "targets","target_uniprot","target_actions","enzymes","enzyme_actions","enzyme_action_map","interactions"
     ]
     df = pd.DataFrame.from_records(records)
     for c in expected:
         if c not in df.columns:
-            df[c] = [] if c in {"synonyms","atc_codes","targets","target_uniprot","target_actions","interactions"} else None
-    for col in ["synonyms","atc_codes","targets","target_uniprot","target_actions","interactions"]:
+            df[c] = [] if c in {"synonyms","atc_codes","targets","target_uniprot","target_actions","enzymes","enzyme_actions","interactions"} else None
+    for col in ["synonyms","atc_codes","targets","target_uniprot","target_actions","enzymes","enzyme_actions","interactions"]:
         df[col] = df[col].apply(_to_list)
+    # enzyme_action_map is JSON string (VARCHAR), not a list - ensure it's stored as string
+    if "enzyme_action_map" not in df.columns:
+        df["enzyme_action_map"] = "[]"  # Default to empty JSON array string
+    else:
+        # Ensure enzyme_action_map is stored as string (VARCHAR) not converted to other types
+        # Replace None/NaN with empty JSON array string
+        df["enzyme_action_map"] = df["enzyme_action_map"].fillna("[]").astype(str)
+        df.loc[df["enzyme_action_map"] == "None", "enzyme_action_map"] = "[]"
+        df.loc[df["enzyme_action_map"] == "nan", "enzyme_action_map"] = "[]"
 
     Path(out_parquet).parent.mkdir(parents=True, exist_ok=True)
     df.to_parquet(out_parquet, index=False)
@@ -497,39 +582,69 @@ def convert_twosides_csv(csv_path: str, out_parquet: str) -> None:
 def convert_dictrank_excel(xlsx_path: str, out_parquet: str) -> None:
     """
     Normalizes to: drug_name, score
-    Picks first non-empty name-like column and first numeric score-like column.
+    DICTRank uses categorical severity levels (mild, moderate, severe) which we convert to numeric scores.
+    Uses 'Generic/Proper Name(s)' for drug names and 'DIC Severity Level' for severity.
     """
     p = Path(xlsx_path)
     assert p.exists(), f"Excel not found: {xlsx_path}"
 
     df = pd.read_excel(p, sheet_name=0)
-    name_col = _choose_first_nonnull(df, [c for c in df.columns if re.search(r"(drug|name)", c, re.I)])
-    score_col = _choose_first_nonnull(df, [c for c in df.columns if re.search(r"(score|rank|prob|dict)", c, re.I)])
-
+    
+    # Prefer 'Generic/Proper Name(s)' for drug name
+    name_col = None
+    for col in ["Generic/Proper Name(s)", "Generic/Proper Name", "drug_name", "name"]:
+        if col in df.columns:
+            name_col = col
+            break
     if name_col is None:
+        # Fallback to first object column
         for c in df.columns:
             if df[c].dtype == object:
                 name_col = c
                 break
-    if score_col is None:
-        for c in df.columns:
-            if _is_numeric_series(df[c]):
-                score_col = c
-                break
-
-    if name_col is None or score_col is None:
-        raise ValueError(f"DICTRank: Could not infer columns from {list(df.columns)}")
-
+    
+    # Look for severity level column (categorical: mild, moderate, severe)
+    severity_col = None
+    for col in ["DIC Severity Level", "Severity Level", "Severity", "DICT _ Concern"]:
+        if col in df.columns:
+            severity_col = col
+            break
+    
+    if name_col is None:
+        raise ValueError(f"DICTRank: Could not infer name column from {list(df.columns)}")
+    
+    # Convert severity levels to numeric scores
+    severity_map = {
+        "mild": 0.1,
+        "moderate": 0.4,
+        "severe": 0.7,
+        "less": 0.2,
+        "most": 0.8,
+        "no": 0.0,
+    }
+    
     out = pd.DataFrame(
         {
             "drug_name": df[name_col].map(_norm_name_lower),
-            "score": pd.to_numeric(df[score_col], errors="coerce"),
         }
-    ).dropna(subset=["drug_name"])
+    )
+    
+    if severity_col and severity_col in df.columns:
+        # Map categorical severity to numeric score
+        severity_series = df[severity_col].astype(str).str.lower().str.strip()
+        out["score"] = severity_series.map(severity_map)
+        # Replace NaN with None (for parquet compatibility)
+        out["score"] = out["score"].where(out["score"].notna(), None)
+    else:
+        # No severity column found, set all to None
+        out["score"] = None
+        print(f"[WARN] DICTRank: No severity column found, all scores will be None")
+    
+    out = out.dropna(subset=["drug_name"])
 
     Path(out_parquet).parent.mkdir(parents=True, exist_ok=True)
     out.to_parquet(out_parquet, index=False)
-    print(f"[OK] DICTRank → {out_parquet}  (rows={len(out)})")
+    print(f"[OK] DICTRank → {out_parquet}  (rows={len(out)}, with_score={out['score'].notna().sum()})")
 
 ################################################################################
 # DILIRank Excel → Parquet
@@ -538,39 +653,79 @@ def convert_dictrank_excel(xlsx_path: str, out_parquet: str) -> None:
 def convert_dilirank_excel(xlsx_path: str, out_parquet: str) -> None:
     """
     Normalizes to: drug_name, dili_score
-    Picks first name-like and first numeric column by heuristic.
+    DILIRank file has headers in first row, data starts from row 2.
+    Column 'Unnamed: 1' contains compound names, 'Unnamed: 2' contains severity scores (numeric).
     """
     p = Path(xlsx_path)
     assert p.exists(), f"Excel not found: {xlsx_path}"
 
-    df = pd.read_excel(p, sheet_name=0)
-
-    name_col = _choose_first_nonnull(df, [c for c in df.columns if re.search(r"(drug|name)", c, re.I)])
-    score_col = _choose_first_nonnull(df, [c for c in df.columns if re.search(r"(dili|score|rank|severity)", c, re.I)])
+    # Read Excel, skip first row which contains headers
+    df = pd.read_excel(p, sheet_name=0, header=0)
+    
+    # The file structure: first row has headers like "Compound Name", "Severity Class"
+    # Actual data starts from row 1 (0-indexed)
+    # Column 'Unnamed: 1' = Compound Name, 'Unnamed: 2' = Severity Class (numeric)
+    
+    # Check if first row contains headers
+    first_row = df.iloc[0] if len(df) > 0 else None
+    if first_row is not None and isinstance(first_row.iloc[1] if len(first_row) > 1 else None, str):
+        # First row is headers, skip it
+        df = df.iloc[1:].reset_index(drop=True)
+        # Rename columns based on what we know
+        if 'Unnamed: 1' in df.columns:
+            df = df.rename(columns={'Unnamed: 1': 'compound_name'})
+        if 'Unnamed: 2' in df.columns:
+            df = df.rename(columns={'Unnamed: 2': 'severity_class'})
+    
+    # Find name column (should be 'compound_name' or 'Unnamed: 1' or first object column)
+    name_col = None
+    for col in ["compound_name", "Compound Name", "Unnamed: 1"]:
+        if col in df.columns:
+            name_col = col
+            break
     if name_col is None:
+        # Find first object column that looks like names
         for c in df.columns:
-            if df[c].dtype == object:
-                name_col = c
-                break
+            if df[c].dtype == object and df[c].notna().sum() > 0:
+                # Check if it's not a header row value
+                sample = df[c].dropna().iloc[0] if df[c].notna().any() else None
+                if sample and isinstance(sample, str) and sample.lower() not in ["compound name", "severity class", "label section"]:
+                    name_col = c
+                    break
+    
+    # Find score column (should be 'severity_class' or 'Unnamed: 2' or first numeric column)
+    score_col = None
+    for col in ["severity_class", "Severity Class", "Unnamed: 2"]:
+        if col in df.columns:
+            score_col = col
+            break
     if score_col is None:
+        # Find first numeric column
         for c in df.columns:
             if _is_numeric_series(df[c]):
                 score_col = c
                 break
-
-    if name_col is None or score_col is None:
-        raise ValueError(f"DILIRank: Could not infer columns from {list(df.columns)}")
+    
+    if name_col is None:
+        raise ValueError(f"DILIRank: Could not infer name column from {list(df.columns)}")
+    if score_col is None:
+        raise ValueError(f"DILIRank: Could not infer score column from {list(df.columns)}")
 
     out = pd.DataFrame(
         {
             "drug_name": df[name_col].map(_norm_name_lower),
             "dili_score": pd.to_numeric(df[score_col], errors="coerce"),
         }
-    ).dropna(subset=["drug_name"])
+    )
+    
+    # Remove rows where drug_name is a header value
+    header_values = {"compound name", "severity class", "label section", "vdiliconcern", "version"}
+    out = out[~out["drug_name"].isin(header_values)]
+    out = out.dropna(subset=["drug_name"])
 
     Path(out_parquet).parent.mkdir(parents=True, exist_ok=True)
     out.to_parquet(out_parquet, index=False)
-    print(f"[OK] DILIRank → {out_parquet}  (rows={len(out)})")
+    print(f"[OK] DILIRank → {out_parquet}  (rows={len(out)}, with_score={out['dili_score'].notna().sum()})")
 
 ################################################################################
 # DIQT Excel (wide → tidy) → Parquet
@@ -578,13 +733,8 @@ def convert_dilirank_excel(xlsx_path: str, out_parquet: str) -> None:
 
 def convert_diqt_excel(xlsx_path: str, out_parquet: str) -> None:
     """
-    Converts DIQT Excel (often wide with a 'drug name' column and many numeric columns)
-    into tidy two-column parquet: drug_name, score.
-
-    Strategy:
-      - Identify the primary name column (first object-like col or one matching '(drug|name)').
-      - Identify all numeric columns.
-      - Melt to long format and aggregate by drug_name using MAX (conservative).
+    Converts DIQT Excel into tidy two-column parquet: drug_name, score.
+    Uses 'Generic/Proper_Name(s)' for drug names and 'Severity Score' for scores.
     """
     p = Path(xlsx_path)
     assert p.exists(), f"Excel not found: {xlsx_path}"
@@ -593,38 +743,63 @@ def convert_diqt_excel(xlsx_path: str, out_parquet: str) -> None:
     if df.empty:
         raise ValueError("DIQT: empty sheet")
 
-    name_col = _choose_first_nonnull(df, [c for c in df.columns if re.search(r"(drug|name)", c, re.I)])
+    # Prefer 'Generic/Proper_Name(s)' for drug name
+    name_col = None
+    for col in ["Generic/Proper_Name(s)", "Generic/Proper Name(s)", "Generic/Proper Name", "drug_name", "name"]:
+        if col in df.columns:
+            name_col = col
+            break
     if name_col is None:
         obj_cols = [c for c in df.columns if df[c].dtype == object]
         name_col = obj_cols[0] if obj_cols else df.columns[0]
 
-    num_cols = [c for c in df.columns if c != name_col and _is_numeric_series(df[c])]
-    if not num_cols:
+    # Prefer 'Severity Score' column
+    score_col = None
+    for col in ["Severity Score", "score", "Score"]:
+        if col in df.columns:
+            score_col = col
+            break
+    
+    if score_col is None:
+        # Fallback: find first numeric column that's not Pubchem_ID
+        num_cols = [c for c in df.columns if c != name_col and c != "Pubchem_ID" and _is_numeric_series(df[c])]
+        if num_cols:
+            score_col = num_cols[0]
+    
+    if score_col is None:
+        # Last resort: try to convert columns to numeric
         for c in df.columns:
-            if c != name_col:
+            if c != name_col and c != "Pubchem_ID":
                 try:
-                    df[c] = pd.to_numeric(df[c], errors="coerce")
+                    numeric_series = pd.to_numeric(df[c], errors="coerce")
+                    if numeric_series.notna().sum() > 0:
+                        score_col = c
+                        break
                 except Exception:
                     pass
-        num_cols = [c for c in df.columns if c != name_col and _is_numeric_series(df[c])]
 
-    if not num_cols:
+    if score_col is None:
         raise ValueError(f"DIQT: no numeric score columns found. Columns={list(df.columns)}")
 
-    long = df[[name_col] + num_cols].copy()
-    long[name_col] = long[name_col].map(_norm_name_lower)
-    long = long.melt(id_vars=[name_col], value_vars=num_cols, var_name="metric", value_name="score")
-    long = long.dropna(subset=[name_col, "score"])
-
-    out = (
-        long.groupby(name_col, as_index=False)["score"]
-        .max()
-        .rename(columns={name_col: "drug_name"})
-    )
+    # Extract drug name (may have extra text in parentheses, e.g., "Astemizole (Hismanal)")
+    def extract_drug_name(s):
+        if pd.isna(s):
+            return None
+        s = str(s)
+        # Remove content in parentheses if present
+        s = re.sub(r'\s*\([^)]*\)', '', s)
+        return _norm_name_lower(s)
+    
+    out = pd.DataFrame(
+        {
+            "drug_name": df[name_col].map(extract_drug_name),
+            "score": pd.to_numeric(df[score_col], errors="coerce"),
+        }
+    ).dropna(subset=["drug_name", "score"])  # Only keep rows with both name and score
 
     Path(out_parquet).parent.mkdir(parents=True, exist_ok=True)
     out.to_parquet(out_parquet, index=False)
-    print(f"[OK] DIQT → {out_parquet}  (rows={len(out)})")
+    print(f"[OK] DIQT → {out_parquet}  (rows={len(out)}, with_score={out['score'].notna().sum()})")
 
 ################################################################################
 # CLI

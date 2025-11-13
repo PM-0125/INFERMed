@@ -19,7 +19,7 @@ from src.llm.rag_pipeline import (
     run_rag,                 # uses get_response_cached internally when use_cache_response=True
     clear_context_cache,     # to clear disk cache for a pair
 )
-from src.llm.llm_interface import generate_response  # used for follow-ups when context is already present
+from src.llm.llm_interface import generate_response, OLLAMA_HOST  # used for follow-ups when context is already present
 
 
 # =========================
@@ -114,6 +114,181 @@ def _inject_custom_css():
     </style>
     """
     st.markdown(css, unsafe_allow_html=True)
+    
+    # Add JavaScript to fix form accessibility issues - handles empty attributes too
+    accessibility_js = """
+    <script>
+    (function() {
+        // Fix form fields with missing or empty id/name attributes and autocomplete
+        function fixFormAccessibility() {
+            // Find ALL input, select, and textarea elements (including those with empty attributes)
+            const formFields = document.querySelectorAll('input, select, textarea');
+            
+            formFields.forEach((field, index) => {
+                // Fix empty or missing name attribute
+                const currentName = field.getAttribute('name');
+                if (!currentName || currentName.trim() === '') {
+                    // Use existing id if available, otherwise generate one
+                    if (!field.id || field.id.trim() === '') {
+                        const fieldType = field.tagName.toLowerCase();
+                        const ariaLabel = field.getAttribute('aria-label') || '';
+                        const placeholder = field.getAttribute('placeholder') || '';
+                        const identifier = (ariaLabel || placeholder || 'field').replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
+                        field.id = `streamlit_${fieldType}_${identifier}_${index}_${Date.now()}`;
+                    }
+                    field.name = field.id;
+                }
+                
+                // Fix empty autocomplete attributes (empty string is invalid)
+                const currentAutocomplete = field.getAttribute('autocomplete');
+                if (currentAutocomplete !== null && currentAutocomplete.trim() === '') {
+                    // Infer autocomplete value from context
+                    const inputType = (field.type || '').toLowerCase();
+                    const placeholder = (field.placeholder || '').toLowerCase();
+                    const ariaLabel = (field.getAttribute('aria-label') || '').toLowerCase();
+                    const label = field.closest('.stTextInput, .stNumberInput, .stSelectbox')?.textContent?.toLowerCase() || '';
+                    const context = `${placeholder} ${ariaLabel} ${label}`.toLowerCase();
+                    
+                    let autocompleteValue = 'off'; // Default
+                    
+                    if (inputType === 'email' || context.includes('email')) {
+                        autocompleteValue = 'email';
+                    } else if (inputType === 'tel' || context.includes('phone') || context.includes('tel')) {
+                        autocompleteValue = 'tel';
+                    } else if (context.includes('name') && !context.includes('model') && !context.includes('drug')) {
+                        autocompleteValue = 'name';
+                    } else if (context.includes('search')) {
+                        autocompleteValue = 'off';
+                    } else if (inputType === 'number' || field.type === 'number') {
+                        autocompleteValue = 'off';
+                    } else {
+                        // For drug names, model names, etc. - use 'off' to prevent autocomplete
+                        autocompleteValue = 'off';
+                    }
+                    
+                    field.setAttribute('autocomplete', autocompleteValue);
+                }
+            });
+            
+            // Fix labels not associated with form fields
+            const labels = document.querySelectorAll('label');
+            labels.forEach((label, index) => {
+                const labelFor = label.getAttribute('for');
+                if (!labelFor || labelFor.trim() === '') {
+                    // Try to find associated input
+                    const input = label.querySelector('input, select, textarea');
+                    if (input) {
+                        if (!input.id || input.id.trim() === '') {
+                            input.id = `streamlit_label_input_${index}_${Date.now()}`;
+                        }
+                        label.setAttribute('for', input.id);
+                    }
+                }
+            });
+        }
+        
+        // Run immediately and on page load
+        fixFormAccessibility();
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', fixFormAccessibility);
+        }
+        
+        // Run after Streamlit reruns (more aggressive monitoring)
+        const observer = new MutationObserver(function() {
+            setTimeout(fixFormAccessibility, 50);
+        });
+        
+        observer.observe(document.body, {
+            childList: true,
+            subtree: true,
+            attributes: true,
+            attributeFilter: ['name', 'autocomplete', 'id']
+        });
+        
+        // Also listen for Streamlit's render events
+        window.addEventListener('load', fixFormAccessibility);
+    })();
+    </script>
+    """
+    st.markdown(accessibility_js, unsafe_allow_html=True)
+
+
+def _expand_sidebar_button():
+    """Add JavaScript to auto-expand sidebar and handle sidebar state."""
+    # Use a more aggressive approach that works with Streamlit's iframe structure
+    expand_js = """
+    <script>
+    (function() {
+        function expandSidebar() {
+            // Method 1: Try to find and click the toggle button in the parent frame
+            try {
+                // Streamlit runs in an iframe, so we need to access the parent
+                const parentWindow = window.parent || window;
+                
+                // Try multiple selectors for the sidebar toggle button
+                const selectors = [
+                    '[data-testid="stSidebarCollapseButton"]',
+                    '[aria-label*="sidebar"]',
+                    'button[aria-label*="Close"]',
+                    'button[aria-label*="Open"]',
+                    '.css-1d391kg button',
+                    '[class*="sidebar"] button'
+                ];
+                
+                for (const selector of selectors) {
+                    const btn = parentWindow.document.querySelector(selector);
+                    if (btn && btn.offsetParent !== null) {
+                        btn.click();
+                        console.log('Clicked sidebar toggle via selector:', selector);
+                        return true;
+                    }
+                }
+                
+                // Method 2: Directly manipulate sidebar
+                const sidebar = parentWindow.document.querySelector('[data-testid="stSidebar"]');
+                if (sidebar) {
+                    sidebar.style.display = 'block';
+                    sidebar.style.visibility = 'visible';
+                    sidebar.setAttribute('aria-expanded', 'true');
+                    sidebar.classList.remove('collapsed');
+                    console.log('Manually expanded sidebar');
+                    return true;
+                }
+                
+                // Method 3: Update localStorage in parent window
+                try {
+                    parentWindow.localStorage.setItem('sidebarState', 'expanded');
+                    parentWindow.localStorage.removeItem('sidebarCollapsed');
+                    console.log('Updated localStorage');
+                } catch(e) {
+                    console.log('Could not update localStorage:', e);
+                }
+            } catch(e) {
+                console.error('Error expanding sidebar:', e);
+            }
+            return false;
+        }
+        
+        // Try immediately
+        setTimeout(expandSidebar, 100);
+        
+        // Also try on various events
+        ['load', 'DOMContentLoaded', 'streamlit:render'].forEach(event => {
+            window.addEventListener(event, function() {
+                setTimeout(expandSidebar, 200);
+            });
+        });
+        
+        // Listen for Streamlit events
+        if (window.parent && window.parent.postMessage) {
+            window.parent.postMessage({
+                type: 'streamlit:expandSidebar'
+            }, '*');
+        }
+    })();
+    </script>
+    """
+    st.markdown(expand_js, unsafe_allow_html=True)
 
 
 def _pair_key(a: str, b: str) -> Tuple[str, str]:
@@ -178,7 +353,11 @@ def _render_header():
         page_title=f"{APP_TITLE} — Drug Interaction Analysis",
         layout="wide",
         initial_sidebar_state="expanded",
-        menu_items={'Get Help': None, 'Report a bug': None, 'About': "INFERMed: PK/PD-aware RAG DDI Explainer"}
+        menu_items={
+            'Get Help': 'https://github.com/your-repo/issues',
+            'Report a bug': 'https://github.com/your-repo/issues',
+            'About': "INFERMed: PK/PD-aware RAG DDI Explainer\n\nIf the sidebar is hidden, look for the expander below with instructions."
+        }
     )
     _inject_custom_css()
 
@@ -191,6 +370,39 @@ def _render_header():
     with col2:
         st.title("INFERMed")
         st.caption("**PK/PD-aware Drug-Drug Interaction Analysis** · Powered by RAG, FAERS, and Clinical Evidence")
+    
+
+def _fetch_ollama_models() -> List[str]:
+    """
+    Fetch available models from Ollama API.
+    Returns list of model names, or empty list if Ollama is unavailable.
+    Uses session state to cache the result.
+    """
+    # Check if we have cached models in session state
+    if "ollama_models_cache" in st.session_state:
+        return st.session_state.ollama_models_cache
+    
+    try:
+        import requests
+        # Ollama API endpoint to list models
+        response = requests.get(f"{OLLAMA_HOST}/api/tags", timeout=5)
+        if response.status_code == 200:
+            data = response.json()
+            models = []
+            for model_info in data.get("models", []):
+                model_name = model_info.get("name", "")
+                if model_name:
+                    models.append(model_name)
+            # Cache the result in session state
+            st.session_state.ollama_models_cache = models
+            logger.info(f"Fetched {len(models)} models from Ollama: {models}")
+            return models
+        else:
+            logger.warning(f"Ollama API returned status {response.status_code}")
+            return []
+    except Exception as e:
+        logger.warning(f"Failed to fetch models from Ollama: {e}")
+        return []
 
 
 def _sidebar():
@@ -207,29 +419,46 @@ def _sidebar():
 
         st.markdown("---")
         st.markdown("### Model Selection")
-        available_models = [
-            "gpt-oss",
-            "gpt-oss:latest",
-            "mistral-nemo:12b",
-            "merlinvn/MedicalQA-Llama-3.2-3B-Instruct",
-            "Elixpo/LlamaMedicine",
-        ]
+        
+        # Fetch models dynamically from Ollama
+        available_models = _fetch_ollama_models()
+        
+        # Fallback to default list if Ollama is unavailable or returns no models
+        if not available_models:
+            logger.info("Using fallback model list (Ollama unavailable or returned no models)")
+            available_models = [
+                "gpt-oss",
+                "gpt-oss:latest",
+                "mistral-nemo:12b",
+                "merlinvn/MedicalQA-Llama-3.2-3B-Instruct",
+                "Elixpo/LlamaMedicine",
+            ]
+        
         current_model = st.session_state.get("model_name", "gpt-oss")
         if current_model not in available_models:
             available_models.insert(0, current_model)
 
-        st.session_state.model_name = st.selectbox(
-            "LLM Model",
-            available_models,
-            index=available_models.index(current_model) if current_model in available_models else 0,
-            help="Select the Ollama model to use for generation"
-        )
+        # Add refresh button to reload models from Ollama
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            st.session_state.model_name = st.selectbox(
+                "LLM Model",
+                available_models,
+                index=available_models.index(current_model) if current_model in available_models else 0,
+                help="Select the Ollama model to use for generation (dynamically fetched from Ollama)"
+            )
+        with col2:
+            if st.button("🔄", help="Refresh model list from Ollama"):
+                # Clear cache to force refresh
+                if "ollama_models_cache" in st.session_state:
+                    del st.session_state.ollama_models_cache
+                st.rerun()
 
         custom_model = st.text_input(
             "Or enter custom model name",
             value="" if st.session_state.model_name in available_models else st.session_state.model_name,
             placeholder="e.g., llama3:8b",
-            help="Enter a custom Ollama model name"
+            help="Enter a custom Ollama model name (will be added to list if not present)"
         )
         if custom_model.strip():
             st.session_state.model_name = custom_model.strip()
@@ -763,7 +992,8 @@ def _render_footer():
 # App
 # ------------------------------
 _init_state()
-_render_header()
+_render_header()  # This includes the expand button now
+_expand_sidebar_button()  # Add JavaScript to auto-expand sidebar
 _sidebar()
 _render_pair_inputs()
 

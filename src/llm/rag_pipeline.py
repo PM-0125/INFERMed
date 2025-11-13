@@ -162,9 +162,9 @@ def retrieve_and_normalize(
     prr_pair = None
     dili_a = dili_b = dict_a = dict_b = None
     diqt_a = diqt_b = None
-    se_a_raw: List[tuple] = []
-    se_b_raw: List[tuple] = []
-    se_pair_raw: List[tuple] = []
+    se_a_raw: List[str] = []
+    se_b_raw: List[str] = []
+    se_pair_raw: List[str] = []
     db_targets_a: List[str] = []
     db_targets_b: List[str] = []
 
@@ -174,15 +174,15 @@ def retrieve_and_normalize(
         se_b_raw    = db.get_side_effects(b, top_k=topk_side_effects) or []
         se_pair_raw = db.get_side_effects(a, b, top_k=topk_side_effects) or []
 
-        # Simple proxy for "pair PRR": take the maximum PRR observed among pair side effects
-        if se_pair_raw:
-            prrs = [p for (_, p) in se_pair_raw if p is not None]
-            prr_pair = max(prrs) if prrs else None
+        # Get pair PRR using the dedicated method
+        prr_pair = db.get_interaction_score(a, b)
+        if prr_pair == 0.0:
+            prr_pair = None
 
-        # Risk scores
+        # Risk scores - using legacy methods that return numeric scores for compatibility
         dili_a = db.get_dilirank_score(a)  # float or None
         dili_b = db.get_dilirank_score(b)
-        dict_a = db.get_dictrank_score(a)
+        dict_a = db.get_dictrank_score(a)  # float or None
         dict_b = db.get_dictrank_score(b)
         diqt_a = db.get_diqt_score(a)
         diqt_b = db.get_diqt_score(b)
@@ -245,8 +245,9 @@ def retrieve_and_normalize(
         caveats_agg.append("QLever mechanistic unavailable; using DuckDB DrugBank targets as PD fallback.")
 
     # For UI/debug parity: keep side_effects as strings (not tuples)
-    side_effects_a = [t for (t, _p) in se_a_raw]
-    side_effects_b = [t for (t, _p) in se_b_raw]
+    # Side effects are now just lists of strings (no PRR tuples)
+    side_effects_a = se_a_raw
+    side_effects_b = se_b_raw
 
     context: Dict[str, Any] = {
         "drugs": {

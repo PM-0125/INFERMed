@@ -244,23 +244,29 @@ def synthesize_mechanistic(
         "b": canon_roles(raw_ez.get("b", {}) or {}),
     }
 
-    # --- Targets / pathways: normalize whether from QLever or fallback ---
+    # --- Targets / pathways / diseases: normalize whether from QLever or fallback ---
     t_a = q.get("targets_a")
     t_b = q.get("targets_b")
     p_a = q.get("pathways_a")
     p_b = q.get("pathways_b")
     cp  = q.get("common_pathways")
+    d_a = q.get("diseases_a")  # NEW: diseases from DISEASE index
+    d_b = q.get("diseases_b")  # NEW: diseases from DISEASE index
 
     targets_a = canonicalize_list(t_a if t_a else (fallback_targets_a or []))
     targets_b = canonicalize_list(t_b if t_b else (fallback_targets_b or []))
     pathways_a = canonicalize_list(p_a or [])
     pathways_b = canonicalize_list(p_b or [])
     common_pathways = canonicalize_list(cp or [])
+    diseases_a = canonicalize_list(d_a or [])  # NEW
+    diseases_b = canonicalize_list(d_b or [])  # NEW
 
     mech: Dict[str, Any] = {
         "enzymes": enzymes,
         "targets_a": targets_a,
         "targets_b": targets_b,
+        "diseases_a": diseases_a,  # NEW
+        "diseases_b": diseases_b,  # NEW
         "pathways_a": pathways_a,
         "pathways_b": pathways_b,
         "common_pathways": common_pathways,
