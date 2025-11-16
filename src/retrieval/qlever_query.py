@@ -216,9 +216,9 @@ def _bio_query(query: str) -> Dict[str, Any]:
     timeout = int(os.getenv("QLEVER_TIMEOUT_BIO", "90"))
     try:
         r = requests.get(
-            endpoint,
-            params={"query": query},
-            headers={"Accept": "application/sparql-results+json"},
+        endpoint,
+        params={"query": query},
+        headers={"Accept": "application/sparql-results+json"},
             timeout=timeout,
         )
         r.raise_for_status()
@@ -1449,21 +1449,130 @@ def get_mechanistic(drugA: str, drugB: str) -> Dict[str, Any]:
     except Exception as e:
         LOG.warning("PubChem client import failed: %s", e)
     
+    # Enhanced target enrichment with UniProt
+    enriched_targets_a = targets_a
+    enriched_targets_b = targets_b
+    uniprot_ids_a = []  # Initialize for use in Reactome section
+    uniprot_ids_b = []  # Initialize for use in Reactome section
+    
+    try:
+        from src.retrieval import uniprot_client as uc
+        # Note: 're' is already imported at module level
+        
+        # Extract UniProt IDs from targets and enrich
+        for target in targets_a:
+            target_str = str(target)
+            # Look for UniProt ID pattern (P/Q/O followed by 5 alphanumeric)
+            uniprot_match = re.search(r"([PQO][0-9A-Z]{5})", target_str, re.IGNORECASE)
+            if uniprot_match:
+                uniprot_ids_a.append(uniprot_match.group(1).upper())
+        
+        for target in targets_b:
+            target_str = str(target)
+            uniprot_match = re.search(r"([PQO][0-9A-Z]{5})", target_str, re.IGNORECASE)
+            if uniprot_match:
+                uniprot_ids_b.append(uniprot_match.group(1).upper())
+        
+        # Enrich with UniProt info (limit to avoid too many API calls)
+        if uniprot_ids_a:
+            enriched_a = uc.enrich_protein_list(uniprot_ids_a[:10])
+            # Update targets with enriched names where available
+            enriched_dict_a = {e["original_id"]: e.get("name", "") for e in enriched_a if e.get("name")}
+            enriched_targets_a = []
+            for target in targets_a:
+                target_str = str(target)
+                # Try to find matching UniProt ID and replace with enriched name
+                uniprot_match = re.search(r"([PQO][0-9A-Z]{5})", target_str, re.IGNORECASE)
+                if uniprot_match and uniprot_match.group(1).upper() in enriched_dict_a:
+                    enriched_name = enriched_dict_a[uniprot_match.group(1).upper()]
+                    if enriched_name:
+                        enriched_targets_a.append(f"{enriched_name} ({target_str})")
+                    else:
+                        enriched_targets_a.append(target_str)
+                else:
+                    enriched_targets_a.append(target_str)
+        
+        if uniprot_ids_b:
+            enriched_b = uc.enrich_protein_list(uniprot_ids_b[:10])
+            enriched_dict_b = {e["original_id"]: e.get("name", "") for e in enriched_b if e.get("name")}
+            enriched_targets_b = []
+            for target in targets_b:
+                target_str = str(target)
+                uniprot_match = re.search(r"([PQO][0-9A-Z]{5})", target_str, re.IGNORECASE)
+                if uniprot_match and uniprot_match.group(1).upper() in enriched_dict_b:
+                    enriched_name = enriched_dict_b[uniprot_match.group(1).upper()]
+                    if enriched_name:
+                        enriched_targets_b.append(f"{enriched_name} ({target_str})")
+                    else:
+                        enriched_targets_b.append(target_str)
+                else:
+                    enriched_targets_b.append(target_str)
+    except Exception as e:
+        LOG.debug("UniProt target enrichment failed: %s", e)
+    
+    # Get KEGG and Reactome pathways
+    kegg_pathways_a = []
+    kegg_pathways_b = []
+    reactome_pathways_a = []
+    reactome_pathways_b = []
+    common_pathways_enhanced = []
+    
+    try:
+        from src.retrieval import kegg_client as kg
+        from src.retrieval import reactome_client as rc
+        
+        # KEGG pathways
+        try:
+            kegg_paths_a = kg.get_drug_pathways(drugA)
+            kegg_pathways_a = [p.get("pathway_name", "") for p in kegg_paths_a[:5] if p.get("pathway_name")]
+        except Exception as e:
+            LOG.debug("KEGG pathway query failed for %s: %s", drugA, e)
+        
+        try:
+            kegg_paths_b = kg.get_drug_pathways(drugB)
+            kegg_pathways_b = [p.get("pathway_name", "") for p in kegg_paths_b[:5] if p.get("pathway_name")]
+        except Exception as e:
+            LOG.debug("KEGG pathway query failed for %s: %s", drugB, e)
+        
+        # Common KEGG pathways
+        try:
+            kegg_common = kg.get_common_pathways(drugA, drugB)
+            common_pathways_enhanced = [p.get("pathway_name", "") for p in kegg_common[:5] if p.get("pathway_name")]
+        except Exception as e:
+            LOG.debug("KEGG common pathway query failed: %s", e)
+        
+        # Reactome pathways (using UniProt IDs from targets)
+        if uniprot_ids_a:
+            try:
+                reactome_paths_a = rc.get_common_pathways_for_proteins(uniprot_ids_a[:5])
+                reactome_pathways_a = [p.get("pathway_name", "") for p in reactome_paths_a[:5] if p.get("pathway_name")]
+            except Exception as e:
+                LOG.debug("Reactome pathway query failed for %s: %s", drugA, e)
+        
+        if uniprot_ids_b:
+            try:
+                reactome_paths_b = rc.get_common_pathways_for_proteins(uniprot_ids_b[:5])
+                reactome_pathways_b = [p.get("pathway_name", "") for p in reactome_paths_b[:5] if p.get("pathway_name")]
+            except Exception as e:
+                LOG.debug("Reactome pathway query failed for %s: %s", drugB, e)
+    except Exception as e:
+        LOG.debug("KEGG/Reactome integration failed: %s", e)
+
     mech: Dict[str, Any] = {
         "enzymes": {"a": enzymes_a, "b": enzymes_b},
-        "targets_a": targets_a,
-        "targets_b": targets_b,
+        "targets_a": enriched_targets_a,  # Enhanced with UniProt names
+        "targets_b": enriched_targets_b,  # Enhanced with UniProt names
         "diseases_a": diseases_a,
         "diseases_b": diseases_b,
-        "pathways_a": [],
-        "pathways_b": [],
-        "common_pathways": [],
+        "pathways_a": kegg_pathways_a + reactome_pathways_a,  # Enhanced with KEGG and Reactome
+        "pathways_b": kegg_pathways_b + reactome_pathways_b,  # Enhanced with KEGG and Reactome
+        "common_pathways": common_pathways_enhanced,  # Enhanced with KEGG common pathways
         "ids_a": a_info.get("ids", {}),
         "ids_b": b_info.get("ids", {}),
         "synonyms_a": a_info.get("synonyms", []),
         "synonyms_b": b_info.get("synonyms", []),
-        "pk_data_a": pk_data_a,  # NEW: PK data from PubChem REST API (always fetched)
-        "pk_data_b": pk_data_b,  # NEW: PK data from PubChem REST API (always fetched)
+        "pk_data_a": pk_data_a,  # PK data from PubChem REST API (always fetched)
+        "pk_data_b": pk_data_b,  # PK data from PubChem REST API (always fetched)
         "caveats": caveats if caveats else [],
     }
     

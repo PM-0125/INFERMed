@@ -1,9 +1,13 @@
 # src/utils/pkpd_utils.py
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, List, Set, Tuple
+import json
+import logging
+import os
 import re
 import unicodedata
+from functools import lru_cache
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 __all__ = [
     "canonicalize_enzyme",
@@ -153,32 +157,230 @@ def pd_overlap(mech: Dict[str, Any], *, target_topk: int = 32, path_topk: int = 
 # Synthesis (compact summaries for LLM)
 # --------------------------------------------------------------------------------------
 
+@lru_cache(maxsize=1)
+def _load_canonical_pkpd() -> Dict[str, Any]:
+    """Load canonical PK/PD data from JSON file. Cached for performance."""
+    canonical_path = os.path.join("data", "dictionary", "canonical_pkpd.json")
+    try:
+        if os.path.exists(canonical_path):
+            with open(canonical_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except Exception as e:
+        logging.getLogger(__name__).debug("Failed to load canonical PK/PD data: %s", e)
+    return {"canonical_pk_interactions": {}, "canonical_ugt_transporter": {}}
+
+
+def _normalize_drug_name(name: str) -> str:
+    """Normalize drug name for matching (lowercase, strip, replace spaces/underscores)."""
+    return name.strip().lower().replace(" ", "_").replace("-", "_")
+
+
+def _get_canonical_pk_interaction(drugA: str, drugB: str) -> Optional[Dict[str, Any]]:
+    """Get canonical PK interaction data for a drug pair."""
+    canonical_data = _load_canonical_pkpd()
+    interactions = canonical_data.get("canonical_pk_interactions", {})
+    
+    # Try both orderings: A|B and B|A
+    norm_a = _normalize_drug_name(drugA)
+    norm_b = _normalize_drug_name(drugB)
+    
+    key1 = f"{norm_a}|{norm_b}"
+    key2 = f"{norm_b}|{norm_a}"
+    
+    return interactions.get(key1) or interactions.get(key2)
+
+
+def _get_canonical_ugt_transporter(drug_name: str) -> Optional[Dict[str, Any]]:
+    """Get canonical UGT/transporter data for a single drug."""
+    canonical_data = _load_canonical_pkpd()
+    ugt_transporter = canonical_data.get("canonical_ugt_transporter", {})
+    
+    norm_name = _normalize_drug_name(drug_name)
+    return ugt_transporter.get(norm_name)
+
+
+def _enhance_roles_with_canonical(drug_name: str, roles: Dict[str, Set[str]]) -> Dict[str, Set[str]]:
+    """Enhance enzyme/transporter roles with canonical data."""
+    canonical = _get_canonical_ugt_transporter(drug_name)
+    if not canonical:
+        return roles
+    
+    # Add UGT isoforms
+    ugt_data = canonical.get("ugts", [])
+    for ugt_entry in ugt_data:
+        isoform = ugt_entry.get("isoform", "").lower()
+        role = ugt_entry.get("role", "").lower()
+        if isoform and role:
+            # UGTs are typically substrates, but can be inhibitors
+            if role == "substrate":
+                roles.setdefault("substrate", set()).add(isoform)
+            elif role == "inhibitor":
+                roles.setdefault("inhibitor", set()).add(isoform)
+    
+    # Add transporters (note: transporters are separate from enzymes in our current structure)
+    # For now, we'll note them but they're handled differently in the PK analysis
+    # This could be extended to add a "transporters" key to roles if needed
+    
+    return roles
+
+
 def summarize_pkpd_risk(drugA: str, drugB: str, mech: Dict[str, Any]) -> Dict[str, Any]:
     """
     Generate compact PK/PD summaries + details to be surfaced in the prompt.
+    Enhanced with UniProt, KEGG, and Reactome pathway data.
     """
     roles = extract_pk_roles(mech)
+    
+    # Enhance roles with canonical UGT/transporter data
+    roles["a"] = _enhance_roles_with_canonical(drugA, roles.get("a", {"substrate": set(), "inhibitor": set(), "inducer": set()}))
+    roles["b"] = _enhance_roles_with_canonical(drugB, roles.get("b", {"substrate": set(), "inhibitor": set(), "inducer": set()}))
+    
     overlaps = detect_pk_overlaps(roles)
     pd = pd_overlap(mech)
+    
+    # Check for canonical PK interaction data
+    canonical_interaction = _get_canonical_pk_interaction(drugA, drugB)
+
+    # Enhanced PK analysis with KEGG
+    try:
+        from src.retrieval import kegg_client as kg
+        kegg_metabolism_a = kg.get_metabolism_pathway(drugA)
+        kegg_metabolism_b = kg.get_metabolism_pathway(drugB)
+        
+        # Add KEGG enzyme information to PK analysis
+        if kegg_metabolism_a and kegg_metabolism_a.get("enzymes"):
+            kegg_enzymes_a = [e.get("enzyme_name", "") for e in kegg_metabolism_a["enzymes"] if e.get("enzyme_name")]
+            # Try to match KEGG enzymes to CYP names
+            for kegg_enzyme in kegg_enzymes_a:
+                kegg_lower = kegg_enzyme.lower()
+                if "cytochrome p450" in kegg_lower or "cyp" in kegg_lower:
+                    import re
+                    cyp_match = re.search(r"cyp\s*(\d+[a-z]?\d*)", kegg_lower, re.IGNORECASE)
+                    if cyp_match:
+                        cyp_canon = f"cyp{cyp_match.group(1).lower()}"
+                        # Add to roles if not already present (roles uses sets, not lists)
+                        if "substrate" not in roles["a"]:
+                            roles["a"]["substrate"] = set()
+                        roles["a"]["substrate"].add(cyp_canon)
+        
+        if kegg_metabolism_b and kegg_metabolism_b.get("enzymes"):
+            kegg_enzymes_b = [e.get("enzyme_name", "") for e in kegg_metabolism_b["enzymes"] if e.get("enzyme_name")]
+            for kegg_enzyme in kegg_enzymes_b:
+                kegg_lower = kegg_enzyme.lower()
+                if "cytochrome p450" in kegg_lower or "cyp" in kegg_lower:
+                    import re
+                    cyp_match = re.search(r"cyp\s*(\d+[a-z]?\d*)", kegg_lower, re.IGNORECASE)
+                    if cyp_match:
+                        cyp_canon = f"cyp{cyp_match.group(1).lower()}"
+                        # Add to roles if not already present (roles uses sets, not lists)
+                        if "substrate" not in roles["b"]:
+                            roles["b"]["substrate"] = set()
+                        roles["b"]["substrate"].add(cyp_canon)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).debug("KEGG integration failed: %s", e)
+
+    # Recalculate overlaps with enhanced data
+    overlaps = detect_pk_overlaps(roles)
 
     pk_flags: List[str] = []
-    if overlaps["inhibition"]:
-        pk_flags.append("Potential ↑ exposure via inhibition at " + ", ".join(sorted(overlaps["inhibition"])))
-    if overlaps["induction"]:
-        pk_flags.append("Potential ↓ exposure via induction at " + ", ".join(sorted(overlaps["induction"])))
-    if overlaps["shared_substrate"]:
-        pk_flags.append("Both are substrates of " + ", ".join(sorted(overlaps["shared_substrate"])) + " (competition possible)")
+    
+    # If canonical interaction exists, use it as primary source (highest priority)
+    if canonical_interaction:
+        mechanism = canonical_interaction.get("mechanism", "")
+        direction = canonical_interaction.get("direction", "")
+        severity = canonical_interaction.get("severity", "")
+        primary_affected = canonical_interaction.get("primary_affected_drug", "")
+        evidence_level = canonical_interaction.get("evidence_level", "")
+        
+        # Build canonical PK flag
+        direction_symbol = "↑" if direction == "increase" else "↓" if direction == "decrease" else ""
+        severity_label = severity.replace("_", " ").title() if severity else ""
+        
+        canonical_flag = f"CANONICAL PK INTERACTION ({evidence_level.replace('_', ' ').title()}): {mechanism}"
+        if primary_affected:
+            canonical_flag += f" → {direction_symbol} {primary_affected} exposure"
+        if severity_label:
+            canonical_flag += f" (Severity: {severity_label})"
+        
+        pk_flags.insert(0, canonical_flag)  # Insert at beginning (highest priority)
+    else:
+        # Fallback to detected overlaps if no canonical data
+        if overlaps["inhibition"]:
+            pk_flags.append("Potential ↑ exposure via inhibition at " + ", ".join(sorted(overlaps["inhibition"])))
+        if overlaps["induction"]:
+            pk_flags.append("Potential ↓ exposure via induction at " + ", ".join(sorted(overlaps["induction"])))
+        if overlaps["shared_substrate"]:
+            pk_flags.append("Both are substrates of " + ", ".join(sorted(overlaps["shared_substrate"])) + " (competition possible)")
+
+    # Enhanced PD analysis with Reactome and KEGG pathways
+    enhanced_pathways = []
+    try:
+        from src.retrieval import reactome_client as rc
+        from src.retrieval import uniprot_client as uc
+        
+        # Get UniProt IDs from targets
+        targets_a = mech.get("targets_a", []) or []
+        targets_b = mech.get("targets_b", []) or []
+        
+        # Extract UniProt IDs from target strings/URIs
+        uniprot_ids_a = []
+        uniprot_ids_b = []
+        
+        for target in targets_a:
+            target_str = str(target)
+            # Try to extract UniProt ID (format: P12345 or Q12345)
+            import re
+            uniprot_match = re.search(r"([PQO][0-9A-Z]{5})", target_str, re.IGNORECASE)
+            if uniprot_match:
+                uniprot_ids_a.append(uniprot_match.group(1).upper())
+        
+        for target in targets_b:
+            target_str = str(target)
+            uniprot_match = re.search(r"([PQO][0-9A-Z]{5})", target_str, re.IGNORECASE)
+            if uniprot_match:
+                uniprot_ids_b.append(uniprot_match.group(1).upper())
+        
+        # Get Reactome pathways for targets
+        if uniprot_ids_a or uniprot_ids_b:
+            all_uniprot_ids = list(set(uniprot_ids_a + uniprot_ids_b))
+            reactome_pathways = rc.get_common_pathways_for_proteins(all_uniprot_ids[:10])  # Limit to avoid too many queries
+            for pathway in reactome_pathways[:5]:  # Top 5
+                pathway_name = pathway.get("pathway_name", "")
+                if pathway_name:
+                    enhanced_pathways.append(pathway_name)
+        
+        # Get KEGG common pathways
+        try:
+            from src.retrieval import kegg_client as kg
+            kegg_common = kg.get_common_pathways(drugA, drugB)
+            for pathway in kegg_common[:3]:  # Top 3
+                pathway_name = pathway.get("pathway_name", "")
+                if pathway_name:
+                    enhanced_pathways.append(f"KEGG: {pathway_name}")
+        except Exception:
+            pass
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).debug("Reactome/UniProt integration failed: %s", e)
 
     pd_flags: List[str] = []
     if pd["overlap_targets"]:
         pd_flags.append("Overlapping targets: " + ", ".join(pd["overlap_targets"][:8]))
     if pd["overlap_pathways"]:
         pd_flags.append("Common pathways: " + ", ".join(pd["overlap_pathways"][:8]))
+    if enhanced_pathways:
+        pd_flags.append("Enhanced pathways: " + ", ".join(enhanced_pathways[:5]))
 
+    # Include canonical interaction data in pk_detail if available
+    pk_detail = {"roles": roles, "overlaps": overlaps}
+    if canonical_interaction:
+        pk_detail["canonical_interaction"] = canonical_interaction
+    
     return {
         "pk_summary": "; ".join(pk_flags) if pk_flags else "No strong PK overlap detected",
         "pd_summary": "; ".join(pd_flags) if pd_flags else "No obvious PD overlap",
-        "pk_detail": {"roles": roles, "overlaps": overlaps},
+        "pk_detail": pk_detail,
         "pd_detail": pd,
     }
 

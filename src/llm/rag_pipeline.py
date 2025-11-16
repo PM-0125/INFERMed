@@ -23,7 +23,9 @@ from src.utils.pkpd_utils import (
 from src.llm.llm_interface import generate_response, MODEL_NAME as LLM_MODEL_NAME
 
 # ----------------- versioning & caching -----------------
-VERSION = 3  # bump when schema/logic changes to invalidate old cached contexts
+VERSION = 4  # bump when schema/logic changes to invalidate old cached contexts
+# Version 4: Added KEGG/Reactome/UniProt API integrations, enhanced PK/PD summarization,
+#            PubChem PK data, target enrichment, pathway enhancements
 
 CACHE_DIR = os.path.join("data", "cache")
 CTX_DIR   = os.path.join(CACHE_DIR, "contexts")
@@ -249,6 +251,10 @@ def retrieve_and_normalize(
     side_effects_a = se_a_raw
     side_effects_b = se_b_raw
 
+    # Compute PK/PD summary first to check for canonical interactions
+    pkpd = _jsonify_sets(summarize_pkpd_risk(a, b, mech))
+    has_canonical = bool(pkpd.get("pk_detail", {}).get("canonical_interaction"))
+
     context: Dict[str, Any] = {
         "drugs": {
             "a": {"name": a, "synonyms": qlev.get("synonyms_a", []), "ids": qlev.get("ids_a", {})},
@@ -273,13 +279,15 @@ def retrieve_and_normalize(
                 "combo_reactions": faers_combo,
             },
         },
+        "caveats": caveats_agg,
+        "pkpd": pkpd,
         "sources": {
             "duckdb": ["TwoSides", "DILIrank", "DICTRank", "DIQT", "DrugBank"],
             "qlever": ["PubChem RDF via QLever"] if ql_raw_contrib else ["PubChem RDF via QLever (limited)"],
             "openfda": ["FAERS via OpenFDA (cached)"],
+            "apis": ["PubChem REST API", "UniProt REST API", "KEGG REST API", "Reactome REST API"],
+            "canonical": ["Canonical PK/PD Dictionary"] if has_canonical else [],
         },
-        "caveats": caveats_agg,
-        "pkpd": _jsonify_sets(summarize_pkpd_risk(a, b, mech)),  # JSON-safe PK/PD
         "meta": {
             "drug_pair": f"{drugA}|{drugB}",
             "pair_key": _pair_key(drugA, drugB),

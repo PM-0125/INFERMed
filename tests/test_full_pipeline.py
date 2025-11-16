@@ -2,19 +2,24 @@
 """
 Comprehensive test script for the full RAG pipeline.
 Tests 5 drug combinations through DuckDB + OpenFDA + QLever (CORE, BIO, DISEASE).
+Enhanced with UniProt, KEGG, and Reactome API integrations.
 """
 
 import os
 import sys
 from typing import Dict, Any
 
+# Add project root to path
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, project_root)
+
 # Set environment variables
 os.environ["CORE_ENDPOINT"] = "http://localhost:7010/"
 os.environ["DISEASE_ENDPOINT"] = "http://localhost:7011/"
 os.environ["BIO_ENDPOINT"] = "http://localhost:7012/"
-os.environ["QLEVER_TIMEOUT_CORE"] = "60"
-os.environ["QLEVER_TIMEOUT_DISEASE"] = "60"
-os.environ["QLEVER_TIMEOUT_BIO"] = "60"
+os.environ["QLEVER_TIMEOUT_CORE"] = "90"
+os.environ["QLEVER_TIMEOUT_DISEASE"] = "90"
+os.environ["QLEVER_TIMEOUT_BIO"] = "90"
 
 from src.llm.rag_pipeline import retrieve_and_normalize
 import logging
@@ -51,6 +56,7 @@ def test_pair(drugA: str, drugB: str) -> Dict[str, Any]:
         mech = ctx.get('signals', {}).get('mechanistic', {})
         tabular = ctx.get('signals', {}).get('tabular', {})
         faers = ctx.get('signals', {}).get('faers', {})
+        pkpd = ctx.get('pkpd', {})
         caveats = ctx.get('caveats', [])
         
         result = {
@@ -97,6 +103,19 @@ def test_pair(drugA: str, drugB: str) -> Dict[str, Any]:
                 "faers_b": len(faers.get("top_reactions_b", [])),
                 "faers_combo": len(faers.get("combo_reactions", [])),
             },
+            "api_enhancements": {
+                "kegg_pathways_a": len(mech.get("pathways_a", [])),
+                "kegg_pathways_b": len(mech.get("pathways_b", [])),
+                "common_pathways": len(mech.get("common_pathways", [])),
+                "uniprot_enriched_targets": any("(" in str(t) and ")" in str(t) for t in (mech.get("targets_a", []) + mech.get("targets_b", []))),
+                "pk_data_a": bool(mech.get("pk_data_a", {})),
+                "pk_data_b": bool(mech.get("pk_data_b", {})),
+            },
+            "pkpd": {
+                "pk_summary": pkpd.get("pk_summary", ""),
+                "pd_summary": pkpd.get("pd_summary", ""),
+                "has_enhanced_pathways": "Enhanced pathways" in pkpd.get("pd_summary", ""),
+            },
             "caveats": len(caveats),
             "sources": ctx.get('sources', {}),
         }
@@ -121,6 +140,19 @@ def test_pair(drugA: str, drugB: str) -> Dict[str, Any]:
         
         print(f"\n🏥 OpenFDA/FAERS Data:")
         print(f"  Reactions: {drugA}={result['openfda']['faers_a']}, {drugB}={result['openfda']['faers_b']}, Combo={result['openfda']['faers_combo']}")
+        
+        print(f"\n✨ API Enhancements (UniProt, KEGG, Reactome):")
+        api = result['api_enhancements']
+        print(f"  KEGG Pathways: {drugA}={api['kegg_pathways_a']}, {drugB}={api['kegg_pathways_b']}, Common={api['common_pathways']}")
+        print(f"  UniProt Enrichment: {'✅' if api['uniprot_enriched_targets'] else '❌'}")
+        print(f"  PubChem PK Data: {drugA}={api['pk_data_a']}, {drugB}={api['pk_data_b']}")
+        
+        print(f"\n💊 PK/PD Summary:")
+        pkpd_summary = result['pkpd']
+        print(f"  PK: {pkpd_summary['pk_summary'][:100]}...")
+        print(f"  PD: {pkpd_summary['pd_summary'][:100]}...")
+        if pkpd_summary['has_enhanced_pathways']:
+            print(f"  ✅ Enhanced pathways included in PD summary")
         
         if result['caveats'] > 0:
             print(f"\n⚠️  Caveats ({result['caveats']}):")
@@ -148,6 +180,7 @@ def main():
     print("FULL PIPELINE TEST - 5 Drug Combinations")
     print("="*80)
     print("\nTesting: DuckDB + OpenFDA + QLever (CORE, BIO, DISEASE)")
+    print("Enhanced with: UniProt + KEGG + Reactome APIs")
     print(f"Endpoints:")
     print(f"  CORE: {os.getenv('CORE_ENDPOINT')}")
     print(f"  BIO: {os.getenv('BIO_ENDPOINT')}")
@@ -184,6 +217,18 @@ def main():
                                                    r.get("openfda", {}).get("faers_b", 0) > 0))
     print(f"  Pairs with FAERS data: {pairs_with_faers}/{successful}")
     
+    print(f"\n✨ API Enhancement Coverage:")
+    pairs_with_kegg = sum(1 for _, _, r in results 
+                         if r.get("success") and (r.get("api_enhancements", {}).get("kegg_pathways_a", 0) > 0 or 
+                                                  r.get("api_enhancements", {}).get("kegg_pathways_b", 0) > 0))
+    pairs_with_uniprot = sum(1 for _, _, r in results 
+                            if r.get("success") and r.get("api_enhancements", {}).get("uniprot_enriched_targets", False))
+    pairs_with_enhanced_pd = sum(1 for _, _, r in results 
+                                 if r.get("success") and r.get("pkpd", {}).get("has_enhanced_pathways", False))
+    print(f"  Pairs with KEGG pathways: {pairs_with_kegg}/{successful}")
+    print(f"  Pairs with UniProt enrichment: {pairs_with_uniprot}/{successful}")
+    print(f"  Pairs with enhanced PD pathways: {pairs_with_enhanced_pd}/{successful}")
+    
     # Detailed results
     print(f"\n📋 Detailed Results:")
     for drugA, drugB, result in results:
@@ -197,6 +242,10 @@ def main():
             print(f"      DuckDB: PRR={db.get('prr', 'N/A')}, SE={db.get('side_effects_a', 0)}+{db.get('side_effects_b', 0)}")
             of = result.get("openfda", {})
             print(f"      OpenFDA: {of.get('faers_a', 0)}+{of.get('faers_b', 0)}+{of.get('faers_combo', 0)}")
+            api = result.get("api_enhancements", {})
+            print(f"      API Enhancements: KEGG={api.get('kegg_pathways_a', 0)}+{api.get('kegg_pathways_b', 0)}, "
+                  f"UniProt={'✅' if api.get('uniprot_enriched_targets') else '❌'}, "
+                  f"Enhanced PD={'✅' if result.get('pkpd', {}).get('has_enhanced_pathways') else '❌'}")
     
     print("\n" + "="*80)
     print("TEST COMPLETE")

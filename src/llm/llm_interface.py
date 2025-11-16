@@ -584,13 +584,32 @@ def _format_pk(ctx: Dict[str, Any]) -> Tuple[str, int, int]:
 
 def _format_pd(ctx: Dict[str, Any]) -> Tuple[str, int, int]:
     pkpd = (ctx.get("pkpd") or {})
+    mech = (ctx.get("signals", {}) or {}).get("mechanistic", {}) or {}
+    
+    # Always include pathways from mechanistic data (KEGG/Reactome)
+    pathways_a = _as_str_list(mech.get("pathways_a", []))
+    pathways_b = _as_str_list(mech.get("pathways_b", []))
+    common_pathways_mech = _as_str_list(mech.get("common_pathways", []))
+    
+    # If pkpd summary exists, use it but enhance with mechanistic pathways if missing
     if pkpd.get("pd_summary"):
         txt = str(pkpd["pd_summary"])
+        # If summary doesn't mention pathways but we have them, append them
+        if ("pathway" not in txt.lower() or "enhanced pathway" not in txt.lower()) and (pathways_a or pathways_b or common_pathways_mech):
+            pathway_parts = []
+            if common_pathways_mech:
+                pathway_parts.append("Common pathways (KEGG/Reactome): " + ", ".join(sorted(set(common_pathways_mech))[:5]))
+            if pathways_a:
+                pathway_parts.append(f"Drug A pathways: {', '.join(sorted(set(pathways_a))[:3])}")
+            if pathways_b:
+                pathway_parts.append(f"Drug B pathways: {', '.join(sorted(set(pathways_b))[:3])}")
+            if pathway_parts:
+                txt += "; " + "; ".join(pathway_parts)
         prio = 1 if ("overlapping" in txt.lower() or "pathways" in txt.lower()) else 4
         return txt, len(txt), prio
 
-    mech = (ctx.get("signals", {}) or {}).get("mechanistic", {}) or {}
-    cp = _as_str_list(mech.get("common_pathways", []))
+    # Fallback: build from mechanistic data
+    cp = common_pathways_mech
     ta = _as_str_list(mech.get("targets_a", []))
     tb = _as_str_list(mech.get("targets_b", []))
     overlap_targets = sorted(set(ta) & set(tb))
@@ -598,6 +617,12 @@ def _format_pd(ctx: Dict[str, Any]) -> Tuple[str, int, int]:
     parts = []
     if cp:
         parts.append("Common pathways: " + ", ".join(sorted(set(cp))[:8]))
+    elif pathways_a or pathways_b:
+        # Include individual pathways if no common ones
+        if pathways_a:
+            parts.append(f"Drug A pathways: {', '.join(sorted(set(pathways_a))[:5])}")
+        if pathways_b:
+            parts.append(f"Drug B pathways: {', '.join(sorted(set(pathways_b))[:5])}")
     else:
         parts.append("No common pathways found")
     if overlap_targets:
@@ -606,7 +631,7 @@ def _format_pd(ctx: Dict[str, Any]) -> Tuple[str, int, int]:
         parts.append("No overlapping targets found")
 
     txt = "; ".join(parts)
-    prio = 1 if (cp or overlap_targets) else 4
+    prio = 1 if (cp or overlap_targets or pathways_a or pathways_b) else 4
     return txt, len(txt), prio
 
 def _format_faers(ctx: Dict[str, Any], limit: int = 5) -> Tuple[str, int]:
@@ -675,16 +700,25 @@ def _format_evidence_table(ctx: Dict[str, Any], mode: str) -> str:
 
     ta = _as_str_list(mech.get("targets_a", []))[:8]
     tb = _as_str_list(mech.get("targets_b", []))[:8]
-    pa = _as_str_list(mech.get("pathways_a", []))[:6]
-    pb = _as_str_list(mech.get("pathways_b", []))[:6]
+    pa = _as_str_list(mech.get("pathways_a", []))[:8]  # Increased from 6 to 8
+    pb = _as_str_list(mech.get("pathways_b", []))[:8]  # Increased from 6 to 8
+    cp_mech = _as_str_list(mech.get("common_pathways", []))[:8]  # Include common pathways
 
     lines = [
         f"A IDs: {ids('a')} | B IDs: {ids('b')}",
         f"A targets: {', '.join(ta) if ta else '(none)'}",
         f"B targets: {', '.join(tb) if tb else '(none)'}",
-        f"A pathways: {', '.join(pa) if pa else '(none)'}",
-        f"B pathways: {', '.join(pb) if pb else '(none)'}",
     ]
+    # Always include pathways if available (KEGG/Reactome)
+    if cp_mech:
+        lines.append(f"Common pathways (KEGG/Reactome): {', '.join(cp_mech)}")
+    if pa:
+        lines.append(f"A pathways: {', '.join(pa)}")
+    if pb:
+        lines.append(f"B pathways: {', '.join(pb)}")
+    if not cp_mech and not pa and not pb:
+        lines.append("Pathways: (none)")
+    
     return " | ".join(lines)
 
 def _format_sources(ctx: Dict[str, Any]) -> str:

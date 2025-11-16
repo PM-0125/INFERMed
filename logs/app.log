@@ -182,3 +182,151 @@
 2025-11-13 21:18:37 | INFO | infermed.app | Fetched 3 models from Ollama: ['alibayram/medgemma:latest', 'gpt-oss:latest', 'mistral-nemo:12b']
 2025-11-13 21:18:55 | INFO | infermed.app | {"event": "maybe_load_context.begin", "pair": ["Atorvastatin", "Gemfibrozil"], "use_cache": true}
 2025-11-13 21:18:57 | INFO | infermed.app | {"event": "maybe_load_context.get_context_cached", "pair": ["Atorvastatin", "Gemfibrozil"], "cached": true}
+2025-11-13 21:22:27 | INFO | infermed.app | {"event": "explain_pair.done", "pair": ["Atorvastatin", "Gemfibrozil"], "answer_len": 4448}
+2025-11-13 21:24:34 | INFO | infermed.app | Fetched 3 models from Ollama: ['alibayram/medgemma:latest', 'gpt-oss:latest', 'mistral-nemo:12b']
+2025-11-13 21:25:00 | INFO | infermed.app | Fetched 3 models from Ollama: ['alibayram/medgemma:latest', 'gpt-oss:latest', 'mistral-nemo:12b']
+2025-11-13 21:25:24 | INFO | infermed.app | {"event": "maybe_load_context.begin", "pair": ["Atorvastatin", "Gemfibrozil"], "use_cache": false}
+2025-11-13 21:32:46 | INFO | infermed.app | {"event": "maybe_load_context.get_context_cached", "pair": ["Atorvastatin", "Gemfibrozil"], "cached": false, "force_refresh": true}
+2025-11-13 21:37:21 | INFO | infermed.app | {"event": "explain_pair.done", "pair": ["Atorvastatin", "Gemfibrozil"], "answer_len": 4488}
+2025-11-13 21:44:05 | INFO | infermed.app | Fetched 3 models from Ollama: ['alibayram/medgemma:latest', 'gpt-oss:latest', 'mistral-nemo:12b']
+2025-11-13 21:44:29 | INFO | infermed.app | {"event": "maybe_load_context.begin", "pair": ["Cyclosporin", "Erythromycin"], "use_cache": true}
+2025-11-13 21:48:56 | INFO | infermed.app | {"event": "maybe_load_context.get_context_cached", "pair": ["Cyclosporin", "Erythromycin"], "cached": true}
+2025-11-13 21:51:30 | INFO | infermed.app | {"event": "explain_pair.done", "pair": ["Cyclosporin", "Erythromycin"], "answer_len": 3917}
+2025-11-13 21:53:52 | INFO | infermed.app | Fetched 3 models from Ollama: ['alibayram/medgemma:latest', 'gpt-oss:latest', 'mistral-nemo:12b']
+2025-11-13 21:54:50 | INFO | infermed.app | {"event": "maybe_load_context.begin", "pair": ["Methotrexate", "NSAID"], "use_cache": true}
+2025-11-13 21:59:11 | INFO | infermed.app | {"event": "maybe_load_context.get_context_cached", "pair": ["Methotrexate", "NSAID"], "cached": true}
+2025-11-13 22:02:08 | INFO | infermed.app | {"event": "explain_pair.done", "pair": ["Methotrexate", "NSAID"], "answer_len": 4245}
+2025-11-15 12:41:06 | INFO | infermed.app | Fetched 3 models from Ollama: ['alibayram/medgemma:latest', 'gpt-oss:latest', 'mistral-nemo:12b']
+2025-11-15 12:54:17 | INFO | infermed.app | Fetched 3 models from Ollama: ['alibayram/medgemma:latest', 'gpt-oss:latest', 'mistral-nemo:12b']
+2025-11-15 13:14:39 | INFO | infermed.app | {"event": "maybe_load_context.begin", "pair": ["Carbamazepine", "Oral Contraceptive"], "use_cache": true}
+2025-11-15 13:19:15 | INFO | infermed.app | {"event": "maybe_load_context.get_context_cached", "pair": ["Carbamazepine", "Oral Contraceptive"], "cached": true}
+2025-11-15 13:22:15 | INFO | infermed.app | {"event": "explain_pair.done", "pair": ["Carbamazepine", "Oral Contraceptive"], "answer_len": 4207}
+2025-11-15 13:24:58 | INFO | infermed.app | Fetched 3 models from Ollama: ['alibayram/medgemma:latest', 'gpt-oss:latest', 'mistral-nemo:12b']
+2025-11-15 13:25:31 | INFO | infermed.app | {"event": "maybe_load_context.begin", "pair": ["Digoxin", "Verapamil"], "use_cache": true}
+2025-11-15 13:33:36 | INFO | infermed.app | {"event": "maybe_load_context.get_context_cached", "pair": ["Digoxin", "Verapamil"], "cached": true}
+2025-11-15 13:36:18 | INFO | infermed.app | {"event": "explain_pair.done", "pair": ["Digoxin", "Verapamil"], "answer_len": 4689}
+2025-11-15 13:51:31 | INFO | infermed.app | Fetched 3 models from Ollama: ['alibayram/medgemma:latest', 'gpt-oss:latest', 'mistral-nemo:12b']
+2025-11-15 13:52:11 | INFO | infermed.app | {"event": "maybe_load_context.begin", "pair": ["Prednisolone", "Ritonavir"], "use_cache": true}
+2025-11-15 13:53:53 | INFO | infermed.app | {"event": "maybe_load_context.begin", "pair": ["Prednisolone", "Ritonavir"], "use_cache": false}
+2025-11-15 14:00:31 | INFO | infermed.app | {"event": "maybe_load_context.get_context_cached", "pair": ["Prednisolone", "Ritonavir"], "cached": true}
+2025-11-15 14:00:55 | INFO | infermed.app | {"event": "maybe_load_context.get_context_cached", "pair": ["Prednisolone", "Ritonavir"], "cached": false, "force_refresh": true}
+2025-11-15 14:04:09 | INFO | infermed.app | {"event": "explain_pair.done", "pair": ["Prednisolone", "Ritonavir"], "answer_len": 4808}
+2025-11-15 14:07:23 | INFO | infermed.app | Fetched 3 models from Ollama: ['alibayram/medgemma:latest', 'gpt-oss:latest', 'mistral-nemo:12b']
+2025-11-15 14:07:55 | INFO | infermed.app | {"event": "maybe_load_context.begin", "pair": ["Sertraline", "Triptans"], "use_cache": true}
+2025-11-15 14:12:40 | INFO | infermed.app | {"event": "maybe_load_context.get_context_cached", "pair": ["Sertraline", "Triptans"], "cached": true}
+2025-11-15 14:15:24 | INFO | infermed.app | {"event": "explain_pair.done", "pair": ["Sertraline", "Triptans"], "answer_len": 4912}
+2025-11-15 14:31:08 | INFO | infermed.app | Fetched 3 models from Ollama: ['alibayram/medgemma:latest', 'gpt-oss:latest', 'mistral-nemo:12b']
+2025-11-15 14:31:44 | INFO | infermed.app | {"event": "maybe_load_context.begin", "pair": ["Sertraline", "Triptans"], "use_cache": false}
+2025-11-15 14:37:29 | INFO | infermed.app | Fetched 3 models from Ollama: ['alibayram/medgemma:latest', 'gpt-oss:latest', 'mistral-nemo:12b']
+2025-11-15 14:37:53 | INFO | infermed.app | {"event": "maybe_load_context.begin", "pair": ["Sertraline", "Triptans"], "use_cache": true}
+2025-11-15 14:42:51 | INFO | infermed.app | {"event": "maybe_load_context.get_context_cached", "pair": ["Sertraline", "Triptans"], "cached": true}
+2025-11-15 14:45:54 | INFO | infermed.app | {"event": "explain_pair.done", "pair": ["Sertraline", "Triptans"], "answer_len": 5591}
+2025-11-15 14:47:26 | INFO | infermed.app | Fetched 3 models from Ollama: ['alibayram/medgemma:latest', 'gpt-oss:latest', 'mistral-nemo:12b']
+2025-11-15 14:48:05 | INFO | infermed.app | {"event": "maybe_load_context.begin", "pair": ["Valproate", "Lamotrigine"], "use_cache": true}
+2025-11-15 14:57:28 | INFO | infermed.app | {"event": "maybe_load_context.get_context_cached", "pair": ["Valproate", "Lamotrigine"], "cached": true}
+2025-11-15 15:00:24 | INFO | infermed.app | {"event": "explain_pair.done", "pair": ["Valproate", "Lamotrigine"], "answer_len": 5070}
+2025-11-15 15:11:08 | INFO | infermed.app | Fetched 3 models from Ollama: ['alibayram/medgemma:latest', 'gpt-oss:latest', 'mistral-nemo:12b']
+2025-11-15 15:15:51 | INFO | infermed.app | {"event": "maybe_load_context.begin", "pair": ["Clozapine", "Ciprofloxacin"], "use_cache": true}
+2025-11-15 15:24:10 | INFO | infermed.app | {"event": "maybe_load_context.get_context_cached", "pair": ["Clozapine", "Ciprofloxacin"], "cached": true}
+2025-11-15 15:26:42 | INFO | infermed.app | {"event": "explain_pair.done", "pair": ["Clozapine", "Ciprofloxacin"], "answer_len": 4132}
+2025-11-15 15:36:09 | INFO | infermed.app | Fetched 3 models from Ollama: ['alibayram/medgemma:latest', 'gpt-oss:latest', 'mistral-nemo:12b']
+2025-11-15 15:39:51 | INFO | infermed.app | Fetched 3 models from Ollama: ['alibayram/medgemma:latest', 'gpt-oss:latest', 'mistral-nemo:12b']
+2025-11-15 15:40:18 | INFO | infermed.app | {"event": "maybe_load_context.begin", "pair": ["Omeprazole", "Ketoconazole"], "use_cache": true}
+2025-11-15 15:50:02 | INFO | infermed.app | {"event": "maybe_load_context.get_context_cached", "pair": ["Omeprazole", "Ketoconazole"], "cached": true}
+2025-11-15 15:52:54 | INFO | infermed.app | {"event": "explain_pair.done", "pair": ["Omeprazole", "Ketoconazole"], "answer_len": 4233}
+2025-11-15 15:55:56 | INFO | infermed.app | {"event": "maybe_load_context.begin", "pair": ["Omeprazole", "Ketoconazole"], "use_cache": true}
+2025-11-15 15:55:56 | INFO | infermed.app | {"event": "maybe_load_context.hit_memory", "pair": ["Omeprazole", "Ketoconazole"]}
+2025-11-15 15:55:56 | INFO | infermed.app | {"event": "explain_pair.cache_hit", "pair": ["Omeprazole", "Ketoconazole"]}
+2025-11-15 15:56:00 | INFO | infermed.app | {"event": "maybe_load_context.begin", "pair": ["Omeprazole", "Ketoconazole"], "use_cache": true}
+2025-11-15 15:56:00 | INFO | infermed.app | {"event": "maybe_load_context.hit_memory", "pair": ["Omeprazole", "Ketoconazole"]}
+2025-11-15 15:56:00 | INFO | infermed.app | {"event": "explain_pair.cache_hit", "pair": ["Omeprazole", "Ketoconazole"]}
+2025-11-15 15:56:06 | INFO | infermed.app | Fetched 3 models from Ollama: ['alibayram/medgemma:latest', 'gpt-oss:latest', 'mistral-nemo:12b']
+2025-11-15 15:56:56 | INFO | infermed.app | {"event": "maybe_load_context.begin", "pair": ["Omeprazole", "Ketoconazole"], "use_cache": true}
+2025-11-15 15:57:13 | INFO | infermed.app | {"event": "maybe_load_context.get_context_cached", "pair": ["Omeprazole", "Ketoconazole"], "cached": true}
+2025-11-15 15:57:46 | INFO | infermed.app | {"event": "explain_pair.done", "pair": ["Omeprazole", "Ketoconazole"], "answer_len": 2732}
+2025-11-15 15:59:51 | INFO | infermed.app | Fetched 3 models from Ollama: ['alibayram/medgemma:latest', 'gpt-oss:latest', 'mistral-nemo:12b']
+2025-11-15 15:59:55 | INFO | infermed.app | Fetched 3 models from Ollama: ['alibayram/medgemma:latest', 'gpt-oss:latest', 'mistral-nemo:12b']
+2025-11-15 16:00:59 | INFO | infermed.app | {"event": "maybe_load_context.begin", "pair": ["warfarin", "sulfamethoxazole-trimethoprim"], "use_cache": false}
+2025-11-15 16:05:49 | INFO | infermed.app | {"event": "maybe_load_context.get_context_cached", "pair": ["warfarin", "sulfamethoxazole-trimethoprim"], "cached": false, "force_refresh": true}
+2025-11-15 16:08:17 | INFO | infermed.app | {"event": "explain_pair.done", "pair": ["warfarin", "sulfamethoxazole-trimethoprim"], "answer_len": 4383}
+2025-11-15 16:16:20 | INFO | infermed.app | Fetched 3 models from Ollama: ['alibayram/medgemma:latest', 'gpt-oss:latest', 'mistral-nemo:12b']
+2025-11-15 16:17:10 | INFO | infermed.app | {"event": "maybe_load_context.begin", "pair": ["rifampicin", "oral contraceptive"], "use_cache": true}
+2025-11-15 16:19:40 | INFO | infermed.app | {"event": "maybe_load_context.get_context_cached", "pair": ["rifampicin", "oral contraceptive"], "cached": true}
+2025-11-15 16:21:33 | INFO | infermed.app | {"event": "explain_pair.done", "pair": ["rifampicin", "oral contraceptive"], "answer_len": 3817}
+2025-11-15 16:25:41 | INFO | infermed.app | Fetched 3 models from Ollama: ['alibayram/medgemma:latest', 'gpt-oss:latest', 'mistral-nemo:12b']
+2025-11-15 16:25:58 | INFO | infermed.app | {"event": "maybe_load_context.begin", "pair": ["Levodopa", "Haloperidol"], "use_cache": true}
+2025-11-15 16:34:28 | INFO | infermed.app | {"event": "maybe_load_context.get_context_cached", "pair": ["Levodopa", "Haloperidol"], "cached": true}
+2025-11-15 16:37:28 | INFO | infermed.app | {"event": "explain_pair.done", "pair": ["Levodopa", "Haloperidol"], "answer_len": 5324}
+2025-11-15 16:46:12 | INFO | infermed.app | Fetched 3 models from Ollama: ['alibayram/medgemma:latest', 'gpt-oss:latest', 'mistral-nemo:12b']
+2025-11-15 16:46:41 | INFO | infermed.app | {"event": "maybe_load_context.begin", "pair": ["furosemide", "digoxin"], "use_cache": true}
+2025-11-15 16:51:27 | INFO | infermed.app | {"event": "maybe_load_context.get_context_cached", "pair": ["furosemide", "digoxin"], "cached": true}
+2025-11-15 16:53:51 | INFO | infermed.app | {"event": "explain_pair.done", "pair": ["furosemide", "digoxin"], "answer_len": 4042}
+2025-11-15 17:06:31 | INFO | infermed.app | Fetched 3 models from Ollama: ['alibayram/medgemma:latest', 'gpt-oss:latest', 'mistral-nemo:12b']
+2025-11-15 17:07:06 | INFO | infermed.app | {"event": "maybe_load_context.begin", "pair": ["metformin", "cimetidine"], "use_cache": true}
+2025-11-15 17:14:57 | INFO | infermed.app | {"event": "maybe_load_context.get_context_cached", "pair": ["metformin", "cimetidine"], "cached": true}
+2025-11-15 17:17:54 | INFO | infermed.app | {"event": "explain_pair.done", "pair": ["metformin", "cimetidine"], "answer_len": 4384}
+2025-11-15 17:22:20 | INFO | infermed.app | Fetched 3 models from Ollama: ['alibayram/medgemma:latest', 'gpt-oss:latest', 'mistral-nemo:12b']
+2025-11-15 17:23:00 | INFO | infermed.app | {"event": "maybe_load_context.begin", "pair": ["Lithium", "Thiazide Diuretic"], "use_cache": true}
+2025-11-15 17:24:01 | INFO | infermed.app | {"event": "maybe_load_context.get_context_cached", "pair": ["Lithium", "Thiazide Diuretic"], "cached": true}
+2025-11-15 17:26:35 | INFO | infermed.app | {"event": "explain_pair.done", "pair": ["Lithium", "Thiazide Diuretic"], "answer_len": 4255}
+2025-11-15 17:29:53 | INFO | infermed.app | Fetched 3 models from Ollama: ['alibayram/medgemma:latest', 'gpt-oss:latest', 'mistral-nemo:12b']
+2025-11-15 17:30:24 | INFO | infermed.app | {"event": "maybe_load_context.begin", "pair": ["ACE inhibitor", "NSAID"], "use_cache": true}
+2025-11-15 17:31:37 | INFO | infermed.app | {"event": "maybe_load_context.get_context_cached", "pair": ["ACE inhibitor", "NSAID"], "cached": true}
+2025-11-15 17:36:27 | INFO | infermed.app | {"event": "explain_pair.done", "pair": ["ACE inhibitor", "NSAID"], "answer_len": 5176}
+2025-11-15 17:39:15 | INFO | infermed.app | Fetched 3 models from Ollama: ['alibayram/medgemma:latest', 'gpt-oss:latest', 'mistral-nemo:12b']
+2025-11-15 17:40:49 | INFO | infermed.app | {"event": "maybe_load_context.begin", "pair": ["Azythromycin", "Ondansetron"], "use_cache": true}
+2025-11-15 17:45:31 | INFO | infermed.app | {"event": "maybe_load_context.get_context_cached", "pair": ["Azythromycin", "Ondansetron"], "cached": true}
+2025-11-15 17:48:04 | INFO | infermed.app | {"event": "explain_pair.done", "pair": ["Azythromycin", "Ondansetron"], "answer_len": 4754}
+2025-11-15 17:51:49 | INFO | infermed.app | Fetched 3 models from Ollama: ['alibayram/medgemma:latest', 'gpt-oss:latest', 'mistral-nemo:12b']
+2025-11-15 17:52:31 | INFO | infermed.app | {"event": "maybe_load_context.begin", "pair": ["warfarin", "cranberry supplement"], "use_cache": true}
+2025-11-15 17:53:21 | INFO | infermed.app | {"event": "maybe_load_context.get_context_cached", "pair": ["warfarin", "cranberry supplement"], "cached": true}
+2025-11-15 17:55:26 | INFO | infermed.app | {"event": "explain_pair.done", "pair": ["warfarin", "cranberry supplement"], "answer_len": 4777}
+2025-11-15 18:09:14 | INFO | infermed.app | Fetched 3 models from Ollama: ['alibayram/medgemma:latest', 'gpt-oss:latest', 'mistral-nemo:12b']
+2025-11-15 18:10:15 | INFO | infermed.app | {"event": "maybe_load_context.begin", "pair": ["Spironolactone", "Eplerenone"], "use_cache": true}
+2025-11-15 18:17:57 | INFO | infermed.app | {"event": "maybe_load_context.get_context_cached", "pair": ["Spironolactone", "Eplerenone"], "cached": true}
+2025-11-15 18:20:54 | INFO | infermed.app | {"event": "explain_pair.done", "pair": ["Spironolactone", "Eplerenone"], "answer_len": 4821}
+2025-11-15 18:27:23 | INFO | infermed.app | Fetched 3 models from Ollama: ['alibayram/medgemma:latest', 'gpt-oss:latest', 'mistral-nemo:12b']
+2025-11-15 18:27:53 | INFO | infermed.app | {"event": "maybe_load_context.begin", "pair": ["Fluoxetine", "NSAID"], "use_cache": true}
+2025-11-15 18:31:54 | INFO | infermed.app | {"event": "maybe_load_context.get_context_cached", "pair": ["Fluoxetine", "NSAID"], "cached": true}
+2025-11-15 18:34:15 | INFO | infermed.app | {"event": "explain_pair.done", "pair": ["Fluoxetine", "NSAID"], "answer_len": 4599}
+2025-11-15 18:40:57 | INFO | infermed.app | Fetched 3 models from Ollama: ['alibayram/medgemma:latest', 'gpt-oss:latest', 'mistral-nemo:12b']
+2025-11-15 18:41:12 | INFO | infermed.app | {"event": "maybe_load_context.begin", "pair": ["Alcohol", "Paracetamol"], "use_cache": true}
+2025-11-15 18:42:47 | INFO | infermed.app | {"event": "maybe_load_context.get_context_cached", "pair": ["Alcohol", "Paracetamol"], "cached": true}
+2025-11-15 18:45:08 | INFO | infermed.app | {"event": "explain_pair.done", "pair": ["Alcohol", "Paracetamol"], "answer_len": 4370}
+2025-11-15 18:46:34 | INFO | infermed.app | Fetched 3 models from Ollama: ['alibayram/medgemma:latest', 'gpt-oss:latest', 'mistral-nemo:12b']
+2025-11-15 18:46:58 | INFO | infermed.app | {"event": "maybe_load_context.begin", "pair": ["Omeprazole", "Clopidogrel"], "use_cache": true}
+2025-11-15 18:50:45 | INFO | infermed.app | {"event": "maybe_load_context.get_context_cached", "pair": ["Omeprazole", "Clopidogrel"], "cached": true}
+2025-11-15 18:53:29 | INFO | infermed.app | {"event": "explain_pair.done", "pair": ["Omeprazole", "Clopidogrel"], "answer_len": 4499}
+2025-11-15 18:56:23 | INFO | infermed.app | Fetched 3 models from Ollama: ['alibayram/medgemma:latest', 'gpt-oss:latest', 'mistral-nemo:12b']
+2025-11-15 18:56:48 | INFO | infermed.app | {"event": "maybe_load_context.begin", "pair": ["Verapamil", "Atenolol"], "use_cache": true}
+2025-11-15 19:04:33 | INFO | infermed.app | {"event": "maybe_load_context.get_context_cached", "pair": ["Verapamil", "Atenolol"], "cached": true}
+2025-11-15 19:07:08 | INFO | infermed.app | {"event": "explain_pair.done", "pair": ["Verapamil", "Atenolol"], "answer_len": 4669}
+2025-11-15 19:09:07 | INFO | infermed.app | Fetched 3 models from Ollama: ['alibayram/medgemma:latest', 'gpt-oss:latest', 'mistral-nemo:12b']
+2025-11-15 19:09:32 | INFO | infermed.app | {"event": "maybe_load_context.begin", "pair": ["Phenytoin", "doxycycline"], "use_cache": true}
+2025-11-15 19:17:29 | INFO | infermed.app | {"event": "maybe_load_context.get_context_cached", "pair": ["Phenytoin", "doxycycline"], "cached": true}
+2025-11-15 19:20:23 | INFO | infermed.app | {"event": "explain_pair.done", "pair": ["Phenytoin", "doxycycline"], "answer_len": 5018}
+2025-11-16 12:08:04 | INFO | infermed.app | Fetched 3 models from Ollama: ['alibayram/medgemma:latest', 'gpt-oss:latest', 'mistral-nemo:12b']
+2025-11-16 12:09:04 | INFO | infermed.app | {"event": "maybe_load_context.begin", "pair": ["fluconazole", "Cisapride"], "use_cache": true}
+2025-11-16 12:14:34 | INFO | infermed.app | {"event": "maybe_load_context.get_context_cached", "pair": ["fluconazole", "Cisapride"], "cached": true}
+2025-11-16 12:17:28 | INFO | infermed.app | {"event": "explain_pair.done", "pair": ["fluconazole", "Cisapride"], "answer_len": 4427}
+2025-11-16 12:20:07 | INFO | infermed.app | Fetched 3 models from Ollama: ['alibayram/medgemma:latest', 'gpt-oss:latest', 'mistral-nemo:12b']
+2025-11-16 12:21:47 | INFO | infermed.app | {"event": "maybe_load_context.begin", "pair": ["Warfarin", "Gingko biloba"], "use_cache": true}
+2025-11-16 12:26:39 | INFO | infermed.app | {"event": "maybe_load_context.get_context_cached", "pair": ["Warfarin", "Gingko biloba"], "cached": true}
+2025-11-16 12:28:49 | INFO | infermed.app | {"event": "explain_pair.done", "pair": ["Warfarin", "Gingko biloba"], "answer_len": 4288}
+2025-11-16 12:41:58 | INFO | infermed.app | Fetched 3 models from Ollama: ['alibayram/medgemma:latest', 'gpt-oss:latest', 'mistral-nemo:12b']
+2025-11-16 12:42:36 | INFO | infermed.app | {"event": "maybe_load_context.begin", "pair": ["Tacrolimus", "St Jonh's wort"], "use_cache": true}
+2025-11-16 12:47:36 | INFO | infermed.app | {"event": "maybe_load_context.get_context_cached", "pair": ["Tacrolimus", "St Jonh's wort"], "cached": true}
+2025-11-16 12:49:59 | INFO | infermed.app | {"event": "explain_pair.done", "pair": ["Tacrolimus", "St Jonh's wort"], "answer_len": 4637}
+2025-11-16 12:54:24 | INFO | infermed.app | Fetched 3 models from Ollama: ['alibayram/medgemma:latest', 'gpt-oss:latest', 'mistral-nemo:12b']
+2025-11-16 12:55:13 | INFO | infermed.app | {"event": "maybe_load_context.begin", "pair": ["Clozapine", "Smoking (tobacco)"], "use_cache": true}
+2025-11-16 12:59:44 | INFO | infermed.app | {"event": "maybe_load_context.get_context_cached", "pair": ["Clozapine", "Smoking (tobacco)"], "cached": true}
+2025-11-16 13:02:29 | INFO | infermed.app | {"event": "explain_pair.done", "pair": ["Clozapine", "Smoking (tobacco)"], "answer_len": 4221}
+2025-11-16 13:04:02 | INFO | infermed.app | Fetched 3 models from Ollama: ['alibayram/medgemma:latest', 'gpt-oss:latest', 'mistral-nemo:12b']
+2025-11-16 13:04:34 | INFO | infermed.app | {"event": "maybe_load_context.begin", "pair": ["Carbamazepine", "Grapefruit Juice"], "use_cache": true}
+2025-11-16 13:09:03 | INFO | infermed.app | {"event": "maybe_load_context.get_context_cached", "pair": ["Carbamazepine", "Grapefruit Juice"], "cached": true}
+2025-11-16 13:11:16 | INFO | infermed.app | {"event": "explain_pair.done", "pair": ["Carbamazepine", "Grapefruit Juice"], "answer_len": 4577}
+2025-11-16 13:14:47 | INFO | infermed.app | Fetched 3 models from Ollama: ['alibayram/medgemma:latest', 'gpt-oss:latest', 'mistral-nemo:12b']
+2025-11-16 13:15:05 | INFO | infermed.app | {"event": "maybe_load_context.begin", "pair": ["Etoposide", "Ketoconazole"], "use_cache": true}
+2025-11-16 13:23:14 | INFO | infermed.app | {"event": "maybe_load_context.get_context_cached", "pair": ["Etoposide", "Ketoconazole"], "cached": true}
+2025-11-16 13:26:05 | INFO | infermed.app | {"event": "explain_pair.done", "pair": ["Etoposide", "Ketoconazole"], "answer_len": 5373}
+2025-11-16 19:35:07 | INFO | infermed.app | {"event": "followup.done", "pair": ["Etoposide", "Ketoconazole"], "q_len": 55, "answer_len": 5171}
