@@ -6,3 +6,5 @@ streamlit>=1.28.0  # For the frontend
 pandas>=2.0.0  # For data handling
 plotly>=5.0.0  # For visualizations
 requests>=2.31.0  # For API calls
+sentence-transformers>=2.2.0  # For semantic search embeddings
+numpy>=1.24.0  # For numerical operations in semantic search
