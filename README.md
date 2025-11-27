@@ -23,8 +23,18 @@
 * **OpenFDA API**
   Used to query real-world adverse event data from FAERS (FDA Adverse Event Reporting System). Responses are **cached locally** in structured format to improve speed and reduce API dependency.
 
-* **Local LLM (Mistral via Ollama)**
-  A compact, fast, locally hosted language model that generates final natural language responses using retrieved evidence as context.
+* **External REST APIs (Enrichment)**
+  Additional APIs are integrated to enrich and disambiguate data:
+  * **UniProt REST API**: Protein-level data (targets, transporters, enzymes) with functional annotations
+  * **KEGG REST API**: Drug pathways, metabolism maps, and enzyme interactions
+  * **Reactome REST API**: Mechanistic biological pathways involving drug targets
+  * **PubChem REST API**: Protein label resolution and pharmacokinetic properties (molecular weight, LogP, H-bonding)
+
+* **Canonical PK/PD Dictionary**
+  A curated local JSON dictionary (`data/dictionary/canonical_pkpd.json`) providing authoritative, well-established interaction data with detailed mechanism descriptions, severity ratings, and evidence levels.
+
+* **Local LLM (via Ollama)**
+  A locally hosted language model that generates final natural language responses using retrieved evidence as context. Supports multiple models including Mistral, MedGemma, and others.
 
 ---
 
@@ -46,22 +56,37 @@ Modular backend components are organized as follows:
   Retrieves structured interaction data from Parquet datasets using DuckDB.
 
 * `src/retrieval/qlever_query.py`
-  Interfaces with QLever to extract graph-based PK/PD relationships from PubChem RDF.
+  Interfaces with QLever to extract graph-based PK/PD relationships from PubChem RDF. Also integrates UniProt, KEGG, and Reactome APIs for target enrichment and pathway discovery.
 
 * `src/retrieval/openfda_api.py`
   Queries and caches FDA-reported adverse event data via the OpenFDA API.
 
+* `src/retrieval/uniprot_client.py`
+  Client for UniProt REST API to obtain protein metadata, functional annotations, and transporter classifications.
+
+* `src/retrieval/kegg_client.py`
+  Client for KEGG REST API to retrieve drug pathways, metabolism maps, and common pathway analysis.
+
+* `src/retrieval/reactome_client.py`
+  Client for Reactome REST API to discover mechanistic biological pathways involving drug targets.
+
+* `src/retrieval/pubchem_client.py`
+  Client for PubChem REST API to resolve protein labels and retrieve pharmacokinetic properties.
+
+* `src/utils/pkpd_utils.py`
+  Synthesizes PK/PD evidence from multiple sources, detects enzyme/target/pathway overlaps, and integrates canonical interaction data. Generates compact risk summaries for LLM consumption.
+
 * `src/llm/llm_interface.py`
-  Interfaces with a local LLM (e.g., Mistral) using structured prompts and pre-assembled context.
+  Interfaces with a local LLM via Ollama using structured prompts and pre-assembled context. Handles prompt template selection, context summarization, and response generation.
 
 * `src/llm/rag_pipeline.py`
-  Orchestrates retrieval from DuckDB, QLever, and OpenFDA. Selects prompt templates based on user mode and generates the final explanation via LLM.
+  Orchestrates sequential retrieval from DuckDB, QLever, and OpenFDA. Integrates external API enrichment and canonical dictionary lookups. Selects prompt templates based on user mode and generates the final explanation via LLM.
 
 * `src/frontend/app.py`
-  The Streamlit-based frontend for entering drug names, selecting user mode, and viewing interaction explanations.
+  The Streamlit-based frontend for entering drug names, selecting user mode, and viewing interaction explanations with supporting evidence.
 
 * `src/utils/`
-  Shared utility functions (caching, parsing, pathway analysis, etc.).
+  Shared utility functions (caching, parsing, pathway analysis, normalization, etc.).
 
 ---
 
@@ -70,20 +95,22 @@ Modular backend components are organized as follows:
 ```bash
 INFERMed/
 ├── data/
-│   ├── duckdb/      # Parquet and/or DuckDB files (e.g., twosides.parquet)
-│   ├── openfda/     # Cached OpenFDA JSON/Parquet responses
-│   └── pubchem/     # Filtered PubChem RDF .ttl or QLever index
-├── models/          # Local LLM models (not tracked in Git)
-├── scripts/         # Setup and utility scripts (e.g., scaffold.ps1)
+│   ├── duckdb/         # Parquet files (e.g., twosides.parquet)
+│   ├── dictionary/     # Canonical PK/PD dictionary (canonical_pkpd.json)
+│   ├── openfda/        # Cached OpenFDA JSON responses
+│   ├── cache/          # Cached contexts and LLM responses
+│   └── pubchem/        # Filtered PubChem RDF .ttl or QLever index
+├── models/             # Local LLM models (not tracked in Git)
+├── scripts/            # Setup and utility scripts
 ├── src/
-│   ├── frontend/    # Streamlit UI
-│   ├── llm/         # RAG orchestration and LLM interface
-│   ├── retrieval/   # Query interfaces for DuckDB, OpenFDA, QLever
-│   └── utils/       # Shared utilities and PK/PD tools
-├── tests/           # Unit tests and sample validation inputs
-├── requirements.txt # Python dependencies
-├── .gitignore       # Excludes datasets, cache, models
-└── README.md        # This document
+│   ├── frontend/       # Streamlit UI
+│   ├── llm/            # RAG orchestration and LLM interface
+│   ├── retrieval/      # Query interfaces (DuckDB, QLever, OpenFDA, UniProt, KEGG, Reactome, PubChem)
+│   └── utils/          # Shared utilities and PK/PD synthesis tools
+├── tests/              # Unit tests and sample validation inputs
+├── requirements.txt    # Python dependencies
+├── .gitignore         # Excludes datasets, cache, models
+└── README.md          # This document
 ```
 
 ---
@@ -111,8 +138,17 @@ INFERMed/
 
    * Filter relevant `.ttl` files and place them in `data/pubchem/`
    * Build a QLever index if needed and connect via `qlever_query.py`
+   * Set environment variables for QLever endpoints:
+     ```bash
+     export CORE_ENDPOINT=<your_qlever_core_endpoint>
+     export DISEASE_ENDPOINT=<your_qlever_disease_endpoint>
+     export BIO_ENDPOINT=<your_qlever_bio_endpoint>  # Optional but recommended
+     ```
 
-4. **Run the app**
+4. **Set up canonical PK/PD dictionary** (optional but recommended)
+   * Place `canonical_pkpd.json` in `data/dictionary/` for authoritative interaction data
+
+5. **Run the app**
 
    ```bash
    streamlit run src/frontend/app.py
@@ -122,27 +158,48 @@ INFERMed/
 
 ## ⚡ Performance Tips
 
-* Cached OpenFDA results in `data/openfda/` prevent unnecessary API calls
+* **Caching**: The system implements multi-level caching:
+  * OpenFDA API responses are cached in `data/openfda/`
+  * Assembled contexts are cached in `data/cache/contexts/`
+  * Generated LLM responses are cached in `data/cache/responses/`
+* **Context Truncation**: To manage context size, the system applies top-K truncation:
+  * Side effects: top 25 per drug
+  * FAERS reactions: top 10 per drug and for combinations
+  * Targets: top 32 per drug
+  * Pathways: top 24 per drug
+* **Timeout Management**: 
+  * QLever SPARQL queries: 90 seconds
+  * OpenFDA API: 8 seconds with retry logic
+  * Enrichment APIs (UniProt, KEGG, Reactome, PubChem): 10-15 seconds
 * Use filtered PubChem data to avoid massive memory overhead
-* Consider converting all Parquet files into a `.duckdb` database for compact storage and faster joins
-* Tune prompt templates (`prompt_templates.txt`) per user mode to optimize LLM responses
+* Tune prompt templates (`src/llm/prompt_templates.txt`) per user mode to optimize LLM responses
 
 ---
 
 ## 🧚️ Testing & Evaluation
 
-* Run functional tests in `tests/test_interactions.py`
-* Evaluate system on common DDI pairs (e.g., simvastatin + clarithromycin)
+* Run functional tests in `tests/`
+* Evaluate system on common DDI pairs (e.g., simvastatin + clarithromycin, warfarin + ciprofloxacin)
+* Test with multiple drug combinations to verify API integrations and canonical dictionary usage
 * Compare INFERMed explanations to baseline tools like Drugs.com or Medscape
+* Check evidence grounding: all claims should be traceable to retrieved data sources
 
 ---
 
-## 💪 Future Extensions
+## 💪 Recent Enhancements
+
+* **External API Integration**: Added UniProt, KEGG, and Reactome REST APIs for comprehensive target and pathway enrichment
+* **Canonical PK/PD Dictionary**: Integrated authoritative interaction data with detailed mechanisms and severity ratings
+* **Enhanced PK/PD Synthesis**: Improved overlap detection and risk summarization with multi-source evidence integration
+* **Evidence Grounding**: Strict evidence-first reasoning with explicit source attribution and caveat documentation
+
+## 🔮 Future Extensions
 
 * Add drug–gene or protein–protein interaction graphs
 * Incorporate vector search for literature context (e.g., PubMed abstracts)
 * Add multilingual support (e.g., Polish mode for local deployment)
 * Expand LLM reasoning with Chain-of-Thought prompting or QA-GNN integration
+* Implement parallel retrieval for improved latency
 
 ---
 
