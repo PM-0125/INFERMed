@@ -32,12 +32,18 @@ from src.utils.query_expansion import (
     merge_expanded_results,
     create_expanded_query_context,
 )
+from src.retrieval.hybrid_search import hybrid_search_drugs, adaptive_hybrid_search
+from src.utils.adaptive_retrieval import adaptive_retrieve, calculate_result_quality
+from src.utils.reranking import get_reranker
+from src.utils.feedback_loops import get_feedback_tracker
+from src.utils.context_filtering import filter_context_by_relevance, filter_context_sections
 
 # LLM interface (import model name so response cache keys are stable)
 from src.llm.llm_interface import generate_response, MODEL_NAME as LLM_MODEL_NAME
 
 # ----------------- versioning & caching -----------------
-VERSION = 6  # bump when schema/logic changes to invalidate old cached contexts
+VERSION = 7  # bump when schema/logic changes to invalidate old cached contexts
+# Version 7: Added hybrid search, adaptive retrieval, reranking, feedback loops, context filtering
 # Version 6: Added query expansion with synonyms, variations, and semantic similarity
 # Version 5: Added semantic search with embeddings and relevance scoring/ranking
 # Version 4: Added KEGG/Reactome/UniProt API integrations, enhanced PK/PD summarization,
@@ -501,8 +507,60 @@ def retrieve_and_normalize(
             "qlever_contributed": ql_contrib,
         },
     }
-
-    return context
+    
+    # Apply reranking to side effects if reranker is available
+    reranker = get_reranker()
+    if reranker and reranker._initialized:
+        try:
+            # Rerank side effects by query relevance
+            query_text = f"{a} and {b} interaction"
+            if side_effects_a and scored_se_a:
+                reranked_se_a = reranker.rerank_with_scores(
+                    query_text,
+                    scored_se_a[:topk_side_effects * 2],
+                    top_k=topk_side_effects,
+                    combine_with_original=True,
+                    original_weight=0.4,
+                    rerank_weight=0.6
+                )
+                side_effects_a = [se for se, _ in reranked_se_a]
+                context["signals"]["tabular"]["side_effects_a"] = side_effects_a
+            
+            if side_effects_b and scored_se_b:
+                reranked_se_b = reranker.rerank_with_scores(
+                    query_text,
+                    scored_se_b[:topk_side_effects * 2],
+                    top_k=topk_side_effects,
+                    combine_with_original=True,
+                    original_weight=0.4,
+                    rerank_weight=0.6
+                )
+                side_effects_b = [se for se, _ in reranked_se_b]
+                context["signals"]["tabular"]["side_effects_b"] = side_effects_b
+        except Exception as e:
+            LOG.warning(f"Reranking failed: {e}")
+    
+    # Update sources to include reranking
+    if reranker and reranker._initialized:
+        context["sources"]["reranking"] = ["Re-ranking (Cross-Encoder)"]
+    
+    # Apply query-to-context filtering to remove low-relevance items
+    query_text = f"{a} + {b}"
+    filtered_context, filter_metadata = filter_context_by_relevance(
+        context,
+        query_text,
+        query_context_se,
+        min_relevance=0.1,  # Low threshold to keep most items, but filter very irrelevant ones
+        preserve_structure=True
+    )
+    
+    # Add filtering metadata to context
+    if filter_metadata.get("filter_ratio", 0) > 0:
+        filtered_context["meta"]["context_filtered"] = True
+        filtered_context["meta"]["filter_ratio"] = filter_metadata["filter_ratio"]
+        filtered_context["meta"]["filtered_sections"] = filter_metadata.get("filtered_sections", [])
+    
+    return filtered_context
 
 
 def get_context_cached(
@@ -636,7 +694,66 @@ def run_rag(
             model_name=selected_model,
         )
 
+    # Track retrieved items for potential feedback (optional)
+    retrieved_items = []
+    if context.get("signals"):
+        signals = context["signals"]
+        if "tabular" in signals:
+            retrieved_items.extend(signals["tabular"].get("side_effects_a", []))
+            retrieved_items.extend(signals["tabular"].get("side_effects_b", []))
+        if "mechanistic" in signals:
+            retrieved_items.extend(signals["mechanistic"].get("targets_a", []))
+            retrieved_items.extend(signals["mechanistic"].get("targets_b", []))
+    
+    # Store retrieved items in answer metadata for feedback tracking
+    if "meta" not in answer:
+        answer["meta"] = {}
+    answer["meta"]["retrieved_items"] = list(set(retrieved_items))  # Deduplicate
+    
     return {"context": context, "answer": answer}
+
+
+def record_feedback(
+    drugA: str,
+    drugB: str,
+    response_quality: str,
+    user_rating: Optional[float] = None,
+    context: Optional[Dict[str, Any]] = None
+):
+    """
+    Record feedback on a query-response pair for learning.
+    
+    Args:
+        drugA: First drug name
+        drugB: Second drug name
+        response_quality: Quality assessment ("good", "bad", "neutral")
+        user_rating: Optional numeric rating (0-1)
+        context: Optional context dictionary
+    """
+    try:
+        tracker = get_feedback_tracker()
+        
+        # Extract retrieved items from context if provided
+        retrieved_items = []
+        if context and "signals" in context:
+            signals = context["signals"]
+            if "tabular" in signals:
+                retrieved_items.extend(signals["tabular"].get("side_effects_a", []))
+                retrieved_items.extend(signals["tabular"].get("side_effects_b", []))
+            if "mechanistic" in signals:
+                retrieved_items.extend(signals["mechanistic"].get("targets_a", []))
+                retrieved_items.extend(signals["mechanistic"].get("targets_b", []))
+        
+        query = f"{drugA} + {drugB}"
+        tracker.record_feedback(
+            query,
+            retrieved_items,
+            response_quality,
+            user_rating=user_rating,
+            context=context
+        )
+    except Exception as e:
+        LOG.warning(f"Failed to record feedback: {e}")
 
 
 # ----------------- small cache helpers (optional) -----------------
