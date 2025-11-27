@@ -25,12 +25,20 @@ from src.utils.relevance_scoring import (
     score_and_rank_targets,
     merge_and_rerank_evidence,
 )
+from src.utils.query_expansion import (
+    expand_drug_query,
+    expand_drug_pair_queries,
+    get_best_match_from_expanded,
+    merge_expanded_results,
+    create_expanded_query_context,
+)
 
 # LLM interface (import model name so response cache keys are stable)
 from src.llm.llm_interface import generate_response, MODEL_NAME as LLM_MODEL_NAME
 
 # ----------------- versioning & caching -----------------
-VERSION = 5  # bump when schema/logic changes to invalidate old cached contexts
+VERSION = 6  # bump when schema/logic changes to invalidate old cached contexts
+# Version 6: Added query expansion with synonyms, variations, and semantic similarity
 # Version 5: Added semantic search with embeddings and relevance scoring/ranking
 # Version 4: Added KEGG/Reactome/UniProt API integrations, enhanced PK/PD summarization,
 #            PubChem PK data, target enrichment, pathway enhancements
@@ -203,48 +211,61 @@ def retrieve_and_normalize(
         except Exception:
             use_semantic = False
     
-    # Helper function to find drugs with semantic search fallback
-    def find_drug_with_semantic(query_drug: str) -> List[str]:
-        """Find drug names using exact match first, then semantic search if needed."""
-        candidates = [query_drug]
-        
-        # Try exact match first
-        exact_match = db.get_side_effects(query_drug, top_k=1)
-        if exact_match:
-            return [query_drug]
-        
-        # If no exact match and semantic search available, try semantic
-        if use_semantic and semantic_searcher:
-            similar = semantic_searcher.search_similar_drugs(query_drug, top_k=3, threshold=0.6)
-            if similar:
-                candidates.extend([drug for drug, score in similar])
-        
-        return candidates
+    # Query expansion: Get synonyms and expand queries
+    synonyms_a = db.get_synonyms(a) if hasattr(db, 'get_synonyms') else []
+    synonyms_b = db.get_synonyms(b) if hasattr(db, 'get_synonyms') else []
+    
+    # Expand drug queries
+    expanded_queries = create_expanded_query_context(
+        a, b,
+        synonyms_a=synonyms_a,
+        synonyms_b=synonyms_b,
+        semantic_searcher=semantic_searcher if use_semantic else None
+    )
+    
+    expanded_a = expanded_queries["expanded"]["drug_a"]
+    expanded_b = expanded_queries["expanded"]["drug_b"]
+    
+    # Use expanded queries for retrieval, but prioritize original terms
     
     try:
         # TwoSides side effects (single-drug & pair)
-        # Get initial results (may be empty if exact match fails)
-        se_a_raw = db.get_side_effects(a, top_k=topk_side_effects * 2) or []  # Get more for ranking
-        se_b_raw = db.get_side_effects(b, top_k=topk_side_effects * 2) or []
-        se_pair_raw = db.get_side_effects(a, b, top_k=topk_side_effects * 2) or []
+        # Try expanded queries in order of priority (original first, then synonyms/variations)
+        se_a_raw = []
+        se_b_raw = []
+        se_pair_raw = []
         
-        # If no results and semantic search available, try semantic matching
-        if use_semantic and semantic_searcher:
-            if not se_a_raw:
-                similar_a = semantic_searcher.search_similar_drugs(a, top_k=5, threshold=0.6)
-                for similar_drug, sim_score in similar_a:
-                    similar_se = db.get_side_effects(similar_drug, top_k=topk_side_effects)
-                    if similar_se:
-                        se_a_raw.extend(similar_se)
-                        break  # Use first successful match
-            
-            if not se_b_raw:
-                similar_b = semantic_searcher.search_similar_drugs(b, top_k=5, threshold=0.6)
-                for similar_drug, sim_score in similar_b:
-                    similar_se = db.get_side_effects(similar_drug, top_k=topk_side_effects)
-                    if similar_se:
-                        se_b_raw.extend(similar_se)
-                        break
+        # Try each expanded term for drug A until we get results
+        for expanded_term_a in expanded_a:
+            results_a = db.get_side_effects(expanded_term_a, top_k=topk_side_effects * 2) or []
+            if results_a:
+                se_a_raw = results_a
+                break
+        
+        # Try each expanded term for drug B
+        for expanded_term_b in expanded_b:
+            results_b = db.get_side_effects(expanded_term_b, top_k=topk_side_effects * 2) or []
+            if results_b:
+                se_b_raw = results_b
+                break
+        
+        # For pair, try combinations of expanded terms (prioritize original pair)
+        pair_results = db.get_side_effects(a, b, top_k=topk_side_effects * 2) or []
+        if pair_results:
+            se_pair_raw = pair_results
+        else:
+            # Try expanded terms if original pair fails
+            for expanded_term_a in expanded_a[:3]:  # Limit to top 3 to avoid too many combinations
+                for expanded_term_b in expanded_b[:3]:
+                    if expanded_term_a == a and expanded_term_b == b:
+                        continue  # Already tried
+                    results = db.get_side_effects(expanded_term_a, expanded_term_b, top_k=topk_side_effects * 2) or []
+                    if results:
+                        se_pair_raw.extend(results)
+                        if len(se_pair_raw) >= topk_side_effects * 2:
+                            break
+                if se_pair_raw:
+                    break
         
         # Get pair PRR using the dedicated method
         prr_pair = db.get_interaction_score(a, b)
@@ -469,6 +490,7 @@ def retrieve_and_normalize(
             "apis": ["PubChem REST API", "UniProt REST API", "KEGG REST API", "Reactome REST API"],
             "canonical": ["Canonical PK/PD Dictionary"] if has_canonical else [],
             "semantic": ["Semantic Search (Embeddings)"] if use_semantic else [],
+            "query_expansion": ["Query Expansion (Synonyms, Variations)"] if expanded_queries["expansion_methods"]["synonyms"] or expanded_queries["expansion_methods"]["variations"] else [],
         },
         "meta": {
             "drug_pair": f"{drugA}|{drugB}",
