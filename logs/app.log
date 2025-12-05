@@ -332,3 +332,19 @@
 2025-11-16 19:35:07 | INFO | infermed.app | {"event": "followup.done", "pair": ["Etoposide", "Ketoconazole"], "q_len": 55, "answer_len": 5171}
 2025-11-16 20:06:10 | INFO | infermed.app | {"event": "followup.done", "pair": ["Etoposide", "Ketoconazole"], "q_len": 48, "answer_len": 4001}
 2025-11-19 13:35:34 | INFO | infermed.app | Fetched 6 models from Ollama: ['thewindmom/llama3-med42-8b:latest', 'cniongolo/biomistral:latest', 'medllama2:latest', 'alibayram/medgemma:latest', 'gpt-oss:latest', 'mistral-nemo:12b']
+2025-11-30 10:53:29 | INFO | infermed.app | Fetched 4 models from Ollama: ['gpt-oss:latest', 'merlinvn/MedicalQA-Llama-3.2-3B-Instruct:latest', 'Elixpo/LlamaMedicine:latest', 'mistral-nemo:12b']
+2025-11-30 10:53:57 | INFO | infermed.app | {"event": "maybe_load_context.begin", "pair": ["warfarin", "fluconazole"], "use_cache": false}
+2025-11-30 11:02:04 | INFO | infermed.app | {"event": "maybe_load_context.get_context_cached", "pair": ["warfarin", "fluconazole"], "cached": false, "force_refresh": true}
+2025-11-30 11:04:36 | INFO | infermed.app | {"event": "explain_pair.done", "pair": ["warfarin", "fluconazole"], "answer_len": 4391}
+2025-11-30 11:10:24 | INFO | infermed.app | {"event": "maybe_load_context.begin", "pair": ["Lithium", "ACE Inhibitor"], "use_cache": false}
+2025-11-30 11:11:17 | INFO | infermed.app | {"event": "maybe_load_context.get_context_cached", "pair": ["Lithium", "ACE Inhibitor"], "cached": false, "force_refresh": true}
+2025-11-30 11:13:51 | INFO | infermed.app | {"event": "explain_pair.done", "pair": ["Lithium", "ACE Inhibitor"], "answer_len": 4627}
+2025-12-05 12:36:23 | INFO | infermed.app | Fetched 4 models from Ollama: ['gpt-oss:latest', 'merlinvn/MedicalQA-Llama-3.2-3B-Instruct:latest', 'Elixpo/LlamaMedicine:latest', 'mistral-nemo:12b']
+2025-12-05 13:42:05 | INFO | infermed.app | Fetched 4 models from Ollama: ['gpt-oss:latest', 'merlinvn/MedicalQA-Llama-3.2-3B-Instruct:latest', 'Elixpo/LlamaMedicine:latest', 'mistral-nemo:12b']
+2025-12-05 13:42:30 | INFO | infermed.app | {"event": "maybe_load_context.begin", "pair": ["warfarin", "fluconazole"], "use_cache": true}
+2025-12-05 13:42:30 | INFO | infermed.app | {"event": "maybe_load_context.get_context_cached", "pair": ["warfarin", "fluconazole"], "cached": true}
+2025-12-05 13:45:29 | INFO | infermed.app | {"event": "explain_pair.done", "pair": ["warfarin", "fluconazole"], "answer_len": 5295}
+2025-12-05 14:15:55 | INFO | infermed.app | {"event": "maybe_load_context.begin", "pair": ["Ibuprofen", "Methylphenidate"], "use_cache": true}
+2025-12-05 14:22:24 | INFO | infermed.app | {"event": "maybe_load_context.get_context_cached", "pair": ["Ibuprofen", "Methylphenidate"], "cached": true}
+2025-12-05 14:25:15 | INFO | infermed.app | {"event": "explain_pair.done", "pair": ["Ibuprofen", "Methylphenidate"], "answer_len": 4601}
+2025-12-05 14:29:17 | INFO | infermed.app | {"event": "feedback.submitted", "pair": ["Ibuprofen ", "Methylphenidate"], "rating": "moderate", "score": 0.5}
