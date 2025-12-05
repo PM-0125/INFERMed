@@ -18,6 +18,7 @@ from src.llm.rag_pipeline import (
     retrieve_and_normalize,
     run_rag,                 # uses get_response_cached internally when use_cache_response=True
     clear_context_cache,     # to clear disk cache for a pair
+    record_feedback,         # for user feedback tracking
 )
 from src.llm.llm_interface import generate_response, OLLAMA_HOST  # used for follow-ups when context is already present
 
@@ -346,6 +347,7 @@ def _init_state():
     st.session_state.setdefault("responses", {})
     st.session_state.setdefault("chat", [])
     st.session_state.setdefault("active_pair", ("", ""))
+    st.session_state.setdefault("feedback_submitted", {})  # Track feedback per pair
 
 
 def _render_header():
@@ -852,6 +854,78 @@ def _render_evidence(context: Dict[str, Any]):
         st.json(context)
 
 
+def _render_feedback_section(context: Dict[str, Any], drugA: str, drugB: str):
+    """Render user feedback section with three safety categories."""
+    pair_key = _pair_key(drugA, drugB)
+    pair_str = f"{pair_key[0]}|{pair_key[1]}"
+    feedback_key = f"feedback_{pair_str}"
+    
+    # Check if feedback already submitted for this pair
+    if st.session_state.feedback_submitted.get(pair_str, False):
+        st.markdown("---")
+        st.success("✅ Thank you! Your feedback has been recorded and will help improve the system.")
+        return
+    
+    st.markdown("---")
+    st.markdown("### 💬 Help Us Improve")
+    st.caption("Your feedback helps us improve the accuracy and safety of drug interaction assessments.")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        if st.button("✅ Good and Safe", use_container_width=True, key=f"{feedback_key}_good", type="primary"):
+            try:
+                record_feedback(
+                    drugA,
+                    drugB,
+                    "good",
+                    user_rating=0.9,
+                    context=context
+                )
+                st.session_state.feedback_submitted[pair_str] = True
+                log_event("feedback.submitted", pair=(drugA, drugB), rating="good", score=0.9)
+                st.rerun()
+            except Exception as e:
+                logger.error(f"Failed to record feedback: {e}")
+                st.error("Failed to record feedback. Please try again.")
+    
+    with col2:
+        if st.button("⚠️ Moderately Safe", use_container_width=True, key=f"{feedback_key}_moderate"):
+            try:
+                record_feedback(
+                    drugA,
+                    drugB,
+                    "neutral",
+                    user_rating=0.5,
+                    context=context
+                )
+                st.session_state.feedback_submitted[pair_str] = True
+                log_event("feedback.submitted", pair=(drugA, drugB), rating="moderate", score=0.5)
+                st.rerun()
+            except Exception as e:
+                logger.error(f"Failed to record feedback: {e}")
+                st.error("Failed to record feedback. Please try again.")
+    
+    with col3:
+        if st.button("❌ Unsafe", use_container_width=True, key=f"{feedback_key}_unsafe", type="secondary"):
+            try:
+                record_feedback(
+                    drugA,
+                    drugB,
+                    "bad",
+                    user_rating=0.1,
+                    context=context
+                )
+                st.session_state.feedback_submitted[pair_str] = True
+                log_event("feedback.submitted", pair=(drugA, drugB), rating="unsafe", score=0.1)
+                st.rerun()
+            except Exception as e:
+                logger.error(f"Failed to record feedback: {e}")
+                st.error("Failed to record feedback. Please try again.")
+    
+    st.caption("💡 Your feedback is anonymous and helps train the system to provide better assessments.")
+
+
 def _append_chat(role: str, text: str):
     st.session_state.chat.append({"role": role, "text": text})
 
@@ -1024,6 +1098,7 @@ ctx = st.session_state.context_by_pair.get(pair)
 if ctx:
     _render_topline(ctx)
     _render_evidence(ctx)
+    _render_feedback_section(ctx, st.session_state.drugA, st.session_state.drugB)
 
 _render_chat()
 _log_size = os.path.getsize(LOG_PATH) if os.path.exists(LOG_PATH) else 0
