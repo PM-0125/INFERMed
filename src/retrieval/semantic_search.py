@@ -54,10 +54,12 @@ class SemanticSearcher:
         self.side_effect_names: List[str] = []
         self._initialized = False
         
-        if HAS_EMBEDDINGS:
-            self._initialize_model()
-        else:
-            LOG.warning("sentence-transformers not available. Semantic search will be disabled.")
+        if not HAS_EMBEDDINGS:
+            raise RuntimeError(
+                "sentence-transformers is required for semantic search. "
+                "Please install it: pip install sentence-transformers"
+            )
+        self._initialize_model()
     
     def _initialize_model(self):
         """Initialize the embedding model."""
@@ -307,9 +309,14 @@ _global_searcher: Optional[SemanticSearcher] = None
 
 
 def get_semantic_searcher() -> Optional[SemanticSearcher]:
-    """Get or create global semantic searcher instance."""
+    """Get or create global semantic searcher instance (REQUIRED for RAG system)."""
     global _global_searcher
-    if _global_searcher is None and HAS_EMBEDDINGS:
+    if _global_searcher is None:
+        if not HAS_EMBEDDINGS:
+            raise RuntimeError(
+                "sentence-transformers is required for semantic search. "
+                "Please install it: pip install sentence-transformers"
+            )
         _global_searcher = SemanticSearcher()
     return _global_searcher
 

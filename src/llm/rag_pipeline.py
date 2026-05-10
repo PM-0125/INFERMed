@@ -4,9 +4,12 @@ from __future__ import annotations
 import os
 import json
 import hashlib
+import logging
 from typing import Any, Dict, Tuple, Optional, List
 from datetime import datetime
 from collections.abc import Mapping  # <-- for _jsonify_sets
+
+LOG = logging.getLogger(__name__)
 
 # Retrieval modules
 from src.retrieval import duckdb_query as dq
@@ -42,7 +45,9 @@ from src.utils.context_filtering import filter_context_by_relevance, filter_cont
 from src.llm.llm_interface import generate_response, MODEL_NAME as LLM_MODEL_NAME
 
 # ----------------- versioning & caching -----------------
-VERSION = 7  # bump when schema/logic changes to invalidate old cached contexts
+VERSION = 8  # bump when schema/logic changes to invalidate old cached contexts
+# Version 8: FORCED ENABLEMENT of all RAG features - semantic search, reranking, query expansion,
+#            hybrid search, and adaptive retrieval are now REQUIRED (not optional)
 # Version 7: Added hybrid search, adaptive retrieval, reranking, feedback loops, context filtering
 # Version 6: Added query expansion with synonyms, variations, and semantic similarity
 # Version 5: Added semantic search with embeddings and relevance scoring/ranking
@@ -192,82 +197,111 @@ def retrieve_and_normalize(
     db_targets_a: List[str] = []
     db_targets_b: List[str] = []
 
-    # Initialize semantic searcher (optional, graceful degradation if not available)
+    # Initialize semantic searcher (REQUIRED for RAG system)
     semantic_searcher = get_semantic_searcher()
-    use_semantic = semantic_searcher is not None
+    if semantic_searcher is None:
+        raise RuntimeError("Semantic search is required but not available. Please install sentence-transformers.")
+    use_semantic = True
     
-    # Try to build drug index if semantic search is available
-    if use_semantic:
-        try:
-            # Get all unique drug names from database for indexing
-            # This is a one-time operation, cached for subsequent queries
-            all_drugs_query = """
-                SELECT DISTINCT drug_a AS drug FROM twosides
-                UNION
-                SELECT DISTINCT drug_b AS drug FROM twosides
-                UNION
-                SELECT DISTINCT name_lower AS drug FROM drugbank
-            """
-            try:
-                all_drugs = [row[0] for row in db._con.execute(all_drugs_query).fetchall() if row[0]]
-                semantic_searcher.build_drug_index(all_drugs, force_rebuild=False)
-            except Exception as e:
-                # If indexing fails, continue without semantic search
-                use_semantic = False
-        except Exception:
-            use_semantic = False
+    # Build drug index (required for semantic search)
+    try:
+        # Get all unique drug names from database for indexing
+        # This is a one-time operation, cached for subsequent queries
+        all_drugs_query = """
+            SELECT DISTINCT drug_a AS drug FROM twosides
+            UNION
+            SELECT DISTINCT drug_b AS drug FROM twosides
+            UNION
+            SELECT DISTINCT name_lower AS drug FROM drugbank
+        """
+        all_drugs = [row[0] for row in db._con.execute(all_drugs_query).fetchall() if row[0]]
+        if not semantic_searcher.build_drug_index(all_drugs, force_rebuild=False):
+            LOG.warning("Failed to build drug index, but continuing with semantic search")
+    except Exception as e:
+        LOG.error(f"Failed to build drug index: {e}")
+        raise RuntimeError(f"Semantic search initialization failed: {e}")
     
-    # Query expansion: Get synonyms and expand queries
+    # Query expansion: Get synonyms and expand queries (REQUIRED for RAG system)
     synonyms_a = db.get_synonyms(a) if hasattr(db, 'get_synonyms') else []
     synonyms_b = db.get_synonyms(b) if hasattr(db, 'get_synonyms') else []
     
-    # Expand drug queries
+    # Expand drug queries with all methods enabled
     expanded_queries = create_expanded_query_context(
         a, b,
         synonyms_a=synonyms_a,
         synonyms_b=synonyms_b,
-        semantic_searcher=semantic_searcher if use_semantic else None
+        semantic_searcher=semantic_searcher  # Always use semantic searcher
     )
     
     expanded_a = expanded_queries["expanded"]["drug_a"]
     expanded_b = expanded_queries["expanded"]["drug_b"]
     
-    # Use expanded queries for retrieval, but prioritize original terms
+    # Use expanded queries for ALL retrieval operations
     
     try:
-        # TwoSides side effects (single-drug & pair)
-        # Try expanded queries in order of priority (original first, then synonyms/variations)
-        se_a_raw = []
-        se_b_raw = []
-        se_pair_raw = []
+        # TwoSides side effects using HYBRID SEARCH and ADAPTIVE RETRIEVAL
+        # Define keyword search function
+        def keyword_search_side_effects(query: str, k: int) -> List[Tuple[str, float]]:
+            """Keyword search for side effects."""
+            results = db.get_side_effects(query, top_k=k) or []
+            # Convert to (item, score) format with default score
+            return [(se, 1.0) for se in results]
         
-        # Try each expanded term for drug A until we get results
-        for expanded_term_a in expanded_a:
-            results_a = db.get_side_effects(expanded_term_a, top_k=topk_side_effects * 2) or []
-            if results_a:
-                se_a_raw = results_a
-                break
+        # Define semantic search function for side effects
+        def semantic_search_side_effects(query: str, k: int, threshold: float) -> List[Tuple[str, float]]:
+            """Semantic search for side effects."""
+            if not semantic_searcher or not semantic_searcher._initialized:
+                return []
+            # First get keyword results to build index if needed
+            keyword_results = db.get_side_effects(query, top_k=k * 2) or []
+            if keyword_results:
+                semantic_searcher.build_side_effect_index(keyword_results, force_rebuild=False)
+            # Search for similar side effects
+            similar = semantic_searcher.search_similar_side_effects(query, top_k=k, threshold=threshold)
+            return similar
         
-        # Try each expanded term for drug B
-        for expanded_term_b in expanded_b:
-            results_b = db.get_side_effects(expanded_term_b, top_k=topk_side_effects * 2) or []
-            if results_b:
-                se_b_raw = results_b
-                break
+        # Use adaptive hybrid search for drug A
+        se_a_results, se_a_metadata = adaptive_hybrid_search(
+            a,
+            keyword_search_fn=lambda q, k: keyword_search_side_effects(q, k),
+            semantic_search_fn=lambda q, k, t: semantic_search_side_effects(q, k, t),
+            initial_k=topk_side_effects,
+            min_relevance_threshold=0.3,
+            max_k=topk_side_effects * 4
+        )
+        se_a_raw = [se for se, _ in se_a_results]
         
-        # For pair, try combinations of expanded terms (prioritize original pair)
-        pair_results = db.get_side_effects(a, b, top_k=topk_side_effects * 2) or []
-        if pair_results:
-            se_pair_raw = pair_results
+        # Use adaptive hybrid search for drug B
+        se_b_results, se_b_metadata = adaptive_hybrid_search(
+            b,
+            keyword_search_fn=lambda q, k: keyword_search_side_effects(q, k),
+            semantic_search_fn=lambda q, k, t: semantic_search_side_effects(q, k, t),
+            initial_k=topk_side_effects,
+            min_relevance_threshold=0.3,
+            max_k=topk_side_effects * 4
+        )
+        se_b_raw = [se for se, _ in se_b_results]
+        
+        # For pair, use hybrid search with expanded terms
+        def keyword_search_pair(term_a: str, term_b: str, k: int) -> List[Tuple[str, float]]:
+            """Keyword search for pair side effects."""
+            results = db.get_side_effects(term_a, term_b, top_k=k) or []
+            return [(se, 1.0) for se in results]
+        
+        # Try original pair first
+        pair_keyword_results = keyword_search_pair(a, b, topk_side_effects * 2)
+        if pair_keyword_results:
+            se_pair_raw = [se for se, _ in pair_keyword_results]
         else:
-            # Try expanded terms if original pair fails
-            for expanded_term_a in expanded_a[:3]:  # Limit to top 3 to avoid too many combinations
+            # Try expanded term combinations
+            se_pair_raw = []
+            for expanded_term_a in expanded_a[:3]:
                 for expanded_term_b in expanded_b[:3]:
                     if expanded_term_a == a and expanded_term_b == b:
-                        continue  # Already tried
-                    results = db.get_side_effects(expanded_term_a, expanded_term_b, top_k=topk_side_effects * 2) or []
+                        continue
+                    results = keyword_search_pair(expanded_term_a, expanded_term_b, topk_side_effects * 2)
                     if results:
-                        se_pair_raw.extend(results)
+                        se_pair_raw.extend([se for se, _ in results])
                         if len(se_pair_raw) >= topk_side_effects * 2:
                             break
                 if se_pair_raw:
@@ -309,9 +343,27 @@ def retrieve_and_normalize(
         diqt_a = db.get_diqt_score(a)
         diqt_b = db.get_diqt_score(b)
 
-        # DrugBank targets (PD fallback)
-        db_targets_a = db.get_drug_targets(a) or []
-        db_targets_b = db.get_drug_targets(b) or []
+        # DrugBank targets (PD fallback) - use query expansion
+        db_targets_a = []
+        db_targets_b = []
+        # Try expanded terms for targets
+        for expanded_term_a in expanded_a:
+            targets = db.get_drug_targets(expanded_term_a) or []
+            if targets:
+                db_targets_a = targets
+                break
+        
+        for expanded_term_b in expanded_b:
+            targets = db.get_drug_targets(expanded_term_b) or []
+            if targets:
+                db_targets_b = targets
+                break
+        
+        # Fallback to original if no expanded terms found targets
+        if not db_targets_a:
+            db_targets_a = db.get_drug_targets(a) or []
+        if not db_targets_b:
+            db_targets_b = db.get_drug_targets(b) or []
 
     except Exception as e:
         caveats.append(f"DuckDB retrieval failed: {e}")
@@ -370,15 +422,44 @@ def retrieve_and_normalize(
         scored_common = score_and_rank_pathways(common_pathways, query_context, common_pathways)
         mech["common_pathways"] = [p for p, _ in scored_common[:topk_pathways]]
 
-    # 5) FAERS via OpenFDA (cached)
+    # 5) FAERS via OpenFDA (cached) - use query expansion
     faers_a: List[tuple] = []
     faers_b: List[tuple] = []
     faers_combo: List[tuple] = []
     try:
         ofda = OpenFDAClient(cache_dir=openfda_cache)
-        faers_a = ofda.get_top_reactions(a, top_k=topk_faers)      # [(term, count)]
-        faers_b = ofda.get_top_reactions(b, top_k=topk_faers)
-        faers_combo = ofda.get_combination_reactions(a, b, top_k=topk_faers)
+        # Try expanded terms for FAERS
+        for expanded_term_a in expanded_a:
+            reactions = ofda.get_top_reactions(expanded_term_a, top_k=topk_faers * 2)
+            if reactions:
+                faers_a = reactions
+                break
+        if not faers_a:
+            faers_a = ofda.get_top_reactions(a, top_k=topk_faers)
+        
+        for expanded_term_b in expanded_b:
+            reactions = ofda.get_top_reactions(expanded_term_b, top_k=topk_faers * 2)
+            if reactions:
+                faers_b = reactions
+                break
+        if not faers_b:
+            faers_b = ofda.get_top_reactions(b, top_k=topk_faers)
+        
+        # For combo, try original pair first, then expanded combinations
+        faers_combo = ofda.get_combination_reactions(a, b, top_k=topk_faers * 2)
+        if not faers_combo:
+            # Try expanded term combinations
+            for expanded_term_a in expanded_a[:3]:  # Limit to top 3
+                for expanded_term_b in expanded_b[:3]:
+                    if expanded_term_a == a and expanded_term_b == b:
+                        continue  # Already tried
+                    reactions = ofda.get_combination_reactions(expanded_term_a, expanded_term_b, top_k=topk_faers * 2)
+                    if reactions:
+                        faers_combo.extend(reactions)
+                        if len(faers_combo) >= topk_faers * 2:
+                            break
+                if faers_combo:
+                    break
     except Exception as e:
         caveats.append(f"OpenFDA retrieval failed: {e}")
 
@@ -495,8 +576,10 @@ def retrieve_and_normalize(
             "openfda": ["FAERS via OpenFDA (cached)"],
             "apis": ["PubChem REST API", "UniProt REST API", "KEGG REST API", "Reactome REST API"],
             "canonical": ["Canonical PK/PD Dictionary"] if has_canonical else [],
-            "semantic": ["Semantic Search (Embeddings)"] if use_semantic else [],
-            "query_expansion": ["Query Expansion (Synonyms, Variations)"] if expanded_queries["expansion_methods"]["synonyms"] or expanded_queries["expansion_methods"]["variations"] else [],
+            "semantic": ["Semantic Search (Embeddings)"],  # Always enabled
+            "query_expansion": ["Query Expansion (Synonyms, Variations, Semantic Similarity)"],  # Always enabled
+            "hybrid_search": ["Hybrid Search (Keyword + Semantic)"],  # Always enabled
+            "adaptive_retrieval": ["Adaptive Retrieval (Dynamic Top-K)"],  # Always enabled
         },
         "meta": {
             "drug_pair": f"{drugA}|{drugB}",
@@ -508,41 +591,64 @@ def retrieve_and_normalize(
         },
     }
     
-    # Apply reranking to side effects if reranker is available
+    # Apply reranking to side effects (REQUIRED for RAG system)
     reranker = get_reranker()
-    if reranker and reranker._initialized:
-        try:
-            # Rerank side effects by query relevance
-            query_text = f"{a} and {b} interaction"
-            if side_effects_a and scored_se_a:
-                reranked_se_a = reranker.rerank_with_scores(
-                    query_text,
-                    scored_se_a[:topk_side_effects * 2],
-                    top_k=topk_side_effects,
-                    combine_with_original=True,
-                    original_weight=0.4,
-                    rerank_weight=0.6
-                )
-                side_effects_a = [se for se, _ in reranked_se_a]
-                context["signals"]["tabular"]["side_effects_a"] = side_effects_a
-            
-            if side_effects_b and scored_se_b:
-                reranked_se_b = reranker.rerank_with_scores(
-                    query_text,
-                    scored_se_b[:topk_side_effects * 2],
-                    top_k=topk_side_effects,
-                    combine_with_original=True,
-                    original_weight=0.4,
-                    rerank_weight=0.6
-                )
-                side_effects_b = [se for se, _ in reranked_se_b]
-                context["signals"]["tabular"]["side_effects_b"] = side_effects_b
-        except Exception as e:
-            LOG.warning(f"Reranking failed: {e}")
+    if reranker is None or not reranker._initialized:
+        raise RuntimeError("Reranking is required but not available. Please install sentence-transformers.")
     
-    # Update sources to include reranking
-    if reranker and reranker._initialized:
-        context["sources"]["reranking"] = ["Re-ranking (Cross-Encoder)"]
+    try:
+        # Rerank side effects by query relevance
+        query_text = f"{a} and {b} interaction"
+        if side_effects_a and scored_se_a:
+            reranked_se_a = reranker.rerank_with_scores(
+                query_text,
+                scored_se_a[:topk_side_effects * 2],
+                top_k=topk_side_effects,
+                combine_with_original=True,
+                original_weight=0.4,
+                rerank_weight=0.6
+            )
+            side_effects_a = [se for se, _ in reranked_se_a]
+            context["signals"]["tabular"]["side_effects_a"] = side_effects_a
+        
+        if side_effects_b and scored_se_b:
+            reranked_se_b = reranker.rerank_with_scores(
+                query_text,
+                scored_se_b[:topk_side_effects * 2],
+                top_k=topk_side_effects,
+                combine_with_original=True,
+                original_weight=0.4,
+                rerank_weight=0.6
+            )
+            side_effects_b = [se for se, _ in reranked_se_b]
+            context["signals"]["tabular"]["side_effects_b"] = side_effects_b
+        
+        # Also rerank targets and pathways if available
+        mech_targets_a = mech.get("targets_a", [])
+        mech_targets_b = mech.get("targets_b", [])
+        if mech_targets_a:
+            target_texts = [f"{a} targets {t}" for t in mech_targets_a]
+            reranked_targets_a = reranker.rerank(
+                f"{a} drug targets",
+                target_texts,
+                top_k=topk_targets
+            )
+            context["signals"]["mechanistic"]["targets_a"] = [t.split()[-1] for t, _ in reranked_targets_a]
+        
+        if mech_targets_b:
+            target_texts = [f"{b} targets {t}" for t in mech_targets_b]
+            reranked_targets_b = reranker.rerank(
+                f"{b} drug targets",
+                target_texts,
+                top_k=topk_targets
+            )
+            context["signals"]["mechanistic"]["targets_b"] = [t.split()[-1] for t, _ in reranked_targets_b]
+    except Exception as e:
+        LOG.error(f"Reranking failed: {e}")
+        raise RuntimeError(f"Reranking is required but failed: {e}")
+    
+    # Update sources to include reranking (always enabled)
+    context["sources"]["reranking"] = ["Re-ranking (Cross-Encoder)"]
     
     # Apply query-to-context filtering to remove low-relevance items
     query_text = f"{a} + {b}"

@@ -35,10 +35,12 @@ class Reranker:
         self.model = None
         self._initialized = False
         
-        if HAS_CROSS_ENCODER:
-            self._initialize_model()
-        else:
-            LOG.warning("sentence-transformers not available. Re-ranking will be disabled.")
+        if not HAS_CROSS_ENCODER:
+            raise RuntimeError(
+                "sentence-transformers is required for reranking. "
+                "Please install it: pip install sentence-transformers"
+            )
+        self._initialize_model()
     
     def _initialize_model(self):
         """Initialize the cross-encoder model."""
@@ -169,9 +171,14 @@ _global_reranker: Optional[Reranker] = None
 
 
 def get_reranker(model_name: str = DEFAULT_RERANKER_MODEL) -> Optional[Reranker]:
-    """Get or create global reranker instance."""
+    """Get or create global reranker instance (REQUIRED for RAG system)."""
     global _global_reranker
-    if _global_reranker is None and HAS_CROSS_ENCODER:
+    if _global_reranker is None:
+        if not HAS_CROSS_ENCODER:
+            raise RuntimeError(
+                "sentence-transformers is required for reranking. "
+                "Please install it: pip install sentence-transformers"
+            )
         _global_reranker = Reranker(model_name)
     return _global_reranker
 
