@@ -9,9 +9,42 @@ PARQUET_DIR = os.environ.get("DUCKDB_DIR", "data/duckdb")
 
 @pytest.fixture(scope="module")
 def client():
-    # will raise if dir is missing
     init_duckdb_connection(PARQUET_DIR)
     return DuckDBClient(PARQUET_DIR)
+
+
+def test_missing_duckdb_dir_is_fail_soft(tmp_path, monkeypatch):
+    monkeypatch.setenv("INFERMED_DATA_MODE", "public_safe")
+    monkeypatch.setenv("ENABLE_DRUGBANK", "false")
+    init_duckdb_connection.cache_clear()
+
+    c = DuckDBClient(str(tmp_path / "missing"))
+
+    assert c.get_available_sources() == {
+        "twosides": False,
+        "dilirank": False,
+        "dictrank": False,
+        "diqt": False,
+        "drugbank": False,
+    }
+    assert c.get_side_effects("warfarin") == []
+    assert c.get_interaction_score("warfarin", "fluconazole") == 0.0
+    assert c.get_dili_risk("warfarin") is None
+    assert c.get_dict_rank("warfarin") == "unknown"
+    assert c.get_diqt_score("warfarin") is None
+    assert c.get_drug_targets("warfarin") == []
+    assert c.get_synonyms("warfarin") == []
+
+
+def test_public_safe_disables_drugbank_even_when_file_exists(monkeypatch):
+    monkeypatch.setenv("INFERMED_DATA_MODE", "public_safe")
+    monkeypatch.setenv("ENABLE_DRUGBANK", "true")
+    init_duckdb_connection.cache_clear()
+
+    c = DuckDBClient(PARQUET_DIR)
+
+    assert c.get_available_sources()["drugbank"] is False
+    assert c.get_drug_targets("warfarin") == []
 
 @pytest.mark.parametrize("drug, expect_list", [
     ("warfarin", True),

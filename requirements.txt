@@ -8,3 +8,5 @@ plotly>=5.0.0  # For visualizations
 requests>=2.31.0  # For API calls
 sentence-transformers>=2.2.0  # For semantic search embeddings
 numpy>=1.24.0  # For numerical operations in semantic search
+fastapi>=0.111,<0.120  # Backend API bridge for the React product frontend
+uvicorn>=0.29,<0.35  # ASGI server for FastAPI

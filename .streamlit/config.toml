@@ -8,10 +8,10 @@ font = "sans serif"
 
 [server]
 headless = true
+fileWatcherType = "none"
 # Note: enableCORS and enableXsrfProtection are incompatible
 # If you need CORS, set enableXsrfProtection = false
 enableXsrfProtection = true
 
 [browser]
 gatherUsageStats = false
-

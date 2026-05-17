@@ -1,0 +1,533 @@
+{
+  "signals": {
+    "tabular": {
+      "prr": 120.0,
+      "side_effects_a": [
+        "Nephrogenic systemic fibrosis",
+        "Skin induration",
+        "Atelectasis",
+        "Fibrosis",
+        "Joint range of motion decreased",
+        "Skin tightness",
+        "Osteosclerosis",
+        "Intervertebral disc degeneration",
+        "Abdominal wall haematoma",
+        "Renal injury",
+        "Pathological fracture",
+        "Skin fibrosis",
+        "Anhedonia",
+        "Kyphosis",
+        "Loose tooth",
+        "Metastases to spine",
+        "Skin hypertrophy",
+        "Vertebral foraminal stenosis",
+        "Spinal osteoarthritis",
+        "Deformity",
+        "Oral pain",
+        "Exposed bone in jaw",
+        "Joint contracture",
+        "Cerebral atrophy",
+        "Retroperitoneal haemorrhage"
+      ],
+      "side_effects_b": [
+        "Chronic graft versus host disease",
+        "Cytomegalovirus infection",
+        "Immune reconstitution syndrome",
+        "Acute graft versus host disease",
+        "Atelectasis",
+        "International normalised ratio increased",
+        "Acute graft versus host disease in skin",
+        "Mucosal inflammation",
+        "Lymphocyte count decreased",
+        "Transplant rejection",
+        "Haematotoxicity",
+        "Osteolysis",
+        "Cytomegalovirus test positive",
+        "Osteosclerosis",
+        "Biliary dyskinesia",
+        "Cholecystitis chronic",
+        "Gastrointestinal inflammation",
+        "Meningitis cryptococcal",
+        "Bone lesion",
+        "Immunosuppressant drug level increased",
+        "Mucous membrane disorder",
+        "Engraftment syndrome",
+        "Gallbladder cholesterolosis",
+        "Cystitis haemorrhagic",
+        "Osteomyelitis"
+      ],
+      "dili_a": 5.0,
+      "dili_b": 8.0,
+      "dict_a": "unknown",
+      "dict_b": 0.4,
+      "diqt_a": null,
+      "diqt_b": 4.0
+    },
+    "mechanistic": {
+      "enzymes": {
+        "a": {
+          "substrate": [],
+          "inhibitor": [
+            "cyp2c9"
+          ],
+          "inducer": []
+        },
+        "b": {
+          "substrate": [],
+          "inhibitor": [
+            "cyp3a4"
+          ],
+          "inducer": []
+        }
+      },
+      "targets_a": [],
+      "targets_b": [],
+      "diseases_a": [],
+      "diseases_b": [],
+      "pathways_a": [
+        "Warfarin sodium (USP);",
+        "Warfarin potassium (JP19);",
+        "Warfarin (INN);"
+      ],
+      "pathways_b": [
+        "Fluconazole (JP19/USP/INN);",
+        "Fosfluconazole (JAN/INN);"
+      ],
+      "common_pathways": [],
+      "ids_a": {
+        "pubchem_cid": "54678486"
+      },
+      "ids_b": {
+        "pubchem_cid": "3365"
+      },
+      "pk_data_a": {
+        "absorption": null,
+        "distribution": null,
+        "metabolism": null,
+        "excretion": null,
+        "clearance": null,
+        "half_life": null,
+        "bioavailability": null,
+        "protein_binding": null
+      },
+      "pk_data_b": {
+        "absorption": null,
+        "distribution": null,
+        "metabolism": null,
+        "excretion": null,
+        "clearance": null,
+        "half_life": null,
+        "bioavailability": null,
+        "protein_binding": null
+      },
+      "synonyms_a": [],
+      "synonyms_b": [],
+      "uniprot_ids_a": [],
+      "uniprot_ids_b": [],
+      "uniprot_targets_a": [],
+      "uniprot_targets_b": [],
+      "kegg_pathways_a": [
+        {
+          "drug_id": "dr:D00564",
+          "pathway_id": "dr:D00564",
+          "pathway_name": "Warfarin sodium (USP);"
+        },
+        {
+          "drug_id": "dr:D01280",
+          "pathway_id": "dr:D01280",
+          "pathway_name": "Warfarin potassium (JP19);"
+        },
+        {
+          "drug_id": "dr:D08682",
+          "pathway_id": "dr:D08682",
+          "pathway_name": "Warfarin (INN);"
+        }
+      ],
+      "kegg_pathways_b": [
+        {
+          "drug_id": "dr:D00322",
+          "pathway_id": "dr:D00322",
+          "pathway_name": "Fluconazole (JP19/USP/INN);"
+        },
+        {
+          "drug_id": "dr:D01429",
+          "pathway_id": "dr:D01429",
+          "pathway_name": "Fosfluconazole (JAN/INN);"
+        }
+      ],
+      "kegg_common_pathways": [],
+      "kegg_enzymes_a": [],
+      "kegg_enzymes_b": [],
+      "reactome_pathways_a": [],
+      "reactome_pathways_b": [],
+      "chembl_enrichment": {
+        "a": {
+          "enzymes": {
+            "substrate": [],
+            "inhibitor": [],
+            "inducer": []
+          },
+          "enzyme_strength": {
+            "strong": [],
+            "moderate": [],
+            "weak": [
+              "cyp2c9"
+            ]
+          },
+          "chembl_validation": {
+            "found": true,
+            "matches": [],
+            "mismatches": [
+              "cyp2c9"
+            ]
+          }
+        },
+        "b": {
+          "enzymes": {
+            "substrate": [],
+            "inhibitor": [],
+            "inducer": []
+          },
+          "enzyme_strength": {
+            "strong": [],
+            "moderate": [],
+            "weak": [
+              "cyp3a4"
+            ]
+          },
+          "chembl_validation": {
+            "found": true,
+            "matches": [],
+            "mismatches": [
+              "cyp3a4"
+            ]
+          }
+        }
+      }
+    },
+    "faers": {
+      "top_reactions_a": [
+        [
+          "DYSPNOEA",
+          6076
+        ],
+        [
+          "INTERNATIONAL NORMALISED RATIO INCREASED",
+          5355
+        ],
+        [
+          "FATIGUE",
+          4337
+        ],
+        [
+          "DIARRHOEA",
+          4168
+        ],
+        [
+          "NAUSEA",
+          4046
+        ],
+        [
+          "DRUG INTERACTION",
+          3871
+        ],
+        [
+          "DRUG INEFFECTIVE",
+          3744
+        ],
+        [
+          "DEATH",
+          3554
+        ],
+        [
+          "DIZZINESS",
+          3401
+        ],
+        [
+          "HEADACHE",
+          3382
+        ]
+      ],
+      "top_reactions_b": [
+        [
+          "DRUG INEFFECTIVE",
+          2880
+        ],
+        [
+          "OFF LABEL USE",
+          2719
+        ],
+        [
+          "PYREXIA",
+          2119
+        ],
+        [
+          "NAUSEA",
+          1714
+        ],
+        [
+          "PAIN",
+          1693
+        ],
+        [
+          "DIARRHOEA",
+          1648
+        ],
+        [
+          "HEADACHE",
+          1588
+        ],
+        [
+          "DRUG INTERACTION",
+          1490
+        ],
+        [
+          "FATIGUE",
+          1468
+        ],
+        [
+          "FEBRILE NEUTROPENIA",
+          1444
+        ]
+      ],
+      "combo_reactions": [
+        [
+          "DRUG INEFFECTIVE",
+          2880
+        ],
+        [
+          "OFF LABEL USE",
+          2719
+        ],
+        [
+          "PYREXIA",
+          1740
+        ],
+        [
+          "NAUSEA",
+          1714
+        ],
+        [
+          "PAIN",
+          1693
+        ],
+        [
+          "DIARRHOEA",
+          1648
+        ],
+        [
+          "HEADACHE",
+          1588
+        ],
+        [
+          "DRUG INTERACTION",
+          1490
+        ],
+        [
+          "FATIGUE",
+          1468
+        ],
+        [
+          "RASH",
+          1246
+        ]
+      ]
+    }
+  },
+  "drugs": {
+    "a": {
+      "name": "warfarin",
+      "synonyms": [],
+      "ids": {
+        "pubchem_cid": "54678486"
+      }
+    },
+    "b": {
+      "name": "fluconazole",
+      "synonyms": [],
+      "ids": {
+        "pubchem_cid": "3365"
+      }
+    }
+  },
+  "caveats": [
+    "QLever RDF disabled for NVIDIA demo runtime.",
+    "Semantic query expansion unavailable: Semantic searcher is required for query expansion. Please ensure semantic search is initialized.",
+    "QLever RDF disabled for NVIDIA demo runtime."
+  ],
+  "pkpd": {
+    "pk_summary": "CANONICAL PK INTERACTION (Well-Established Clinical Pk): Fluconazole inhibits CYP2C9-mediated metabolism of S-warfarin and CYP3A4 to a lesser degree. → ↑ warfarin exposure (Severity: High)",
+    "pd_summary": "No obvious PD overlap",
+    "pk_detail": {
+      "roles": {
+        "a": {
+          "substrate": [],
+          "inhibitor": [
+            "cyp2c9"
+          ],
+          "inducer": []
+        },
+        "b": {
+          "substrate": [],
+          "inhibitor": [
+            "cyp3a4"
+          ],
+          "inducer": []
+        }
+      },
+      "overlaps": {
+        "inhibition": [],
+        "induction": [],
+        "shared_substrate": []
+      },
+      "canonical_interaction": {
+        "drug_a": "warfarin",
+        "drug_b": "fluconazole",
+        "mechanism": "Fluconazole inhibits CYP2C9-mediated metabolism of S-warfarin and CYP3A4 to a lesser degree.",
+        "primary_affected_drug": "warfarin",
+        "direction": "increase",
+        "severity": "high",
+        "clinical_consequence": "Marked INR elevation and bleeding risk when combined without warfarin dose reduction and close monitoring.",
+        "evidence_level": "well-established_clinical_pk"
+      }
+    },
+    "pd_detail": {
+      "overlap_targets": [],
+      "overlap_pathways": [],
+      "pd_score": 0.0
+    }
+  },
+  "sources": {
+    "duckdb": [
+      "TwoSides",
+      "DILIrank",
+      "DICTRank",
+      "DIQT"
+    ],
+    "qlever": [],
+    "openfda": [
+      "FAERS via OpenFDA (cached)"
+    ],
+    "apis": [
+      "PubChem REST API",
+      "UniProt REST API",
+      "KEGG REST API",
+      "Reactome REST API",
+      "ChEMBL REST API"
+    ],
+    "canonical": [
+      "Canonical PK/PD Dictionary"
+    ],
+    "semantic": [],
+    "query_expansion": [
+      "Query Expansion (Synonyms, Variations)"
+    ],
+    "hybrid_search": [
+      "Keyword Search"
+    ],
+    "adaptive_retrieval": [
+      "Adaptive Retrieval (Dynamic Top-K)"
+    ]
+  },
+  "source_status": [
+    {
+      "name": "TWOSIDES",
+      "enabled": true,
+      "available": true,
+      "reason": "Local file present"
+    },
+    {
+      "name": "DILIrank",
+      "enabled": true,
+      "available": true,
+      "reason": "Local file present"
+    },
+    {
+      "name": "DICTRank",
+      "enabled": true,
+      "available": true,
+      "reason": "Local file present"
+    },
+    {
+      "name": "DIQT",
+      "enabled": true,
+      "available": true,
+      "reason": "Local file present"
+    },
+    {
+      "name": "DrugBank local dataset",
+      "enabled": false,
+      "available": false,
+      "reason": "Disabled in public_safe mode"
+    },
+    {
+      "name": "QLever RDF",
+      "enabled": false,
+      "available": false,
+      "reason": "Disabled for NVIDIA demo runtime"
+    },
+    {
+      "name": "OpenFDA cache/API",
+      "enabled": true,
+      "available": true,
+      "reason": "Availability checked per request"
+    },
+    {
+      "name": "PubChem PUG-REST",
+      "enabled": true,
+      "available": true,
+      "reason": "Required public enrichment"
+    },
+    {
+      "name": "PubChem PUG-View",
+      "enabled": true,
+      "available": true,
+      "reason": "Required public enrichment"
+    },
+    {
+      "name": "ChEMBL",
+      "enabled": true,
+      "available": true,
+      "reason": "Required public enrichment"
+    },
+    {
+      "name": "KEGG",
+      "enabled": true,
+      "available": true,
+      "reason": "Required public enrichment"
+    },
+    {
+      "name": "Reactome",
+      "enabled": true,
+      "available": true,
+      "reason": "Required public enrichment"
+    },
+    {
+      "name": "UniProt",
+      "enabled": true,
+      "available": true,
+      "reason": "Required public enrichment"
+    },
+    {
+      "name": "Canonical PK/PD dictionary",
+      "enabled": true,
+      "available": true,
+      "reason": "Curated local mechanism seeds"
+    },
+    {
+      "name": "NVIDIA NIM LLM",
+      "enabled": true,
+      "available": true,
+      "reason": "NVIDIA_API_KEY and NVIDIA_MODEL configured"
+    }
+  ],
+  "meta": {
+    "drug_pair": "warfarin|fluconazole",
+    "pair_key": "fluconazole|warfarin",
+    "created_at": "2026-05-17T16:54:17Z",
+    "version": 9,
+    "data_mode": "public_safe",
+    "qlever_contributed_raw": false,
+    "qlever_contributed": true
+  }
+}

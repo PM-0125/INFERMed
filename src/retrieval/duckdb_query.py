@@ -19,11 +19,20 @@ Key fixes vs previous version:
 from __future__ import annotations
 
 import os
+import logging
 from functools import lru_cache
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-import duckdb
+try:
+    import duckdb
+except ImportError:  # DuckDB is an optional evidence backend in demo-safe mode.
+    duckdb = None
+
+from src.config.settings import get_settings
+from src.core.evidence import EvidenceItem
+
+LOG = logging.getLogger(__name__)
 
 
 # ---------- Helpers ----------
@@ -37,24 +46,48 @@ def _norm_name(s: Optional[str]) -> Optional[str]:
     s = str(s).strip().replace("\xa0", " ")
     return s.lower()
 
+def _sql_path(path: str) -> str:
+    return str(path).replace("'", "''")
+
+def _file_exists(base_dir: str, filename: str) -> bool:
+    return Path(base_dir, filename).exists()
+
+
+_REGISTERED_VIEWS_BY_BASE: Dict[Tuple[str, bool, bool], set[str]] = {}
+
 
 # ---------- Connection / View Registration ----------
 
-@lru_cache(maxsize=1)
-def init_duckdb_connection(base_dir: str = "data/duckdb") -> duckdb.DuckDBPyConnection:
+@lru_cache(maxsize=8)
+def init_duckdb_connection(
+    base_dir: str = "data/duckdb",
+    enable_drugbank: Optional[bool] = None,
+    enable_duckdb: Optional[bool] = None,
+) -> Any:
     """
     Initializes a single DuckDB connection and registers views.
     """
+    settings = get_settings()
     base_dir = os.path.abspath(base_dir)
+    use_duckdb = settings.enable_duckdb if enable_duckdb is None else bool(enable_duckdb)
+    use_drugbank = settings.enable_drugbank if enable_drugbank is None else bool(enable_drugbank)
+    key = (base_dir, use_drugbank, use_duckdb)
+    if duckdb is None:
+        _REGISTERED_VIEWS_BY_BASE[key] = set()
+        return None
     con = duckdb.connect(database=":memory:")
-    _register_views(con, base_dir)
+    if use_duckdb:
+        _REGISTERED_VIEWS_BY_BASE[key] = _register_views(con, base_dir, use_drugbank)
+    else:
+        _REGISTERED_VIEWS_BY_BASE[key] = set()
     return con
 
 
-def _register_views(con: duckdb.DuckDBPyConnection, base_dir: str) -> None:
+def _register_views(con: Any, base_dir: str, enable_drugbank: bool = False) -> set[str]:
     """
     Register simple views over parquet files. We assume the converters already produced tidy schemas.
     """
+    registered: set[str] = set()
     drugbank = _p(base_dir, "drugbank.parquet")
     twosides = _p(base_dir, "twosides.parquet")
     dictrank = _p(base_dir, "dictrank.parquet")
@@ -64,83 +97,106 @@ def _register_views(con: duckdb.DuckDBPyConnection, base_dir: str) -> None:
     # DrugBank (lowercase column is already in parquet as name_lower; reassert for safety)
     # Note: enzyme_action_map may not exist in old parquet files, so we handle it gracefully
     # Check if enzyme_action_map column exists in parquet
-    try:
-        schema = con.execute(f"DESCRIBE SELECT * FROM read_parquet('{drugbank}') LIMIT 0").fetchall()
-        has_enzyme_action_map = any(col[0] == 'enzyme_action_map' for col in schema)
-    except Exception:
-        has_enzyme_action_map = False
-    
-    if has_enzyme_action_map:
-        con.execute(f"""
-            CREATE OR REPLACE VIEW drugbank AS
-            SELECT 
-                COALESCE(name_lower, lower(name)) AS name_lower,
-                name,
-                synonyms,
-                targets,
-                target_uniprot,
-                target_actions,
-                enzymes,
-                enzyme_actions,
-                enzyme_action_map,
-                interactions
-            FROM read_parquet('{drugbank}');
-        """)
-    else:
-        # Backward compatibility: old parquet files without enzyme_action_map
-        con.execute(f"""
-            CREATE OR REPLACE VIEW drugbank AS
-            SELECT 
-                COALESCE(name_lower, lower(name)) AS name_lower,
-                name,
-                synonyms,
-                targets,
-                target_uniprot,
-                target_actions,
-                enzymes,
-                enzyme_actions,
-                CAST(NULL AS VARCHAR) AS enzyme_action_map,
-                interactions
-            FROM read_parquet('{drugbank}');
-        """)
+    if enable_drugbank and _file_exists(base_dir, "drugbank.parquet"):
+        try:
+            schema = con.execute(f"DESCRIBE SELECT * FROM read_parquet('{_sql_path(drugbank)}') LIMIT 0").fetchall()
+            has_enzyme_action_map = any(col[0] == 'enzyme_action_map' for col in schema)
+            if has_enzyme_action_map:
+                con.execute(f"""
+                    CREATE OR REPLACE VIEW drugbank AS
+                    SELECT
+                        COALESCE(name_lower, lower(name)) AS name_lower,
+                        name,
+                        synonyms,
+                        targets,
+                        target_uniprot,
+                        target_actions,
+                        enzymes,
+                        enzyme_actions,
+                        enzyme_action_map,
+                        interactions
+                    FROM read_parquet('{_sql_path(drugbank)}');
+                """)
+            else:
+                # Backward compatibility: old parquet files without enzyme_action_map
+                con.execute(f"""
+                    CREATE OR REPLACE VIEW drugbank AS
+                    SELECT
+                        COALESCE(name_lower, lower(name)) AS name_lower,
+                        name,
+                        synonyms,
+                        targets,
+                        target_uniprot,
+                        target_actions,
+                        enzymes,
+                        enzyme_actions,
+                        CAST(NULL AS VARCHAR) AS enzyme_action_map,
+                        interactions
+                    FROM read_parquet('{_sql_path(drugbank)}');
+                """)
+            registered.add("drugbank")
+        except Exception as e:
+            LOG.warning("DrugBank parquet was present but could not be registered: %s", e)
 
     # TwoSides (tidy long)
-    con.execute(f"""
-        CREATE OR REPLACE VIEW twosides AS
-        SELECT 
-            CAST(drug_a AS VARCHAR) AS drug_a,
-            CAST(drug_b AS VARCHAR) AS drug_b,
-            CAST(side_effect AS VARCHAR) AS side_effect,
-            CAST(prr AS DOUBLE) AS prr
-        FROM read_parquet('{twosides}');
-    """)
+    if _file_exists(base_dir, "twosides.parquet"):
+        try:
+            con.execute(f"""
+                CREATE OR REPLACE VIEW twosides AS
+                SELECT
+                    CAST(drug_a AS VARCHAR) AS drug_a,
+                    CAST(drug_b AS VARCHAR) AS drug_b,
+                    CAST(side_effect AS VARCHAR) AS side_effect,
+                    CAST(prr AS DOUBLE) AS prr
+                FROM read_parquet('{_sql_path(twosides)}');
+            """)
+            registered.add("twosides")
+        except Exception as e:
+            LOG.warning("TWOSIDES parquet was present but could not be registered: %s", e)
 
     # DICTRank
-    con.execute(f"""
-        CREATE OR REPLACE VIEW dictrank AS
-        SELECT 
-            lower(drug_name) AS drug_name,
-            CAST(score AS DOUBLE) AS score
-        FROM read_parquet('{dictrank}');
-    """)
+    if _file_exists(base_dir, "dictrank.parquet"):
+        try:
+            con.execute(f"""
+                CREATE OR REPLACE VIEW dictrank AS
+                SELECT
+                    lower(drug_name) AS drug_name,
+                    CAST(score AS DOUBLE) AS score
+                FROM read_parquet('{_sql_path(dictrank)}');
+            """)
+            registered.add("dictrank")
+        except Exception as e:
+            LOG.warning("DICTRank parquet was present but could not be registered: %s", e)
 
     # DILIRank
-    con.execute(f"""
-        CREATE OR REPLACE VIEW dilirank AS
-        SELECT 
-            lower(drug_name) AS drug_name,
-            CAST(dili_score AS DOUBLE) AS dili_score
-        FROM read_parquet('{dilirank}');
-    """)
+    if _file_exists(base_dir, "dilirank.parquet"):
+        try:
+            con.execute(f"""
+                CREATE OR REPLACE VIEW dilirank AS
+                SELECT
+                    lower(drug_name) AS drug_name,
+                    CAST(dili_score AS DOUBLE) AS dili_score
+                FROM read_parquet('{_sql_path(dilirank)}');
+            """)
+            registered.add("dilirank")
+        except Exception as e:
+            LOG.warning("DILIrank parquet was present but could not be registered: %s", e)
 
     # DIQT (tidy 2-col)
-    con.execute(f"""
-        CREATE OR REPLACE VIEW diqt AS
-        SELECT 
-            lower(drug_name) AS drug_name,
-            CAST(score AS DOUBLE) AS score
-        FROM read_parquet('{diqt}');
-    """)
+    if _file_exists(base_dir, "diqt.parquet"):
+        try:
+            con.execute(f"""
+                CREATE OR REPLACE VIEW diqt AS
+                SELECT
+                    lower(drug_name) AS drug_name,
+                    CAST(score AS DOUBLE) AS score
+                FROM read_parquet('{_sql_path(diqt)}');
+            """)
+            registered.add("diqt")
+        except Exception as e:
+            LOG.warning("DIQT parquet was present but could not be registered: %s", e)
+
+    return registered
 
 
 # ---------- Client API ----------
@@ -150,15 +206,42 @@ class DuckDBClient:
     Thin wrapper exposing retrieval functions expected by the RAG pipeline.
     """
 
-    def __init__(self, base_dir: str = "data/duckdb"):
-        self.base_dir = base_dir
-        self._con = init_duckdb_connection(base_dir)
+    def __init__(
+        self,
+        base_dir: str = "data/duckdb",
+        *,
+        enable_drugbank: Optional[bool] = None,
+        enable_duckdb: Optional[bool] = None,
+    ):
+        settings = get_settings()
+        self.base_dir = os.path.abspath(base_dir)
+        self.enable_duckdb = settings.enable_duckdb if enable_duckdb is None else bool(enable_duckdb)
+        self.enable_drugbank = settings.enable_drugbank if enable_drugbank is None else bool(enable_drugbank)
+        self._con = init_duckdb_connection(
+            self.base_dir,
+            enable_drugbank=self.enable_drugbank,
+            enable_duckdb=self.enable_duckdb,
+        )
+        key = (self.base_dir, self.enable_drugbank, self.enable_duckdb)
+        self.registered_views = set(_REGISTERED_VIEWS_BY_BASE.get(key, set()))
+
+    def has_view(self, view_name: str) -> bool:
+        return view_name in self.registered_views
+
+    def get_available_sources(self) -> Dict[str, bool]:
+        return {
+            "twosides": self.has_view("twosides"),
+            "dilirank": self.has_view("dilirank"),
+            "dictrank": self.has_view("dictrank"),
+            "diqt": self.has_view("diqt"),
+            "drugbank": self.has_view("drugbank"),
+        }
 
     # --- DrugBank ---
 
     def get_synonyms(self, drug_name: str) -> List[str]:
         d = _norm_name(drug_name)
-        if not d:
+        if not d or not self.has_view("drugbank"):
             return []
         rows = self._con.execute(
             "SELECT synonyms FROM drugbank WHERE name_lower = ? LIMIT 1;",
@@ -174,7 +257,7 @@ class DuckDBClient:
         """Get PRR (Proportional Reporting Ratio) for a drug pair."""
         a = _norm_name(drug1)
         b = _norm_name(drug2)
-        if not a or not b:
+        if not a or not b or not self.has_view("twosides"):
             return 0.0
         rows = self._con.execute(
             """
@@ -192,7 +275,7 @@ class DuckDBClient:
         if isinstance(drug_name, list):
             return self._get_dict_rank_batch(drug_name)
         d = _norm_name(drug_name)
-        if not d:
+        if not d or not self.has_view("dictrank"):
             return "unknown"
         # Try exact match first
         rows = self._con.execute(
@@ -226,7 +309,7 @@ class DuckDBClient:
         if isinstance(drug_name, list):
             return self._get_dili_risk_batch(drug_name)
         d = _norm_name(drug_name)
-        if not d:
+        if not d or not self.has_view("dilirank"):
             return None
         # Try exact match first
         rows = self._con.execute(
@@ -258,7 +341,7 @@ class DuckDBClient:
         if isinstance(drug_name, list):
             return self._get_diqt_score_batch(drug_name)
         d = _norm_name(drug_name)
-        if not d:
+        if not d or not self.has_view("diqt"):
             return None
         # Try exact match first
         rows = self._con.execute(
@@ -285,7 +368,7 @@ class DuckDBClient:
     # Legacy aliases for backward compatibility
     def get_dictrank_score(self, drug_name: str) -> Optional[float]:
         d = _norm_name(drug_name)
-        if not d:
+        if not d or not self.has_view("dictrank"):
             return None
         # Try exact match first
         rows = self._con.execute(
@@ -311,7 +394,7 @@ class DuckDBClient:
 
     def get_dilirank_score(self, drug_name: str) -> Optional[float]:
         d = _norm_name(drug_name)
-        if not d:
+        if not d or not self.has_view("dilirank"):
             return None
         # Try exact match first
         rows = self._con.execute(
@@ -352,11 +435,11 @@ class DuckDBClient:
         # Batch mode: list of drugs
         if isinstance(drug_a, list):
             return self.get_side_effects_batch(drug_a, top_k_per_drug=top_k, min_prr=min_prr)
-        
+
         a = _norm_name(drug_a)
         b = _norm_name(drug_b) if drug_b else None
 
-        if not a:
+        if not a or not self.has_view("twosides"):
             return []
 
         if b is None:
@@ -402,6 +485,8 @@ class DuckDBClient:
         normed = [d for d in {_norm_name(x) for x in drugs} if d]
         if not normed:
             return {}
+        if not self.has_view("twosides"):
+            return {d: [] for d in normed}
 
         # Query all at once via IN (...) for both A and B
         placeholders = ", ".join(["?"] * len(normed))
@@ -446,6 +531,8 @@ class DuckDBClient:
         normed = [_norm_name(d) for d in drugs if _norm_name(d)]
         if not normed:
             return {}
+        if not self.has_view("dictrank"):
+            return {d: "unknown" for d in drugs}
         placeholders = ", ".join(["?"] * len(normed))
         rows = self._con.execute(
             f"""
@@ -455,7 +542,7 @@ class DuckDBClient:
             """,
             normed,
         ).fetchall()
-        
+
         result: Dict[str, str] = {}
         for d in drugs:
             d_norm = _norm_name(d)
@@ -479,6 +566,8 @@ class DuckDBClient:
         normed = [_norm_name(d) for d in drugs if _norm_name(d)]
         if not normed:
             return {}
+        if not self.has_view("dilirank"):
+            return {d: "unknown" for d in drugs}
         placeholders = ", ".join(["?"] * len(normed))
         rows = self._con.execute(
             f"""
@@ -488,7 +577,7 @@ class DuckDBClient:
             """,
             normed,
         ).fetchall()
-        
+
         result: Dict[str, str] = {}
         for d in drugs:
             d_norm = _norm_name(d)
@@ -510,6 +599,8 @@ class DuckDBClient:
         normed = [_norm_name(d) for d in drugs if _norm_name(d)]
         if not normed:
             return {}
+        if not self.has_view("diqt"):
+            return {d: None for d in drugs}
         placeholders = ", ".join(["?"] * len(normed))
         rows = self._con.execute(
             f"""
@@ -519,7 +610,7 @@ class DuckDBClient:
             """,
             normed,
         ).fetchall()
-        
+
         result: Dict[str, Optional[float]] = {d: None for d in drugs}
         for d in drugs:
             d_norm = _norm_name(d)
@@ -528,7 +619,7 @@ class DuckDBClient:
                     result[d] = float(row[1]) if row[1] is not None else None
                     break
         return result
-    
+
     def get_drug_enzymes(self, drug_name: str) -> Dict[str, Any]:
         """
         Return enzyme data from DrugBank: enzymes and their actions (substrate/inhibitor/inducer).
@@ -538,9 +629,9 @@ class DuckDBClient:
         - 'enzyme_action_map' (list of dicts with 'enzyme' and 'actions' keys - proper mapping)
         """
         d = _norm_name(drug_name)
-        if not d:
+        if not d or not self.has_view("drugbank"):
             return {"enzymes": [], "enzyme_actions": [], "enzyme_action_map": []}
-        
+
         # Try exact match first
         rows = self._con.execute(
             "SELECT enzymes, enzyme_actions, enzyme_action_map FROM drugbank WHERE name_lower = ? LIMIT 1;",
@@ -550,7 +641,7 @@ class DuckDBClient:
             enzymes = rows[0][0] or []
             enzyme_actions = rows[0][1] or []
             enzyme_action_map_str = rows[0][2] if len(rows[0]) > 2 else None
-            
+
             # Parse enzyme_action_map if available
             enzyme_action_map = []
             if enzyme_action_map_str:
@@ -559,13 +650,13 @@ class DuckDBClient:
                     enzyme_action_map = json.loads(enzyme_action_map_str)
                 except Exception:
                     pass
-            
+
             return {
                 "enzymes": enzymes,
                 "enzyme_actions": enzyme_actions,
                 "enzyme_action_map": enzyme_action_map
             }
-        
+
         # Try partial match
         rows = self._con.execute(
             "SELECT enzymes, enzyme_actions, enzyme_action_map FROM drugbank WHERE name_lower LIKE ? LIMIT 1;",
@@ -575,7 +666,7 @@ class DuckDBClient:
             enzymes = rows[0][0] or []
             enzyme_actions = rows[0][1] or []
             enzyme_action_map_str = rows[0][2] if len(rows[0]) > 2 else None
-            
+
             enzyme_action_map = []
             if enzyme_action_map_str:
                 try:
@@ -583,13 +674,13 @@ class DuckDBClient:
                     enzyme_action_map = json.loads(enzyme_action_map_str)
                 except Exception:
                     pass
-            
+
             return {
                 "enzymes": enzymes,
                 "enzyme_actions": enzyme_actions,
                 "enzyme_action_map": enzyme_action_map
             }
-        
+
         return {"enzymes": [], "enzyme_actions": [], "enzyme_action_map": []}
 
     def get_drug_targets(self, drug_name: str | List[str]) -> List[str] | Dict[str, List[str]]:
@@ -597,7 +688,7 @@ class DuckDBClient:
         if isinstance(drug_name, list):
             return self._get_drug_targets_batch(drug_name)
         d = _norm_name(drug_name)
-        if not d:
+        if not d or not self.has_view("drugbank"):
             return []
         rows = self._con.execute(
             "SELECT targets FROM drugbank WHERE name_lower = ? LIMIT 1;",
@@ -612,6 +703,8 @@ class DuckDBClient:
         normed = [_norm_name(d) for d in drugs if _norm_name(d)]
         if not normed:
             return {}
+        if not self.has_view("drugbank"):
+            return {d: [] for d in drugs}
         placeholders = ", ".join(["?"] * len(normed))
         rows = self._con.execute(
             f"""
@@ -621,7 +714,7 @@ class DuckDBClient:
             """,
             normed,
         ).fetchall()
-        
+
         result: Dict[str, List[str]] = {d: [] for d in drugs}
         for d in drugs:
             d_norm = _norm_name(d)
@@ -630,3 +723,82 @@ class DuckDBClient:
                     result[d] = [t for t in (row[1] or []) if t]
                     break
         return result
+
+    def get_pair_evidence(self, drug_a: str, drug_b: str, top_k: int = 20) -> List[EvidenceItem]:
+        a = _norm_name(drug_a)
+        b = _norm_name(drug_b)
+        if not a or not b or not self.has_view("twosides"):
+            return []
+
+        rows = self._con.execute(
+            """
+            SELECT side_effect, MAX(prr) AS prr
+            FROM twosides
+            WHERE ((drug_a = ? AND drug_b = ?) OR (drug_a = ? AND drug_b = ?))
+            GROUP BY side_effect
+            ORDER BY COALESCE(MAX(prr), 0) DESC, side_effect
+            LIMIT ?;
+            """,
+            [a, b, b, a, int(top_k)],
+        ).fetchall()
+
+        return [
+            EvidenceItem(
+                source="TWOSIDES",
+                evidence_type="pair_adverse_event_signal",
+                subject=f"{a} + {b}",
+                predicate="reported_pair_side_effect",
+                object=str(side_effect),
+                confidence="associative",
+                raw={"prr": prr},
+            )
+            for side_effect, prr in rows
+            if side_effect
+        ]
+
+    def get_drug_toxicity_evidence(self, drug_name: str) -> List[EvidenceItem]:
+        d = _norm_name(drug_name)
+        if not d:
+            return []
+
+        items: List[EvidenceItem] = []
+        dili = self.get_dilirank_score(d)
+        if dili is not None:
+            items.append(
+                EvidenceItem(
+                    source="DILIrank",
+                    evidence_type="single_drug_toxicity",
+                    subject=d,
+                    predicate="dili_score",
+                    object=dili,
+                    confidence="dataset_score",
+                )
+            )
+
+        dictrank = self.get_dictrank_score(d)
+        if dictrank is not None:
+            items.append(
+                EvidenceItem(
+                    source="DICTRank",
+                    evidence_type="single_drug_toxicity",
+                    subject=d,
+                    predicate="cardiotoxicity_score",
+                    object=dictrank,
+                    confidence="dataset_score",
+                )
+            )
+
+        diqt = self.get_diqt_score(d)
+        if diqt is not None:
+            items.append(
+                EvidenceItem(
+                    source="DIQT",
+                    evidence_type="single_drug_toxicity",
+                    subject=d,
+                    predicate="qt_risk_score",
+                    object=diqt,
+                    confidence="dataset_score",
+                )
+            )
+
+        return items

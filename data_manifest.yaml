@@ -1,0 +1,40 @@
+datasets:
+  twosides:
+    file: data/duckdb/twosides.parquet
+    backend: duckdb
+    visibility: public
+    enabled_in_public_safe: true
+    required: false
+    source_label: TWOSIDES
+
+  dilirank:
+    file: data/duckdb/dilirank.parquet
+    backend: duckdb
+    visibility: public
+    enabled_in_public_safe: true
+    required: false
+    source_label: DILIrank
+
+  dictrank:
+    file: data/duckdb/dictrank.parquet
+    backend: duckdb
+    visibility: public
+    enabled_in_public_safe: true
+    required: false
+    source_label: DICTRank
+
+  diqt:
+    file: data/duckdb/diqt.parquet
+    backend: duckdb
+    visibility: public
+    enabled_in_public_safe: true
+    required: false
+    source_label: DIQT
+
+  drugbank:
+    file: data/private/drugbank.parquet
+    backend: duckdb
+    visibility: restricted_local
+    enabled_in_public_safe: false
+    required: false
+    source_label: DrugBank local dataset

@@ -1,0 +1,404 @@
+{
+  "signals": {
+    "tabular": {
+      "prr": 90.0,
+      "side_effects_a": [
+        "Renal injury",
+        "Carotid artery stenosis",
+        "Fear",
+        "Economic problem",
+        "Anhedonia",
+        "Thrombosis in device",
+        "Unevaluable event",
+        "Skin hypertrophy",
+        "Diabetic neuropathy",
+        "Skin tightness",
+        "Catheter related complication",
+        "Emotional distress",
+        "Nephrogenic systemic fibrosis",
+        "Gout",
+        "Haemorrhagic anaemia",
+        "Aortic stenosis",
+        "Retroperitoneal haematoma",
+        "Dyslipidaemia",
+        "Scar",
+        "Cardiac tamponade",
+        "Middle insomnia",
+        "Multi-organ failure",
+        "Sick sinus syndrome",
+        "Retroperitoneal haemorrhage",
+        "Renal impairment"
+      ],
+      "side_effects_b": [
+        "Multiple fractures",
+        "Biliary dyskinesia",
+        "Osteosclerosis",
+        "Antipsychotic drug level increased",
+        "Sleep disorder due to a general medical condition",
+        "Osteoporosis",
+        "Calcium deficiency",
+        "Cholecystitis chronic",
+        "Dilatation intrahepatic duct acquired",
+        "Vitamin D deficiency",
+        "Blood testosterone decreased",
+        "Peritonitis bacterial",
+        "Hepatotoxicity",
+        "Cytomegalovirus infection",
+        "Bone disorder",
+        "Osteopenia",
+        "Osteolysis",
+        "Anal pruritus",
+        "Osteoarthritis",
+        "Serum ferritin increased",
+        "Pathological gambling",
+        "Venoocclusive liver disease",
+        "Metastatic renal cell carcinoma",
+        "Fear of disease",
+        "Intervertebral disc degeneration"
+      ],
+      "dili_a": 7.0,
+      "dili_b": "unknown",
+      "dict_a": "unknown",
+      "dict_b": "unknown",
+      "diqt_a": null,
+      "diqt_b": null
+    },
+    "mechanistic": {
+      "enzymes": {
+        "a": {
+          "substrate": [],
+          "inhibitor": [],
+          "inducer": []
+        },
+        "b": {
+          "substrate": [],
+          "inhibitor": [],
+          "inducer": []
+        }
+      },
+      "targets_a": [],
+      "targets_b": [],
+      "diseases_a": [],
+      "diseases_b": [],
+      "pathways_a": [],
+      "pathways_b": [],
+      "common_pathways": []
+    },
+    "faers": {
+      "top_reactions_a": [
+        [
+          "DYSPNOEA",
+          4472
+        ],
+        [
+          "FATIGUE",
+          3908
+        ],
+        [
+          "DIZZINESS",
+          3489
+        ],
+        [
+          "DIARRHOEA",
+          3351
+        ],
+        [
+          "DRUG INEFFECTIVE",
+          3267
+        ],
+        [
+          "DRUG INTERACTION",
+          3195
+        ],
+        [
+          "NAUSEA",
+          3195
+        ],
+        [
+          "ANAEMIA",
+          3077
+        ],
+        [
+          "FALL",
+          3029
+        ],
+        [
+          "ACUTE KIDNEY INJURY",
+          2965
+        ]
+      ],
+      "top_reactions_b": [
+        [
+          "NAUSEA",
+          10743
+        ],
+        [
+          "DIARRHOEA",
+          10510
+        ],
+        [
+          "FATIGUE",
+          10448
+        ],
+        [
+          "DYSPNOEA",
+          8760
+        ],
+        [
+          "DRUG INEFFECTIVE",
+          8173
+        ],
+        [
+          "HEADACHE",
+          7902
+        ],
+        [
+          "PAIN",
+          7655
+        ],
+        [
+          "OFF LABEL USE",
+          7591
+        ],
+        [
+          "VOMITING",
+          7501
+        ],
+        [
+          "DIZZINESS",
+          7029
+        ]
+      ],
+      "combo_reactions": [
+        [
+          "DYSPNOEA",
+          4472
+        ],
+        [
+          "FATIGUE",
+          3908
+        ],
+        [
+          "DIZZINESS",
+          3489
+        ],
+        [
+          "DIARRHOEA",
+          3351
+        ],
+        [
+          "DRUG INEFFECTIVE",
+          3267
+        ],
+        [
+          "DRUG INTERACTION",
+          3195
+        ],
+        [
+          "NAUSEA",
+          3195
+        ],
+        [
+          "ANAEMIA",
+          3077
+        ],
+        [
+          "FALL",
+          3029
+        ],
+        [
+          "ACUTE KIDNEY INJURY",
+          2965
+        ]
+      ]
+    }
+  },
+  "drugs": {
+    "a": {
+      "name": "clopidogrel",
+      "synonyms": [],
+      "ids": {}
+    },
+    "b": {
+      "name": "omeprazole",
+      "synonyms": [],
+      "ids": {}
+    }
+  },
+  "caveats": [
+    "QLever RDF disabled for NVIDIA demo runtime.",
+    "Semantic query expansion unavailable: Semantic searcher is required for query expansion. Please ensure semantic search is initialized.",
+    "DuckDB retrieval failed: Invalid Input Error: No open result set",
+    "QLever RDF disabled for NVIDIA demo runtime."
+  ],
+  "pkpd": {
+    "pk_summary": "CANONICAL PK INTERACTION (Clinical Pk And Outcome Studies): Omeprazole inhibits CYP2C19, the key enzyme responsible for converting clopidogrel to its active thiol metabolite. → ↓ clopidogrel exposure (Severity: Moderate High)",
+    "pd_summary": "No obvious PD overlap",
+    "pk_detail": {
+      "roles": {
+        "a": {
+          "substrate": [],
+          "inhibitor": [],
+          "inducer": []
+        },
+        "b": {
+          "substrate": [],
+          "inhibitor": [],
+          "inducer": []
+        }
+      },
+      "overlaps": {
+        "inhibition": [],
+        "induction": [],
+        "shared_substrate": []
+      },
+      "canonical_interaction": {
+        "drug_a": "clopidogrel",
+        "drug_b": "omeprazole",
+        "mechanism": "Omeprazole inhibits CYP2C19, the key enzyme responsible for converting clopidogrel to its active thiol metabolite.",
+        "primary_affected_drug": "clopidogrel",
+        "direction": "decrease",
+        "severity": "moderate_high",
+        "clinical_consequence": "Reduced generation of active clopidogrel metabolite and potentially reduced antiplatelet efficacy with increased risk of thrombotic events in some patients.",
+        "evidence_level": "clinical_pk_and_outcome_studies"
+      }
+    },
+    "pd_detail": {
+      "overlap_targets": [],
+      "overlap_pathways": [],
+      "pd_score": 0.0
+    }
+  },
+  "sources": {
+    "duckdb": [
+      "TwoSides",
+      "DILIrank",
+      "DICTRank",
+      "DIQT"
+    ],
+    "qlever": [],
+    "openfda": [
+      "FAERS via OpenFDA (cached)"
+    ],
+    "apis": [
+      "PubChem REST API",
+      "UniProt REST API",
+      "KEGG REST API",
+      "Reactome REST API"
+    ],
+    "canonical": [
+      "Canonical PK/PD Dictionary"
+    ],
+    "semantic": [],
+    "query_expansion": [
+      "Query Expansion (Synonyms, Variations)"
+    ],
+    "hybrid_search": [
+      "Keyword Search"
+    ],
+    "adaptive_retrieval": [
+      "Adaptive Retrieval (Dynamic Top-K)"
+    ]
+  },
+  "source_status": [
+    {
+      "name": "TWOSIDES",
+      "enabled": true,
+      "available": true,
+      "reason": "Local file present"
+    },
+    {
+      "name": "DILIrank",
+      "enabled": true,
+      "available": true,
+      "reason": "Local file present"
+    },
+    {
+      "name": "DICTRank",
+      "enabled": true,
+      "available": true,
+      "reason": "Local file present"
+    },
+    {
+      "name": "DIQT",
+      "enabled": true,
+      "available": true,
+      "reason": "Local file present"
+    },
+    {
+      "name": "DrugBank local dataset",
+      "enabled": false,
+      "available": false,
+      "reason": "Disabled in public_safe mode"
+    },
+    {
+      "name": "QLever RDF",
+      "enabled": false,
+      "available": false,
+      "reason": "Disabled for NVIDIA demo runtime"
+    },
+    {
+      "name": "OpenFDA cache/API",
+      "enabled": true,
+      "available": true,
+      "reason": "Availability checked per request"
+    },
+    {
+      "name": "PubChem PUG-REST",
+      "enabled": true,
+      "available": true,
+      "reason": "Availability checked per request"
+    },
+    {
+      "name": "PubChem PUG-View",
+      "enabled": true,
+      "available": true,
+      "reason": "Availability checked per request"
+    },
+    {
+      "name": "ChEMBL",
+      "enabled": true,
+      "available": true,
+      "reason": "Optional enrichment"
+    },
+    {
+      "name": "KEGG",
+      "enabled": true,
+      "available": true,
+      "reason": "Optional enrichment"
+    },
+    {
+      "name": "Reactome",
+      "enabled": true,
+      "available": true,
+      "reason": "Optional enrichment"
+    },
+    {
+      "name": "UniProt",
+      "enabled": true,
+      "available": true,
+      "reason": "Optional enrichment"
+    },
+    {
+      "name": "Canonical PK/PD dictionary",
+      "enabled": true,
+      "available": true,
+      "reason": "Curated local mechanism seeds"
+    },
+    {
+      "name": "NVIDIA NIM LLM",
+      "enabled": true,
+      "available": true,
+      "reason": "NVIDIA_API_KEY and NVIDIA_MODEL configured"
+    }
+  ],
+  "meta": {
+    "drug_pair": "clopidogrel|omeprazole",
+    "pair_key": "clopidogrel|omeprazole",
+    "created_at": "2026-05-11T19:26:34Z",
+    "version": 8,
+    "data_mode": "public_safe",
+    "qlever_contributed_raw": false,
+    "qlever_contributed": false
+  }
+}

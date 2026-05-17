@@ -13,20 +13,26 @@ from __future__ import annotations
 
 import os
 import json
+import importlib.util
 import logging
 import pickle
 from functools import lru_cache
 from typing import Any, Dict, List, Optional, Tuple
 from pathlib import Path
 
-try:
-    from sentence_transformers import SentenceTransformer
-    import numpy as np
-    HAS_EMBEDDINGS = True
-except ImportError:
-    HAS_EMBEDDINGS = False
-    SentenceTransformer = None
-    np = None
+import numpy as np
+
+HAS_EMBEDDINGS = importlib.util.find_spec("sentence_transformers") is not None
+
+
+def _load_sentence_transformer():
+    if not HAS_EMBEDDINGS:
+        return None
+    try:
+        from sentence_transformers import SentenceTransformer
+    except ImportError:
+        return None
+    return SentenceTransformer
 
 LOG = logging.getLogger(__name__)
 
@@ -54,11 +60,6 @@ class SemanticSearcher:
         self.side_effect_names: List[str] = []
         self._initialized = False
         
-        if not HAS_EMBEDDINGS:
-            raise RuntimeError(
-                "sentence-transformers is required for semantic search. "
-                "Please install it: pip install sentence-transformers"
-            )
         self._initialize_model()
     
     def _initialize_model(self):
@@ -67,7 +68,11 @@ class SemanticSearcher:
             return
         
         try:
-            self.model = SentenceTransformer(self.model_name)
+            sentence_transformer = _load_sentence_transformer()
+            if sentence_transformer is None:
+                LOG.info("sentence-transformers is unavailable; semantic search disabled")
+                return
+            self.model = sentence_transformer(self.model_name)
             LOG.info(f"Initialized embedding model: {self.model_name}")
         except Exception as e:
             LOG.error(f"Failed to initialize embedding model: {e}")
@@ -309,14 +314,9 @@ _global_searcher: Optional[SemanticSearcher] = None
 
 
 def get_semantic_searcher() -> Optional[SemanticSearcher]:
-    """Get or create global semantic searcher instance (REQUIRED for RAG system)."""
+    """Get or create global semantic searcher instance."""
     global _global_searcher
     if _global_searcher is None:
-        if not HAS_EMBEDDINGS:
-            raise RuntimeError(
-                "sentence-transformers is required for semantic search. "
-                "Please install it: pip install sentence-transformers"
-            )
         _global_searcher = SemanticSearcher()
     return _global_searcher
 
