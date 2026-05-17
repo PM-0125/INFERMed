@@ -9,15 +9,21 @@ of retrieved results based on query-document relevance.
 
 from __future__ import annotations
 
+import importlib.util
 import logging
 from typing import Any, Dict, List, Optional, Tuple
 
-try:
-    from sentence_transformers import CrossEncoder
-    HAS_CROSS_ENCODER = True
-except ImportError:
-    HAS_CROSS_ENCODER = False
-    CrossEncoder = None
+HAS_CROSS_ENCODER = importlib.util.find_spec("sentence_transformers") is not None
+
+
+def _load_cross_encoder():
+    if not HAS_CROSS_ENCODER:
+        return None
+    try:
+        from sentence_transformers import CrossEncoder
+    except ImportError:
+        return None
+    return CrossEncoder
 
 LOG = logging.getLogger(__name__)
 
@@ -35,10 +41,7 @@ class Reranker:
         self.model = None
         self._initialized = False
         
-        if HAS_CROSS_ENCODER:
-            self._initialize_model()
-        else:
-            LOG.warning("sentence-transformers not available. Re-ranking will be disabled.")
+        self._initialize_model()
     
     def _initialize_model(self):
         """Initialize the cross-encoder model."""
@@ -46,7 +49,11 @@ class Reranker:
             return
         
         try:
-            self.model = CrossEncoder(self.model_name)
+            cross_encoder = _load_cross_encoder()
+            if cross_encoder is None:
+                LOG.info("sentence-transformers is unavailable; reranking disabled")
+                return
+            self.model = cross_encoder(self.model_name)
             self._initialized = True
             LOG.info(f"Initialized re-ranker model: {self.model_name}")
         except Exception as e:
@@ -171,7 +178,7 @@ _global_reranker: Optional[Reranker] = None
 def get_reranker(model_name: str = DEFAULT_RERANKER_MODEL) -> Optional[Reranker]:
     """Get or create global reranker instance."""
     global _global_reranker
-    if _global_reranker is None and HAS_CROSS_ENCODER:
+    if _global_reranker is None:
         _global_reranker = Reranker(model_name)
     return _global_reranker
 

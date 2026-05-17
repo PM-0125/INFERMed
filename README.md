@@ -159,7 +159,7 @@ INFERMed/
 ## ⚡ Performance Tips
 
 * **Caching**: The system implements multi-level caching:
-  * OpenFDA API responses are cached in `data/openfda/`
+  * OpenFDA API responses are cached in `data/cache/openfda/`
   * Assembled contexts are cached in `data/cache/contexts/`
   * Generated LLM responses are cached in `data/cache/responses/`
 * **Context Truncation**: To manage context size, the system applies top-K truncation:

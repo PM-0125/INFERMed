@@ -2,6 +2,7 @@ import pytest
 from pathlib import Path
 import plotly.graph_objs as go
 
+from src.retrieval import openfda_api
 from src.retrieval.openfda_api import OpenFDAClient, FaersQuery
 
 CACHE_SUBDIR = "openfda"
@@ -17,6 +18,28 @@ def clean_cache(tmp_path):
 def client(clean_cache):
     # Initialize client with temporary cache dir
     return OpenFDAClient(cache_dir=str(clean_cache))
+
+
+def test_default_cache_location_is_under_data_cache():
+    assert openfda_api.DEFAULT_CACHE_DIR == "data/cache/openfda"
+
+
+def test_legacy_openfda_cache_is_copied_to_new_default(tmp_path, monkeypatch):
+    legacy = tmp_path / "data" / "openfda"
+    default = tmp_path / "data" / "cache" / "openfda"
+    legacy.mkdir(parents=True)
+    old_file = legacy / "v2__aspirin__reactions__exact.json"
+    old_file.write_text('{"headache": 2}', encoding="utf-8")
+
+    monkeypatch.setattr(openfda_api, "DEFAULT_CACHE_DIR", str(default), raising=True)
+    monkeypatch.setattr(openfda_api, "LEGACY_CACHE_DIR", str(legacy), raising=True)
+
+    client = OpenFDAClient(cache_dir=str(default))
+
+    migrated_file = Path(client.cache_dir) / old_file.name
+    assert migrated_file.exists()
+    assert migrated_file.read_text(encoding="utf-8") == '{"headache": 2}'
+    assert old_file.exists()
 
 
 def test_get_top_reactions_real(client):
@@ -43,15 +66,15 @@ def test_fetch_openfda_summary_real(client):
     summary = client.fetch_openfda_summary('ibuprofen', limit=2)
     assert isinstance(summary, str)
     assert summary.startswith('FDA report') or 'No recent FDA event reports' in summary
-    summary_file = Path(client.cache_dir) / 'ibuprofen_summary.json'
+    summary_file = Path(client.cache_dir) / f'{openfda_api.CACHE_VERSION}__ibuprofen__summary.json'
     assert summary_file.exists()
 
 
 def test_fetch_openfda_summary_unknown(client):
     msg = client.fetch_openfda_summary('gibberishdrugxyz', limit=1)
     assert msg.startswith('No recent FDA event reports found for gibberishdrugxyz.')
-    summary_file = Path(client.cache_dir) / 'gibberishdrugxyz_summary.json'
-    assert not summary_file.exists()
+    summary_file = Path(client.cache_dir) / f'{openfda_api.CACHE_VERSION}__gibberishdrugxyz__summary.json'
+    assert summary_file.exists()
 
 
 def test_plot_helpers(client):

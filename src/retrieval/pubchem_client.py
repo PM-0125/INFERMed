@@ -189,6 +189,31 @@ def enrich_protein_ids(protein_ids: List[str]) -> List[Dict[str, str]]:
 
 
 @lru_cache(maxsize=512)
+def get_compound_cid_by_name(compound_name: str) -> Optional[str]:
+    """
+    Resolve a compound name to the first PubChem CID returned by PUG-REST.
+
+    This is intentionally generic and not tied to demo drug pairs.
+    """
+    if not compound_name or not compound_name.strip():
+        return None
+
+    try:
+        _rate_limit()
+        url = f"{PUBCHEM_API_BASE}/compound/name/{compound_name}/cids/JSON"
+        r = requests.get(url, timeout=PUBCHEM_TIMEOUT)
+        if r.status_code == 200:
+            data = r.json()
+            cids = data.get("IdentifierList", {}).get("CID", [])
+            if cids:
+                return str(cids[0])
+    except Exception as e:
+        LOG.debug("PubChem CID lookup failed for %s: %s", compound_name, e)
+
+    return None
+
+
+@lru_cache(maxsize=512)
 def get_compound_pk_data(pubchem_cid: str) -> Dict[str, Any]:
     """
     Get pharmacokinetic data for a compound from PubChem.
@@ -251,19 +276,5 @@ def get_compound_pk_data_by_name(compound_name: str) -> Dict[str, Any]:
     Returns:
         Dictionary with PK data
     """
-    # First, try to get CID from name
-    try:
-        _rate_limit()
-        url = f"{PUBCHEM_API_BASE}/compound/name/{compound_name}/cids/JSON"
-        r = requests.get(url, timeout=PUBCHEM_TIMEOUT)
-        if r.status_code == 200:
-            data = r.json()
-            cids = data.get("IdentifierList", {}).get("CID", [])
-            if cids:
-                cid = str(cids[0])
-                return get_compound_pk_data(cid)
-    except Exception as e:
-        LOG.debug("PubChem CID lookup failed for %s: %s", compound_name, e)
-    
-    return {}
-
+    cid = get_compound_cid_by_name(compound_name)
+    return get_compound_pk_data(cid) if cid else {}

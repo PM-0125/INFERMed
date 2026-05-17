@@ -285,18 +285,20 @@ def create_expanded_query_context(
     Returns:
         Dictionary with expanded query information
     """
-    # Basic expansion
-    expanded_a = expand_drug_query(drug_a, synonyms_a)
-    expanded_b = expand_drug_query(drug_b, synonyms_b)
+    # Basic expansion (always enabled)
+    expanded_a = expand_drug_query(drug_a, synonyms_a, use_variations=True, use_case_variants=True)
+    expanded_b = expand_drug_query(drug_b, synonyms_b, use_variations=True, use_case_variants=True)
     
-    # Semantic expansion if available
-    if semantic_searcher:
-        semantic_a = expand_with_semantic_similarity(drug_a, semantic_searcher)
-        semantic_b = expand_with_semantic_similarity(drug_b, semantic_searcher)
-        
-        # Merge semantic results
-        expanded_a = list(set(expanded_a + semantic_a))
-        expanded_b = list(set(expanded_b + semantic_b))
+    # Semantic expansion (REQUIRED for RAG system)
+    if semantic_searcher is None:
+        raise RuntimeError("Semantic searcher is required for query expansion. Please ensure semantic search is initialized.")
+    
+    semantic_a = expand_with_semantic_similarity(drug_a, semantic_searcher, top_k=5, threshold=0.6)
+    semantic_b = expand_with_semantic_similarity(drug_b, semantic_searcher, top_k=5, threshold=0.6)
+    
+    # Merge semantic results
+    expanded_a = list(set(expanded_a + semantic_a))
+    expanded_b = list(set(expanded_b + semantic_b))
     
     return {
         "original": {"drug_a": drug_a, "drug_b": drug_b},
@@ -305,9 +307,9 @@ def create_expanded_query_context(
             "drug_b": expanded_b,
         },
         "expansion_methods": {
-            "synonyms": synonyms_a is not None or synonyms_b is not None,
-            "variations": True,
-            "semantic": semantic_searcher is not None,
+            "synonyms": True,  # Always enabled if synonyms available
+            "variations": True,  # Always enabled
+            "semantic": True,  # Always enabled (required)
         },
     }
 

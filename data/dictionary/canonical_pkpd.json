@@ -1,0 +1,576 @@
+{
+  "canonical_pk_interactions": {
+    "valproate|lamotrigine": {
+      "drug_a": "valproate",
+      "drug_b": "lamotrigine",
+      "mechanism": "Valproate inhibits UGT-mediated glucuronidation of lamotrigine (primarily UGT2B7 and UGT1A4), reducing lamotrigine clearance.",
+      "primary_affected_drug": "lamotrigine",
+      "direction": "increase",
+      "severity": "high",
+      "clinical_consequence": "Increased lamotrigine exposure with higher risk of rash including Stevens–Johnson syndrome and CNS toxicity.",
+      "evidence_level": "well-established_clinical_pk"
+    },
+
+    "digoxin|verapamil": {
+      "drug_a": "digoxin",
+      "drug_b": "verapamil",
+      "mechanism": "Verapamil inhibits intestinal and renal P-glycoprotein (ABCB1), reducing efflux and clearance of digoxin.",
+      "primary_affected_drug": "digoxin",
+      "direction": "increase",
+      "severity": "high",
+      "clinical_consequence": "Marked increase in digoxin levels and risk of digoxin toxicity (arrhythmias, GI symptoms, visual disturbances).",
+      "evidence_level": "well-established_clinical_pk"
+    },
+    "amiodarone|digoxin": {
+      "drug_a": "amiodarone",
+      "drug_b": "digoxin",
+      "mechanism": "Amiodarone inhibits P-glycoprotein-mediated efflux of digoxin and may reduce its renal clearance.",
+      "primary_affected_drug": "digoxin",
+      "direction": "increase",
+      "severity": "high",
+      "clinical_consequence": "Increased digoxin concentration leading to bradyarrhythmias and other digoxin toxicity manifestations.",
+      "evidence_level": "well-established_clinical_pk"
+    },
+    "digoxin|quinidine": {
+      "drug_a": "digoxin",
+      "drug_b": "quinidine",
+      "mechanism": "Quinidine potently inhibits P-glycoprotein and renal tubular secretion of digoxin.",
+      "primary_affected_drug": "digoxin",
+      "direction": "increase",
+      "severity": "high",
+      "clinical_consequence": "Substantial increase in digoxin concentration with high risk of life-threatening digoxin toxicity.",
+      "evidence_level": "well-established_clinical_pk"
+    },
+
+    "simvastatin|gemfibrozil": {
+      "drug_a": "simvastatin",
+      "drug_b": "gemfibrozil",
+      "mechanism": "Gemfibrozil and its acyl-glucuronide metabolite inhibit OATP1B1 uptake and CYP2C8/UGT-mediated metabolism of some statins including simvastatin.",
+      "primary_affected_drug": "simvastatin",
+      "direction": "increase",
+      "severity": "high",
+      "clinical_consequence": "Marked increase in active simvastatin exposure and greatly increased risk of myopathy and rhabdomyolysis.",
+      "evidence_level": "well-established_clinical_pk"
+    },
+    "atorvastatin|gemfibrozil": {
+      "drug_a": "atorvastatin",
+      "drug_b": "gemfibrozil",
+      "mechanism": "Gemfibrozil inhibits hepatic uptake and glucuronidation of atorvastatin via OATP1B1 and UGT pathways.",
+      "primary_affected_drug": "atorvastatin",
+      "direction": "increase",
+      "severity": "moderate_high",
+      "clinical_consequence": "Increased atorvastatin concentrations and increased risk of statin-associated muscle symptoms and rhabdomyolysis.",
+      "evidence_level": "clinical_pk_and_case_reports"
+    },
+
+    "simvastatin|clarithromycin": {
+      "drug_a": "simvastatin",
+      "drug_b": "clarithromycin",
+      "mechanism": "Clarithromycin strongly inhibits CYP3A4-mediated metabolism of simvastatin and its active acid form.",
+      "primary_affected_drug": "simvastatin",
+      "direction": "increase",
+      "severity": "high",
+      "clinical_consequence": "Marked increase in simvastatin exposure with high risk of myopathy and rhabdomyolysis.",
+      "evidence_level": "well-established_clinical_pk"
+    },
+    "simvastatin|itraconazole": {
+      "drug_a": "simvastatin",
+      "drug_b": "itraconazole",
+      "mechanism": "Itraconazole is a potent CYP3A4 inhibitor that markedly reduces the metabolism of simvastatin.",
+      "primary_affected_drug": "simvastatin",
+      "direction": "increase",
+      "severity": "high",
+      "clinical_consequence": "Marked elevation of simvastatin levels and high risk of myopathy and rhabdomyolysis.",
+      "evidence_level": "well-established_clinical_pk"
+    },
+    "atorvastatin|clarithromycin": {
+      "drug_a": "atorvastatin",
+      "drug_b": "clarithromycin",
+      "mechanism": "Clarithromycin inhibits CYP3A4-mediated metabolism of atorvastatin.",
+      "primary_affected_drug": "atorvastatin",
+      "direction": "increase",
+      "severity": "moderate_high",
+      "clinical_consequence": "Increased atorvastatin exposure and increased risk of statin-associated muscle toxicity.",
+      "evidence_level": "clinical_pk"
+    },
+    "atorvastatin|itraconazole": {
+      "drug_a": "atorvastatin",
+      "drug_b": "itraconazole",
+      "mechanism": "Itraconazole strongly inhibits CYP3A4 metabolism of atorvastatin.",
+      "primary_affected_drug": "atorvastatin",
+      "direction": "increase",
+      "severity": "moderate_high",
+      "clinical_consequence": "Marked rise in atorvastatin levels with elevated risk of myopathy.",
+      "evidence_level": "clinical_pk"
+    },
+
+    "tacrolimus|fluconazole": {
+      "drug_a": "tacrolimus",
+      "drug_b": "fluconazole",
+      "mechanism": "Fluconazole inhibits CYP3A4/3A5-mediated metabolism of tacrolimus.",
+      "primary_affected_drug": "tacrolimus",
+      "direction": "increase",
+      "severity": "high",
+      "clinical_consequence": "Large increases in tacrolimus trough levels, leading to nephrotoxicity, neurotoxicity, and other calcineurin-inhibitor toxicities.",
+      "evidence_level": "well-established_clinical_pk"
+    },
+    "tacrolimus|itraconazole": {
+      "drug_a": "tacrolimus",
+      "drug_b": "itraconazole",
+      "mechanism": "Itraconazole strongly inhibits CYP3A4/3A5-mediated tacrolimus clearance.",
+      "primary_affected_drug": "tacrolimus",
+      "direction": "increase",
+      "severity": "high",
+      "clinical_consequence": "Very large tacrolimus exposure increases, high risk of nephrotoxicity and neurotoxicity without dose reduction and close TDM.",
+      "evidence_level": "well-established_clinical_pk"
+    },
+    "cyclosporine|erythromycin": {
+      "drug_a": "cyclosporine",
+      "drug_b": "erythromycin",
+      "mechanism": "Erythromycin inhibits CYP3A4-mediated metabolism of cyclosporine.",
+      "primary_affected_drug": "cyclosporine",
+      "direction": "increase",
+      "severity": "high",
+      "clinical_consequence": "Increased cyclosporine levels with heightened risk of nephrotoxicity and neurotoxicity.",
+      "evidence_level": "well-established_clinical_pk"
+    },
+    "cyclosporine|diltiazem": {
+      "drug_a": "cyclosporine",
+      "drug_b": "diltiazem",
+      "mechanism": "Diltiazem inhibits CYP3A4 and P-gp processes that clear cyclosporine.",
+      "primary_affected_drug": "cyclosporine",
+      "direction": "increase",
+      "severity": "moderate_high",
+      "clinical_consequence": "Increased cyclosporine concentrations and increased risk of nephrotoxicity.",
+      "evidence_level": "clinical_pk"
+    },
+
+    "warfarin|amiodarone": {
+      "drug_a": "warfarin",
+      "drug_b": "amiodarone",
+      "mechanism": "Amiodarone inhibits CYP2C9, CYP3A4 and CYP1A2, reducing clearance of S- and R-warfarin.",
+      "primary_affected_drug": "warfarin",
+      "direction": "increase",
+      "severity": "high",
+      "clinical_consequence": "Increased warfarin effect, elevated INR and substantially increased bleeding risk.",
+      "evidence_level": "well-established_clinical_pk"
+    },
+    "warfarin|fluconazole": {
+      "drug_a": "warfarin",
+      "drug_b": "fluconazole",
+      "mechanism": "Fluconazole inhibits CYP2C9-mediated metabolism of S-warfarin and CYP3A4 to a lesser degree.",
+      "primary_affected_drug": "warfarin",
+      "direction": "increase",
+      "severity": "high",
+      "clinical_consequence": "Marked INR elevation and bleeding risk when combined without warfarin dose reduction and close monitoring.",
+      "evidence_level": "well-established_clinical_pk"
+    },
+    "warfarin|metronidazole": {
+      "drug_a": "warfarin",
+      "drug_b": "metronidazole",
+      "mechanism": "Metronidazole inhibits CYP2C9-mediated metabolism of S-warfarin.",
+      "primary_affected_drug": "warfarin",
+      "direction": "increase",
+      "severity": "high",
+      "clinical_consequence": "INR elevation and increased bleeding risk.",
+      "evidence_level": "well-established_clinical_pk"
+    },
+    "warfarin|trimethoprim_sulfamethoxazole": {
+      "drug_a": "warfarin",
+      "drug_b": "trimethoprim_sulfamethoxazole",
+      "mechanism": "TMP-SMX inhibits CYP2C9 metabolism of S-warfarin and may displace warfarin from plasma proteins.",
+      "primary_affected_drug": "warfarin",
+      "direction": "increase",
+      "severity": "high",
+      "clinical_consequence": "Substantial INR rises and bleeding risk, often requiring significant warfarin dose reduction.",
+      "evidence_level": "well-established_clinical_pk"
+    },
+    "warfarin|rifampin": {
+      "drug_a": "warfarin",
+      "drug_b": "rifampin",
+      "mechanism": "Rifampin strongly induces CYP2C9, CYP3A4 and other enzymes, increasing warfarin clearance.",
+      "primary_affected_drug": "warfarin",
+      "direction": "decrease",
+      "severity": "high",
+      "clinical_consequence": "Marked reduction of INR and risk of thrombosis unless warfarin dose is substantially increased.",
+      "evidence_level": "well-established_clinical_pk"
+    },
+
+    "theophylline|ciprofloxacin": {
+      "drug_a": "theophylline",
+      "drug_b": "ciprofloxacin",
+      "mechanism": "Ciprofloxacin inhibits CYP1A2-mediated theophylline metabolism.",
+      "primary_affected_drug": "theophylline",
+      "direction": "increase",
+      "severity": "moderate_high",
+      "clinical_consequence": "Increased theophylline levels, raising risk of nausea, seizures, and arrhythmias.",
+      "evidence_level": "well-established_clinical_pk"
+    },
+    "theophylline|fluvoxamine": {
+      "drug_a": "theophylline",
+      "drug_b": "fluvoxamine",
+      "mechanism": "Fluvoxamine strongly inhibits CYP1A2, markedly reducing theophylline clearance.",
+      "primary_affected_drug": "theophylline",
+      "direction": "increase",
+      "severity": "high",
+      "clinical_consequence": "Major increases in theophylline levels with high risk of serious toxicity.",
+      "evidence_level": "well-established_clinical_pk"
+    },
+
+    "methotrexate_high_dose|nsaid": {
+      "drug_a": "methotrexate_high_dose",
+      "drug_b": "nsaid",
+      "mechanism": "NSAIDs reduce renal blood flow via prostaglandin inhibition and compete with methotrexate for renal tubular secretion.",
+      "primary_affected_drug": "methotrexate",
+      "direction": "increase",
+      "severity": "high",
+      "clinical_consequence": "Delayed high-dose methotrexate clearance with increased risk of severe myelosuppression, mucositis, and nephrotoxicity.",
+      "evidence_level": "well-established_clinical_pk"
+    },
+    "methotrexate|probenecid": {
+      "drug_a": "methotrexate",
+      "drug_b": "probenecid",
+      "mechanism": "Probenecid inhibits organic anion transporters (OAT) in the renal tubule, reducing methotrexate secretion.",
+      "primary_affected_drug": "methotrexate",
+      "direction": "increase",
+      "severity": "moderate_high",
+      "clinical_consequence": "Prolonged methotrexate exposure with increased toxicity risk.",
+      "evidence_level": "clinical_pk"
+    },
+
+    "carbamazepine|oral_contraceptive_combined": {
+      "drug_a": "carbamazepine",
+      "drug_b": "oral_contraceptive_combined",
+      "mechanism": "Carbamazepine is a strong inducer of CYP3A4 and UGTs, increasing the metabolism of ethinyl estradiol and many progestins.",
+      "primary_affected_drug": "oral_contraceptive_combined",
+      "direction": "decrease",
+      "severity": "high",
+      "clinical_consequence": "Reduced contraceptive hormone exposure and increased risk of unintended pregnancy and breakthrough bleeding.",
+      "evidence_level": "well-established_clinical_pk"
+    },
+    "phenytoin|oral_contraceptive_combined": {
+      "drug_a": "phenytoin",
+      "drug_b": "oral_contraceptive_combined",
+      "mechanism": "Phenytoin is a strong hepatic enzyme inducer (CYP3A4 and UGTs), enhancing metabolism of contraceptive steroids.",
+      "primary_affected_drug": "oral_contraceptive_combined",
+      "direction": "decrease",
+      "severity": "high",
+      "clinical_consequence": "Decreased contraceptive effectiveness and increased risk of unintended pregnancy.",
+      "evidence_level": "well-established_clinical_pk"
+    },
+    "rifampin|oral_contraceptive_combined": {
+      "drug_a": "rifampin",
+      "drug_b": "oral_contraceptive_combined",
+      "mechanism": "Rifampin strongly induces CYP3A4 and other enzymes, markedly increasing metabolism of ethinyl estradiol and progestins.",
+      "primary_affected_drug": "oral_contraceptive_combined",
+      "direction": "decrease",
+      "severity": "high",
+      "clinical_consequence": "Substantial loss of contraceptive protection and high risk of unintended pregnancy.",
+      "evidence_level": "well-established_clinical_pk"
+    },
+
+    "ritonavir|prednisolone": {
+      "drug_a": "ritonavir",
+      "drug_b": "prednisolone",
+      "mechanism": "Ritonavir is a potent CYP3A inhibitor, reducing clearance of prednisolone and other CYP3A-metabolized corticosteroids.",
+      "primary_affected_drug": "prednisolone",
+      "direction": "increase",
+      "severity": "high",
+      "clinical_consequence": "Increased systemic steroid exposure leading to iatrogenic Cushing’s syndrome and adrenal suppression.",
+      "evidence_level": "well-established_clinical_pk"
+    },
+    "ritonavir|fluticasone": {
+      "drug_a": "ritonavir",
+      "drug_b": "fluticasone",
+      "mechanism": "Ritonavir strongly inhibits CYP3A4-mediated metabolism of inhaled or intranasal fluticasone.",
+      "primary_affected_drug": "fluticasone",
+      "direction": "increase",
+      "severity": "high",
+      "clinical_consequence": "Marked systemic corticosteroid accumulation with risk of Cushing’s syndrome and adrenal suppression even from inhaled doses.",
+      "evidence_level": "well-established_clinical_pk"
+    },
+
+    "clopidogrel|omeprazole": {
+      "drug_a": "clopidogrel",
+      "drug_b": "omeprazole",
+      "mechanism": "Omeprazole inhibits CYP2C19, the key enzyme responsible for converting clopidogrel to its active thiol metabolite.",
+      "primary_affected_drug": "clopidogrel",
+      "direction": "decrease",
+      "severity": "moderate_high",
+      "clinical_consequence": "Reduced generation of active clopidogrel metabolite and potentially reduced antiplatelet efficacy with increased risk of thrombotic events in some patients.",
+      "evidence_level": "clinical_pk_and_outcome_studies"
+    },
+
+    "metoprolol|paroxetine": {
+      "drug_a": "metoprolol",
+      "drug_b": "paroxetine",
+      "mechanism": "Paroxetine is a strong CYP2D6 inhibitor, reducing CYP2D6-mediated clearance of metoprolol.",
+      "primary_affected_drug": "metoprolol",
+      "direction": "increase",
+      "severity": "moderate_high",
+      "clinical_consequence": "Increased metoprolol exposure with greater risk of bradycardia, hypotension, and fatigue.",
+      "evidence_level": "clinical_pk"
+    },
+
+    "tamoxifen|paroxetine": {
+      "drug_a": "tamoxifen",
+      "drug_b": "paroxetine",
+      "mechanism": "Paroxetine strongly inhibits CYP2D6, the key enzyme that converts tamoxifen into its active metabolite endoxifen.",
+      "primary_affected_drug": "tamoxifen",
+      "direction": "decrease",
+      "severity": "moderate_high",
+      "clinical_consequence": "Reduced endoxifen levels and potentially reduced efficacy of tamoxifen in estrogen receptor–positive breast cancer.",
+      "evidence_level": "clinical_pk_and_observational_outcomes"
+    },
+
+    "dabigatran|amiodarone": {
+      "drug_a": "dabigatran",
+      "drug_b": "amiodarone",
+      "mechanism": "Dabigatran etexilate is a P-gp substrate; amiodarone inhibits P-gp and reduces dabigatran efflux.",
+      "primary_affected_drug": "dabigatran",
+      "direction": "increase",
+      "severity": "moderate_high",
+      "clinical_consequence": "Elevated dabigatran exposure and increased bleeding risk, particularly in renal impairment.",
+      "evidence_level": "clinical_pk"
+    },
+    "dabigatran|verapamil": {
+      "drug_a": "dabigatran",
+      "drug_b": "verapamil",
+      "mechanism": "Verapamil inhibits P-gp in the gut, increasing dabigatran etexilate absorption.",
+      "primary_affected_drug": "dabigatran",
+      "direction": "increase",
+      "severity": "moderate_high",
+      "clinical_consequence": "Higher dabigatran plasma levels with increased bleeding risk.",
+      "evidence_level": "clinical_pk"
+    },
+    "rivaroxaban|ketoconazole": {
+      "drug_a": "rivaroxaban",
+      "drug_b": "ketoconazole",
+      "mechanism": "Rivaroxaban is a substrate of CYP3A4 and P-gp/BCRP; ketoconazole potently inhibits both CYP3A4 and P-gp.",
+      "primary_affected_drug": "rivaroxaban",
+      "direction": "increase",
+      "severity": "high",
+      "clinical_consequence": "Substantial increase in rivaroxaban exposure and bleeding risk.",
+      "evidence_level": "well-established_clinical_pk"
+    },
+    "rivaroxaban|clarithromycin": {
+      "drug_a": "rivaroxaban",
+      "drug_b": "clarithromycin",
+      "mechanism": "Clarithromycin inhibits CYP3A4 and P-gp, reducing rivaroxaban clearance.",
+      "primary_affected_drug": "rivaroxaban",
+      "direction": "increase",
+      "severity": "moderate_high",
+      "clinical_consequence": "Increased rivaroxaban exposure and bleeding risk.",
+      "evidence_level": "clinical_pk"
+    }
+  },
+
+  "canonical_ugt_transporter": {
+    "lamotrigine": {
+      "drug_name": "lamotrigine",
+      "ugts": [
+        { "isoform": "UGT1A4", "role": "substrate" },
+        { "isoform": "UGT2B7", "role": "substrate" }
+      ],
+      "transporters": [],
+      "notes": "Mainly cleared by hepatic glucuronidation via UGT1A4, with UGT2B7 also contributing."
+    },
+    "valproate": {
+      "drug_name": "valproate",
+      "ugts": [
+        { "isoform": "UGT2B7", "role": "substrate" },
+        { "isoform": "UGT1A3", "role": "substrate" },
+        { "isoform": "UGT1A6", "role": "substrate" },
+        { "isoform": "UGT2B7", "role": "inhibitor" },
+        { "isoform": "UGT1A9", "role": "inhibitor" }
+      ],
+      "transporters": [],
+      "notes": "Undergoes extensive glucuronidation and can inhibit UGT2B7 and other UGT isoforms."
+    },
+
+    "digoxin": {
+      "drug_name": "digoxin",
+      "ugts": [],
+      "transporters": [
+        { "name": "P-gp", "gene": "ABCB1", "role": "substrate" }
+      ],
+      "notes": "Prototype P-gp substrate with negligible CYP metabolism; narrow therapeutic index."
+    },
+    "verapamil": {
+      "drug_name": "verapamil",
+      "ugts": [],
+      "transporters": [
+        { "name": "P-gp", "gene": "ABCB1", "role": "substrate" },
+        { "name": "P-gp", "gene": "ABCB1", "role": "inhibitor" }
+      ],
+      "notes": "Calcium channel blocker; both a P-gp substrate and inhibitor."
+    },
+    "amiodarone": {
+      "drug_name": "amiodarone",
+      "ugts": [],
+      "transporters": [
+        { "name": "P-gp", "gene": "ABCB1", "role": "inhibitor" }
+      ],
+      "notes": "Antiarrhythmic drug that inhibits P-gp and multiple CYPs."
+    },
+    "quinidine": {
+      "drug_name": "quinidine",
+      "ugts": [],
+      "transporters": [
+        { "name": "P-gp", "gene": "ABCB1", "role": "substrate" },
+        { "name": "P-gp", "gene": "ABCB1", "role": "inhibitor" }
+      ],
+      "notes": "Potent P-gp inhibitor; classic cause of increased digoxin levels."
+    },
+
+    "cyclosporine": {
+      "drug_name": "cyclosporine",
+      "ugts": [],
+      "transporters": [
+        { "name": "P-gp", "gene": "ABCB1", "role": "substrate" },
+        { "name": "P-gp", "gene": "ABCB1", "role": "inhibitor" },
+        { "name": "OATP1B1", "gene": "SLCO1B1", "role": "inhibitor" }
+      ],
+      "notes": "Calcineurin inhibitor; both a P-gp substrate and inhibitor; also inhibits hepatic OATP1B1."
+    },
+    "tacrolimus": {
+      "drug_name": "tacrolimus",
+      "ugts": [],
+      "transporters": [
+        { "name": "P-gp", "gene": "ABCB1", "role": "substrate" }
+      ],
+      "notes": "Calcineurin inhibitor; sensitive CYP3A4/3A5 and P-gp substrate."
+    },
+
+    "simvastatin": {
+      "drug_name": "simvastatin",
+      "ugts": [
+        { "isoform": "UGT1A1", "role": "substrate" },
+        { "isoform": "UGT1A3", "role": "substrate" }
+      ],
+      "transporters": [
+        { "name": "OATP1B1", "gene": "SLCO1B1", "role": "substrate" },
+        { "name": "BCRP", "gene": "ABCG2", "role": "substrate" }
+      ],
+      "notes": "Lipid-lowering statin; high first-pass hepatic uptake via OATP1B1; glucuronidation forms active and inactive metabolites."
+    },
+    "atorvastatin": {
+      "drug_name": "atorvastatin",
+      "ugts": [
+        { "isoform": "UGT1A1", "role": "substrate" },
+        { "isoform": "UGT1A3", "role": "substrate" }
+      ],
+      "transporters": [
+        { "name": "OATP1B1", "gene": "SLCO1B1", "role": "substrate" },
+        { "name": "BCRP", "gene": "ABCG2", "role": "substrate" }
+      ],
+      "notes": "Hepatic uptake via OATP1B1 and metabolism by CYP3A4 and UGTs."
+    },
+    "pravastatin": {
+      "drug_name": "pravastatin",
+      "ugts": [],
+      "transporters": [
+        { "name": "OATP1B1", "gene": "SLCO1B1", "role": "substrate" }
+      ],
+      "notes": "Hydrophilic statin; primarily a substrate of OATP1B1 with minimal CYP metabolism."
+    },
+    "rosuvastatin": {
+      "drug_name": "rosuvastatin",
+      "ugts": [],
+      "transporters": [
+        { "name": "OATP1B1", "gene": "SLCO1B1", "role": "substrate" },
+        { "name": "OATP1B3", "gene": "SLCO1B3", "role": "substrate" },
+        { "name": "BCRP", "gene": "ABCG2", "role": "substrate" }
+      ],
+      "notes": "Hydrophilic statin; disposition heavily influenced by OATP and BCRP transport."
+    },
+    "gemfibrozil": {
+      "drug_name": "gemfibrozil",
+      "ugts": [
+        { "isoform": "UGT2B7", "role": "substrate" }
+      ],
+      "transporters": [
+        { "name": "OATP1B1", "gene": "SLCO1B1", "role": "inhibitor" }
+      ],
+      "notes": "Fibrate; its acyl-glucuronide metabolite inhibits OATP1B1 and CYP2C8, which underlies key statin interactions."
+    },
+
+    "dabigatran": {
+      "drug_name": "dabigatran",
+      "ugts": [],
+      "transporters": [
+        { "name": "P-gp", "gene": "ABCB1", "role": "substrate" }
+      ],
+      "notes": "Dabigatran etexilate is a P-gp substrate; absorption and exposure are sensitive to P-gp modulators, particularly in renal impairment."
+    },
+    "rivaroxaban": {
+      "drug_name": "rivaroxaban",
+      "ugts": [],
+      "transporters": [
+        { "name": "P-gp", "gene": "ABCB1", "role": "substrate" },
+        { "name": "BCRP", "gene": "ABCG2", "role": "substrate" }
+      ],
+      "notes": "Factor Xa inhibitor; cleared by combined CYP3A4/5 and transport via P-gp/BCRP."
+    },
+
+    "methotrexate": {
+      "drug_name": "methotrexate",
+      "ugts": [],
+      "transporters": [
+        { "name": "OAT1", "gene": "SLC22A6", "role": "substrate" },
+        { "name": "OAT3", "gene": "SLC22A8", "role": "substrate" },
+        { "name": "BCRP", "gene": "ABCG2", "role": "substrate" }
+      ],
+      "notes": "Renally cleared anticancer/DMARD drug; elimination depends on glomerular filtration and active tubular secretion via OAT1/3 and BCRP."
+    },
+    "probenecid": {
+      "drug_name": "probenecid",
+      "ugts": [],
+      "transporters": [
+        { "name": "OAT1", "gene": "SLC22A6", "role": "inhibitor" },
+        { "name": "OAT3", "gene": "SLC22A8", "role": "inhibitor" }
+      ],
+      "notes": "Uricosuric; inhibits renal organic anion transporters, thereby reducing tubular secretion of methotrexate and many other anionic drugs."
+    },
+
+    "rifampin": {
+      "drug_name": "rifampin",
+      "ugts": [],
+      "transporters": [
+        { "name": "OATP1B1", "gene": "SLCO1B1", "role": "substrate" },
+        { "name": "OATP1B1", "gene": "SLCO1B1", "role": "inhibitor" }
+      ],
+      "notes": "Powerful inducer of many enzymes and transporters; acutely inhibits and chronically induces OATP1B1, affecting statin disposition."
+    },
+
+    "clopidogrel": {
+      "drug_name": "clopidogrel",
+      "ugts": [],
+      "transporters": [
+        { "name": "P-gp", "gene": "ABCB1", "role": "substrate" }
+      ],
+      "notes": "Prodrug activated by CYP2C19; minor P-gp substrate role; interaction with omeprazole is mainly CYP2C19-mediated rather than transporter-based."
+    },
+
+    "metoprolol": {
+      "drug_name": "metoprolol",
+      "ugts": [],
+      "transporters": [],
+      "notes": "Primarily a CYP2D6 substrate; no major clinically relevant transporter interactions recognized."
+    },
+
+    "paroxetine": {
+      "drug_name": "paroxetine",
+      "ugts": [],
+      "transporters": [],
+      "notes": "Selective serotonin reuptake inhibitor; clinically important as a strong CYP2D6 inhibitor, not via transporters."
+    },
+
+    "tamoxifen": {
+      "drug_name": "tamoxifen",
+      "ugts": [],
+      "transporters": [],
+      "notes": "Prodrug converted to endoxifen mainly via CYP2D6; transporter roles are less clinically central than CYP interactions."
+    }
+  }
+}

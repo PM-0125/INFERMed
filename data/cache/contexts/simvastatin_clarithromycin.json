@@ -1,0 +1,406 @@
+{
+  "signals": {
+    "tabular": {
+      "prr": 130.0,
+      "side_effects_a": [
+        "Renal injury",
+        "Diabetic neuropathy",
+        "Carotid artery stenosis",
+        "Rhabdomyolysis",
+        "Blood testosterone decreased",
+        "Erectile dysfunction",
+        "Renal impairment",
+        "Osteoporosis",
+        "Skin tightness",
+        "Skin induration",
+        "Joint range of motion decreased",
+        "Tobacco user",
+        "Anhedonia",
+        "Fear",
+        "Peritonitis bacterial",
+        "Neutrophil count increased",
+        "Loose tooth",
+        "Clostridium difficile colitis",
+        "Unevaluable event",
+        "Arthritis",
+        "Dermatomyositis",
+        "Skin discolouration",
+        "Skin hypertrophy",
+        "Spinal column stenosis",
+        "Haematoma"
+      ],
+      "side_effects_b": [
+        "Mycobacterium avium complex infection",
+        "Abnormal behaviour",
+        "Immune reconstitution syndrome",
+        "Myositis",
+        "Osteonecrosis of jaw",
+        "Ataxia",
+        "Osteomyelitis",
+        "Vanishing bile duct syndrome",
+        "Enterocolitis haemorrhagic",
+        "Cytomegalovirus chorioretinitis",
+        "Neuroleptic malignant syndrome",
+        "Psychomotor hyperactivity",
+        "Homicidal ideation",
+        "Immune reconstitution inflammatory syndrome",
+        "Clostridium difficile infection",
+        "Paradoxical drug reaction",
+        "Pleural effusion",
+        "Atypical mycobacterial infection",
+        "Faecal incontinence",
+        "Joint stiffness",
+        "Tachycardia foetal",
+        "Ventricular tachycardia",
+        "Clostridium difficile colitis",
+        "Energy increased",
+        "Feeling drunk"
+      ],
+      "dili_a": 3.0,
+      "dili_b": 8.0,
+      "dict_a": 0.1,
+      "dict_b": 0.4,
+      "diqt_a": null,
+      "diqt_b": 4.0
+    },
+    "mechanistic": {
+      "enzymes": {
+        "a": {
+          "substrate": [],
+          "inhibitor": [],
+          "inducer": []
+        },
+        "b": {
+          "substrate": [],
+          "inhibitor": [],
+          "inducer": []
+        }
+      },
+      "targets_a": [],
+      "targets_b": [],
+      "diseases_a": [],
+      "diseases_b": [],
+      "pathways_a": [],
+      "pathways_b": [],
+      "common_pathways": []
+    },
+    "faers": {
+      "top_reactions_a": [
+        [
+          "NAUSEA",
+          5822
+        ],
+        [
+          "FATIGUE",
+          5542
+        ],
+        [
+          "DYSPNOEA",
+          5394
+        ],
+        [
+          "DIARRHOEA",
+          5195
+        ],
+        [
+          "DIZZINESS",
+          4801
+        ],
+        [
+          "DRUG INEFFECTIVE",
+          4438
+        ],
+        [
+          "PAIN",
+          4063
+        ],
+        [
+          "HEADACHE",
+          4002
+        ],
+        [
+          "VOMITING",
+          3937
+        ],
+        [
+          "ASTHENIA",
+          3799
+        ]
+      ],
+      "top_reactions_b": [
+        [
+          "DRUG INEFFECTIVE",
+          1734
+        ],
+        [
+          "DRUG INTERACTION",
+          1605
+        ],
+        [
+          "NAUSEA",
+          1412
+        ],
+        [
+          "DIARRHOEA",
+          1203
+        ],
+        [
+          "DYSPNOEA",
+          1196
+        ],
+        [
+          "OFF LABEL USE",
+          1189
+        ],
+        [
+          "HEADACHE",
+          1110
+        ],
+        [
+          "PYREXIA",
+          1106
+        ],
+        [
+          "MALAISE",
+          1010
+        ],
+        [
+          "VOMITING",
+          851
+        ]
+      ],
+      "combo_reactions": [
+        [
+          "DRUG INEFFECTIVE",
+          1734
+        ],
+        [
+          "DRUG INTERACTION",
+          1605
+        ],
+        [
+          "NAUSEA",
+          1412
+        ],
+        [
+          "DIARRHOEA",
+          1203
+        ],
+        [
+          "DYSPNOEA",
+          1196
+        ],
+        [
+          "OFF LABEL USE",
+          1189
+        ],
+        [
+          "HEADACHE",
+          1110
+        ],
+        [
+          "PYREXIA",
+          1106
+        ],
+        [
+          "MALAISE",
+          1010
+        ],
+        [
+          "VOMITING",
+          851
+        ]
+      ]
+    }
+  },
+  "drugs": {
+    "a": {
+      "name": "simvastatin",
+      "synonyms": [],
+      "ids": {}
+    },
+    "b": {
+      "name": "clarithromycin",
+      "synonyms": [],
+      "ids": {}
+    }
+  },
+  "caveats": [
+    "QLever RDF disabled for NVIDIA demo runtime.",
+    "Semantic query expansion unavailable: Semantic searcher is required for query expansion. Please ensure semantic search is initialized.",
+    "QLever RDF disabled for NVIDIA demo runtime."
+  ],
+  "pkpd": {
+    "pk_summary": "CANONICAL PK INTERACTION (Well-Established Clinical Pk): Clarithromycin strongly inhibits CYP3A4-mediated metabolism of simvastatin and its active acid form. → ↑ simvastatin exposure (Severity: High)",
+    "pd_summary": "No obvious PD overlap",
+    "pk_detail": {
+      "roles": {
+        "a": {
+          "substrate": [
+            "ugt1a1",
+            "ugt1a3"
+          ],
+          "inhibitor": [],
+          "inducer": []
+        },
+        "b": {
+          "substrate": [],
+          "inhibitor": [],
+          "inducer": []
+        }
+      },
+      "overlaps": {
+        "inhibition": [],
+        "induction": [],
+        "shared_substrate": []
+      },
+      "canonical_interaction": {
+        "drug_a": "simvastatin",
+        "drug_b": "clarithromycin",
+        "mechanism": "Clarithromycin strongly inhibits CYP3A4-mediated metabolism of simvastatin and its active acid form.",
+        "primary_affected_drug": "simvastatin",
+        "direction": "increase",
+        "severity": "high",
+        "clinical_consequence": "Marked increase in simvastatin exposure with high risk of myopathy and rhabdomyolysis.",
+        "evidence_level": "well-established_clinical_pk"
+      }
+    },
+    "pd_detail": {
+      "overlap_targets": [],
+      "overlap_pathways": [],
+      "pd_score": 0.0
+    }
+  },
+  "sources": {
+    "duckdb": [
+      "TwoSides",
+      "DILIrank",
+      "DICTRank",
+      "DIQT"
+    ],
+    "qlever": [],
+    "openfda": [
+      "FAERS via OpenFDA (cached)"
+    ],
+    "apis": [
+      "PubChem REST API",
+      "UniProt REST API",
+      "KEGG REST API",
+      "Reactome REST API"
+    ],
+    "canonical": [
+      "Canonical PK/PD Dictionary"
+    ],
+    "semantic": [],
+    "query_expansion": [
+      "Query Expansion (Synonyms, Variations)"
+    ],
+    "hybrid_search": [
+      "Keyword Search"
+    ],
+    "adaptive_retrieval": [
+      "Adaptive Retrieval (Dynamic Top-K)"
+    ]
+  },
+  "source_status": [
+    {
+      "name": "TWOSIDES",
+      "enabled": true,
+      "available": true,
+      "reason": "Local file present"
+    },
+    {
+      "name": "DILIrank",
+      "enabled": true,
+      "available": true,
+      "reason": "Local file present"
+    },
+    {
+      "name": "DICTRank",
+      "enabled": true,
+      "available": true,
+      "reason": "Local file present"
+    },
+    {
+      "name": "DIQT",
+      "enabled": true,
+      "available": true,
+      "reason": "Local file present"
+    },
+    {
+      "name": "DrugBank local dataset",
+      "enabled": false,
+      "available": false,
+      "reason": "Disabled in public_safe mode"
+    },
+    {
+      "name": "QLever RDF",
+      "enabled": false,
+      "available": false,
+      "reason": "Disabled for NVIDIA demo runtime"
+    },
+    {
+      "name": "OpenFDA cache/API",
+      "enabled": true,
+      "available": true,
+      "reason": "Availability checked per request"
+    },
+    {
+      "name": "PubChem PUG-REST",
+      "enabled": true,
+      "available": true,
+      "reason": "Availability checked per request"
+    },
+    {
+      "name": "PubChem PUG-View",
+      "enabled": true,
+      "available": true,
+      "reason": "Availability checked per request"
+    },
+    {
+      "name": "ChEMBL",
+      "enabled": true,
+      "available": true,
+      "reason": "Optional enrichment"
+    },
+    {
+      "name": "KEGG",
+      "enabled": true,
+      "available": true,
+      "reason": "Optional enrichment"
+    },
+    {
+      "name": "Reactome",
+      "enabled": true,
+      "available": true,
+      "reason": "Optional enrichment"
+    },
+    {
+      "name": "UniProt",
+      "enabled": true,
+      "available": true,
+      "reason": "Optional enrichment"
+    },
+    {
+      "name": "Canonical PK/PD dictionary",
+      "enabled": true,
+      "available": true,
+      "reason": "Curated local mechanism seeds"
+    },
+    {
+      "name": "NVIDIA NIM LLM",
+      "enabled": true,
+      "available": true,
+      "reason": "NVIDIA_API_KEY and NVIDIA_MODEL configured"
+    }
+  ],
+  "meta": {
+    "drug_pair": "simvastatin|clarithromycin",
+    "pair_key": "clarithromycin|simvastatin",
+    "created_at": "2026-05-11T18:48:07Z",
+    "version": 8,
+    "data_mode": "public_safe",
+    "qlever_contributed_raw": false,
+    "qlever_contributed": false
+  }
+}

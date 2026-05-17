@@ -133,7 +133,7 @@ def filter_context_by_relevance(
             filtered_context["signals"]["faers"] = faers
     
     # Preserve other context sections
-    for key in ["drugs", "caveats", "pkpd", "sources", "meta"]:
+    for key in ["drugs", "caveats", "pkpd", "sources", "source_status", "meta"]:
         if key in context:
             filtered_context[key] = context[key]
     
@@ -270,4 +270,3 @@ def filter_context_sections(
             mech["pathways_b"] = filtered_pathways_b
     
     return filtered_context
-

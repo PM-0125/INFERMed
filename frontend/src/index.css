@@ -1,0 +1,178 @@
+/* ============================================================
+   INFERMed Design System — Global Foundation
+   Clinical Intelligence Platform
+   ============================================================ */
+
+/* ---------- Design Tokens ---------- */
+:root {
+  /* Brand */
+  --navy:           #0C2D45;
+  --navy-mid:       #163B58;
+  --navy-light:     #1E4F74;
+
+  /* Primary actions */
+  --blue:           #1565A8;
+  --blue-hover:     #1272BE;
+  --blue-pale:      #EBF4FB;
+  --blue-mid:       #C0DDEF;
+
+  /* Cyan accent (PubChem-inspired) */
+  --cyan:           #0798C5;
+  --cyan-hover:     #0AADDF;
+  --cyan-pale:      #E0F5FC;
+  --cyan-mid:       #B3E4F5;
+
+  /* Evidence green (DrugBank-inspired) */
+  --green:          #147A47;
+  --green-hover:    #1A9456;
+  --green-pale:     #E6F5EE;
+  --green-mid:      #B8DFC9;
+
+  /* Risk: High */
+  --red:            #C12026;
+  --red-hover:      #A81B20;
+  --red-pale:       #FEE8E8;
+  --red-mid:        #F9BBBD;
+
+  /* Risk: Moderate */
+  --amber:          #A8520A;
+  --amber-pale:     #FEF3E4;
+  --amber-mid:      #FDD5A0;
+
+  /* Typography */
+  --ink:            #0D1E2B;
+  --ink-mid:        #2C4255;
+  --muted:          #576E80;
+  --muted-light:    #8DA5B4;
+
+  /* Surfaces */
+  --surface:        #EFF3F7;
+  --surface-card:   #FFFFFF;
+  --surface-hover:  #F6F9FB;
+  --surface-raised: #FAFCFD;
+
+  /* Borders */
+  --line:           #C5D4DE;
+  --line-light:     #DDE8EE;
+  --line-strong:    #A8BFC9;
+
+  /* Elevation */
+  --shadow-xs:  0 1px 2px rgba(13, 30, 43, 0.06);
+  --shadow-sm:  0 2px 6px rgba(13, 30, 43, 0.08);
+  --shadow-md:  0 4px 16px rgba(13, 30, 43, 0.10);
+  --shadow-lg:  0 12px 36px rgba(13, 30, 43, 0.13);
+
+  /* Border radius */
+  --r-xs:   4px;
+  --r-sm:   6px;
+  --r-md:   10px;
+  --r-lg:   14px;
+  --r-xl:   20px;
+  --r-pill: 999px;
+
+  /* Transitions */
+  --ease:        cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --t-fast:  120ms;
+  --t-base:  200ms;
+  --t-slow:  350ms;
+
+  /* Typography */
+  font-family: 'Inter', 'Segoe UI', 'Helvetica Neue', Arial, system-ui, sans-serif;
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--ink);
+  background: var(--surface);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ---------- Keyframes ---------- */
+
+@keyframes shimmer {
+  0%   { background-position: -900px 0; }
+  100% { background-position:  900px 0; }
+}
+
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes slide-right {
+  from { opacity: 0; transform: translateX(-8px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1;   transform: scale(1);    box-shadow: 0 0 0 0   rgba(20, 122, 71, 0.5); }
+  50%       { opacity: 0.7; transform: scale(0.85); box-shadow: 0 0 0 4px rgba(20, 122, 71, 0);   }
+}
+
+@keyframes risk-pulse {
+  0%, 100% { box-shadow: 0 0 0 0   rgba(193, 32, 38, 0.35); }
+  50%       { box-shadow: 0 0 0 6px rgba(193, 32, 38, 0);    }
+}
+
+/* ---------- Reset ---------- */
+*, *::before, *::after { box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
+
+html, body, #root {
+  width: 100%;
+  min-height: 100vh;
+  margin: 0;
+}
+
+body {
+  min-width: 320px;
+  background: var(--surface);
+}
+
+h1, h2, h3, h4, h5, h6 {
+  margin: 0;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+
+p { margin: 0; }
+
+a {
+  color: var(--blue);
+  text-decoration: none;
+  transition: color var(--t-fast) var(--ease);
+}
+a:hover { color: var(--blue-hover); text-decoration: underline; }
+
+/* ---------- Scrollbar ---------- */
+::-webkit-scrollbar { width: 7px; height: 7px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border-radius: var(--r-pill);
+}
+::-webkit-scrollbar-thumb:hover { background: var(--muted-light); }
+
+/* ---------- Focus ---------- */
+button:focus-visible,
+input:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+  border-radius: var(--r-xs);
+}

@@ -5,7 +5,7 @@
 #   {{FAERS_SUMMARY}}                # e.g., "Top A: … | Top B: … | Combo: …"
 #   {{RISK_FLAGS}}                   # compact text (PRR, DILI/DICT/DIQT flags)
 #   {{EVIDENCE_TABLE}}               # compressed, human-readable dump (targets, enzymes, pathways)
-#   {{SOURCES}}                      # bullet-ish (TwoSides, DrugBank, PubChem via QLever, OpenFDA)
+#   {{SOURCES}}                      # compact source inventory (TwoSides, DrugBank, PubChem RDF/QLever, OpenFDA, PubChem REST, UniProt, KEGG, Reactome, ChEMBL)
 #   {{CAVEATS}}                      # list of caveats surfaced in context
 #   {{HISTORY}}                      # prior Q&A turns, if any (optional)
 #   {{USER_QUESTION}}                # built by llm_interface
@@ -76,8 +76,15 @@ IMPORTANT BEHAVIOR RULES:
 
 RESPONSE STYLE:
 Write in this order. Keep it compact, clinical, and honest about uncertainty.
+Use exactly these markdown section headings so the frontend can render structured cards:
+## Bottom Line
+## Interaction Mechanism
+## Clinical Concern
+## Monitoring & Actions
+## Evidence Limitations
 
-1) Assessment (2–4 sentences)
+## Bottom Line
+Assessment (2-4 sentences)
    - Interaction likelihood: Likely | Possible | Unclear | Unlikely.
    - Interaction type:
        * PK (inhibition/induction/competition) if supported by CONTEXT or clearly explained as general pharmacology knowledge.
@@ -89,7 +96,8 @@ Write in this order. Keep it compact, clinical, and honest about uncertainty.
      If it says "DATA-DRIVEN PK OVERLAP: No strong PK overlap detected", you must state that 
      the retrieved data do not show a PK overlap (even if you mention known mechanisms as general knowledge).
 
-2) Mechanism & Rationale (bullets)
+## Interaction Mechanism
+Mechanism & rationale (bullets)
    - PK:
      * **First, explicitly restate the DATA-DRIVEN PK OVERLAP status from the PK summary verbatim.**
      * Then, if the retrieved data show no PK overlap but you know of a well-known mechanism, 
@@ -107,7 +115,8 @@ Write in this order. Keep it compact, clinical, and honest about uncertainty.
      * Tie DILI/DICT/DIQT and PRR back to the PK/PD picture:
        e.g., “High PRR and elevated DILI scores support a hepatotoxicity signal, even though the exact mechanism is uncertain.”
 
-3) Expected Clinical Effects
+## Clinical Concern
+Expected clinical effects
    - Based on CONTEXT and (clearly labeled) general pharmacology knowledge, list plausible clinical outcomes:
      * PK-related (e.g., ↓ effect of a prodrug if activation is inhibited; ↑ toxicity if clearance is reduced).
      * PD-related (e.g., additive anticoagulation, additive QT prolongation) only when supported by PD/DIQT/DICT data or very strong general knowledge.
@@ -120,7 +129,8 @@ Write in this order. Keep it compact, clinical, and honest about uncertainty.
      * Baseline cardiovascular/QT risk
    - Avoid extrapolating beyond what risk domains and FAERS reasonably support.
 
-4) Monitoring / Actions (bullets)
+## Monitoring & Actions
+Monitoring and actions (bullets)
    - Monitoring:
      * What to monitor (labs, symptoms, ECG) based on risk domains and hypothesized mechanisms.
      * Qualitative timing only: “baseline and periodic”, “closer monitoring around initiation”.
@@ -133,12 +143,13 @@ Write in this order. Keep it compact, clinical, and honest about uncertainty.
        “Given the external pharmacology knowledge about [mechanism], clinicians often consider avoiding this combination in high-risk patients.”
        But do not present this as a dataset-derived rule.
 
-5) Evidence & Uncertainty
+## Evidence Limitations
+Evidence and uncertainty
    - State clearly: “FAERS signals are associative, not causal.”
    - Distinguish explicitly:
      * “Supported by retrieved data” vs. “General pharmacology knowledge (not directly observed in these datasets)”.
    - List gaps: “No quantitative PK data”, “Mechanism based mainly on PD overlap and external knowledge”, etc.
-   - Mention sources from CONTEXT by name (TwoSides, DILIrank, DICTRank, DIQT, DrugBank, PubChem RDF via QLever, FAERS via OpenFDA).
+   - Mention sources from CONTEXT by name when present (TwoSides, DILIrank, DICTRank, DIQT, DrugBank, PubChem RDF via QLever, FAERS via OpenFDA, PubChem REST, UniProt, KEGG, Reactome, ChEMBL).
 
 Close with:
 “This note reflects only the evidence provided and general pharmacology knowledge, and does not replace clinical judgment.”
@@ -165,19 +176,33 @@ CONTEXT (simplified):
 
 RESPONSE STYLE:
 Use short paragraphs and bullets. Reassure without minimizing real risk.
+Use exactly these markdown section headings so the frontend can render structured cards:
+## Bottom Line
+## Interaction Mechanism
+## Clinical Concern
+## Monitoring & Actions
+## Evidence Limitations
 
-1) Short Answer (1–3 sentences)
+## Bottom Line
+Short answer (1-3 sentences)
    - Classify in plain language: “Usually safe”, “Can be used with caution”, or “Best to avoid without medical advice”.
    - Base this classification on the risk domains in CONTEXT (e.g., liver, heart, bleeding).
    - You may briefly mention well-known mechanisms in plain language, but only as background.
 
-2) What to Watch For
+## Interaction Mechanism
+Why this interaction may matter
+   - Explain the relevant mechanism in plain language.
+   - Separate retrieved data from general pharmacology knowledge.
+
+## Clinical Concern
+What to watch for
    - 4–7 bullet points of symptoms/signs:
      * Directly related to risk flags (e.g., liver, heart, bleeding, CNS).
      * Informed by FAERS patterns and general pharmacology when aligned (e.g., nausea, diarrhoea, dizziness, fatigue).
    - Each bullet has a “why it matters” in parentheses.
 
-3) What To Do
+## Monitoring & Actions
+What to do
    - Non-prescriptive, practical steps:
      * Take the medicines exactly as prescribed.
      * When to call the prescriber (e.g., unusual bleeding, yellowing of skin/eyes, chest pain, severe dizziness).
@@ -185,7 +210,8 @@ Use short paragraphs and bullets. Reassure without minimizing real risk.
    - Do NOT suggest changing doses, stopping drugs, or switching specific medicines.
      Instead, say: “Talk to your doctor or pharmacist before making any changes.”
 
-4) Extra Notes
+## Evidence Limitations
+Extra notes
    - Explain that reports like FAERS show patterns, not proof for each person.
    - Encourage the patient to:
      * Keep an updated list of medicines and supplements.
@@ -218,13 +244,21 @@ CONTEXT:
 
 RESPONSE STYLE:
 Use headings and tight bullets (one line where possible).
+Use exactly these markdown section headings so the frontend can render structured cards:
+## Bottom Line
+## Interaction Mechanism
+## Clinical Concern
+## Monitoring & Actions
+## Evidence Limitations
 
-1) Overview
+## Bottom Line
+Overview
    - Interaction type: PK / PD / both / signal-only.
    - Direction if supported (↑/↓ exposure, additive toxicity).
    - Confidence: High | Moderate | Low, tied explicitly to breadth/consistency of CONTEXT plus any widely accepted external mechanism.
 
-2) Evidence Summary
+## Interaction Mechanism
+Evidence summary
    - Mechanism:
      * Summarize PK from PK summary; if “No strong PK overlap detected” in retrieved data, state PK overlap is not demonstrated in this dataset.
      * You may add a separate line for general pharmacology knowledge (e.g., known CYP interactions), clearly labeled as external.
@@ -234,11 +268,13 @@ Use headings and tight bullets (one line where possible).
      * Summarize FAERS combo entries (term + counts, or absence).
      * Mention pairwise PRR and DILI/DICT/DIQT scores.
 
-3) Risk Assessment
+## Clinical Concern
+Risk assessment
    - Category: Low / Moderate / High with justification tied to CONTEXT (and optionally supported by widely accepted external mechanism).
    - Populations of concern (e.g., elderly, hepatic/renal impairment, cardiovascular/QT risk).
 
-4) Recommendations
+## Monitoring & Actions
+Recommendations
    - Monitoring:
      * Qualitative only (“consider periodic LFT/ECG monitoring”, “closer observation at initiation or dose changes”).
    - Mitigation:
@@ -247,7 +283,8 @@ Use headings and tight bullets (one line where possible).
    - Labeling / further work:
      * Comment on whether the signal merits further analysis, targeted studies, or label enhancement.
 
-5) Limitations
+## Evidence Limitations
+Limitations
    - Enumerate missing or weak data:
      * “No quantitative PK data”, “PK overlap not demonstrated in retrieved mechanistic data”, “PD overlap only”, “FAERS sparse/absent for combo”.
    - Reiterate that FAERS/PRR are associative, and distinguish dataset-supported vs external knowledge.

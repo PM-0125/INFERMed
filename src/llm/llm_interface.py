@@ -5,15 +5,19 @@ import os
 import re
 import time
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import urlsplit, urlunsplit
 
-# Try to load .env file if python-dotenv is available
-try:
-    from dotenv import load_dotenv
-    # Load .env from project root (go up from src/llm to project root)
-    env_path = os.path.join(os.path.dirname(__file__), "..", "..", ".env")
-    load_dotenv(env_path, override=False)  # Don't override existing env vars
-except ImportError:
-    pass  # python-dotenv not installed, skip
+from src.config.settings import get_settings
+
+# Sensitive local .env files are opt-in. Codex/test runs should use process
+# environment variables or example env files rather than reading secrets.
+if os.getenv("INFERMED_LOAD_DOTENV", "").strip().lower() in {"1", "true", "yes", "on"}:
+    try:
+        from dotenv import load_dotenv
+        env_path = os.path.join(os.path.dirname(__file__), "..", "..", ".env")
+        load_dotenv(env_path, override=False)
+    except ImportError:
+        pass
 
 # ========== Configuration ==========
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
@@ -56,11 +60,12 @@ DEFAULT_TEMPLATES: Dict[str, str] = {
         "- Conversation history: {{HISTORY}}\n"
         "- Raw context JSON: {{RAW_CONTEXT_JSON}}\n\n"
         "RESPONSE STYLE:\n"
-        "1) Assessment\n"
-        "2) Mechanism & Rationale\n"
-        "3) Expected Clinical Effects\n"
-        "4) Monitoring / Actions\n"
-        "5) Evidence & Uncertainty\n"
+        "Use exactly these markdown section headings:\n"
+        "## Bottom Line\n"
+        "## Interaction Mechanism\n"
+        "## Clinical Concern\n"
+        "## Monitoring & Actions\n"
+        "## Evidence Limitations\n"
     ),
     "PATIENT": (
         "[TEMPLATE:PATIENT]\n"
@@ -77,7 +82,12 @@ DEFAULT_TEMPLATES: Dict[str, str] = {
         "- Prior discussion: {{HISTORY}}\n"
         "- Caveats: {{CAVEATS}}\n\n"
         "RESPONSE STYLE:\n"
-        "Short Answer; What to Watch For; What To Do; Extra Notes.\n"
+        "Use exactly these markdown section headings:\n"
+        "## Bottom Line\n"
+        "## Interaction Mechanism\n"
+        "## Clinical Concern\n"
+        "## Monitoring & Actions\n"
+        "## Evidence Limitations\n"
     ),
     "PHARMA": (
         "[TEMPLATE:PHARMA]\n"
@@ -97,7 +107,12 @@ DEFAULT_TEMPLATES: Dict[str, str] = {
         "- History: {{HISTORY}}\n"
         "- Raw context JSON: {{RAW_CONTEXT_JSON}}\n\n"
         "RESPONSE STYLE:\n"
-        "Overview; Evidence Summary; Risk Assessment; Recommendations; Limitations.\n"
+        "Use exactly these markdown section headings:\n"
+        "## Bottom Line\n"
+        "## Interaction Mechanism\n"
+        "## Clinical Concern\n"
+        "## Monitoring & Actions\n"
+        "## Evidence Limitations\n"
     ),
 }
 
@@ -138,11 +153,28 @@ def generate_response(
     max_tokens: Optional[int] = None,
     history: Optional[List[Dict[str, str]]] = None,
     model_name: Optional[str] = None,
+    stream: Optional[bool] = None,
 ) -> Dict[str, Any]:
     prompt = build_prompt(context or {}, mode, history=history)
+    settings = get_settings()
 
     selected_model = model_name or MODEL_NAME
     num_predict = int(max_tokens) if (max_tokens is not None) else DEFAULT_NUM_PREDICT
+
+    if settings.llm_provider == "mock":
+        return _mock_response(context or {}, mode, selected_model="mock", temperature=temperature, seed=seed)
+
+    if settings.llm_provider == "nvidia":
+        return _generate_nvidia_response(
+            prompt,
+            mode,
+            model_name=model_name or settings.nvidia_model,
+            temperature=settings.llm_temperature,
+            top_p=settings.llm_top_p,
+            max_tokens=max_tokens if max_tokens is not None else settings.llm_max_tokens,
+            stream=settings.llm_stream if stream is None else bool(stream),
+            seed=seed,
+        )
 
     payload_options = {
         **DECODE_DEFAULTS,
@@ -183,6 +215,376 @@ def generate_response(
         return _fallback(f"Ollama exception: {e}")
 
 
+def generate_followup_response(
+    context: Dict[str, Any],
+    mode: str,
+    *,
+    question: str,
+    history: Optional[List[Dict[str, str]]] = None,
+    prior_assessment: Optional[str] = None,
+    seed: Optional[int] = None,
+    temperature: float = 0.2,
+    max_tokens: Optional[int] = None,
+    model_name: Optional[str] = None,
+    stream: Optional[bool] = None,
+) -> Dict[str, Any]:
+    """Generate a compact answer to a scenario-specific follow-up question."""
+    prompt = build_followup_prompt(
+        context or {},
+        mode,
+        question=question,
+        history=history,
+        prior_assessment=prior_assessment,
+    )
+    settings = get_settings()
+
+    selected_model = model_name or MODEL_NAME
+    num_predict = int(max_tokens) if (max_tokens is not None) else DEFAULT_NUM_PREDICT
+
+    if settings.llm_provider == "mock":
+        return _mock_followup_response(
+            context or {},
+            mode,
+            question=question,
+            selected_model="mock",
+            temperature=temperature,
+            seed=seed,
+        )
+
+    if settings.llm_provider == "nvidia":
+        followup_tokens = max_tokens
+        if followup_tokens is None and settings.llm_max_tokens:
+            followup_tokens = min(int(settings.llm_max_tokens), 1800)
+        return _generate_nvidia_response(
+            prompt,
+            mode,
+            model_name=model_name or settings.nvidia_model,
+            temperature=settings.llm_temperature,
+            top_p=settings.llm_top_p,
+            max_tokens=followup_tokens,
+            stream=settings.llm_stream if stream is None else bool(stream),
+            seed=seed,
+        )
+
+    payload_options = {
+        **DECODE_DEFAULTS,
+        "temperature": float(temperature),
+        "num_predict": num_predict,
+        **({"seed": int(seed)} if seed is not None else {}),
+    }
+    payload = {
+        "model": selected_model,
+        "prompt": prompt,
+        "options": payload_options,
+        "stream": False,
+    }
+
+    try:
+        import requests
+        r = requests.post(f"{OLLAMA_HOST}/api/generate", json=payload, timeout=TIMEOUT_S)
+        if r.status_code != 200:
+            return _fallback(f"Ollama error {r.status_code}: {r.text[:200]}")
+
+        data = r.json()
+        text = (data.get("response") or "").strip()
+        text = _strip_template_safety(text)
+        return {
+            "text": _append_disclaimer(text, mode),
+            "usage": {
+                "eval_count": data.get("eval_count"),
+                "prompt_eval_count": data.get("prompt_eval_count"),
+            },
+            "meta": {
+                "model": selected_model,
+                "temperature": temperature,
+                "seed": seed,
+                "followup": True,
+                "ts": int(time.time()),
+            },
+        }
+    except Exception as e:
+        return _fallback(f"Ollama exception: {e}")
+
+
+def _mock_response(
+    context: Dict[str, Any],
+    mode: str,
+    *,
+    selected_model: str,
+    temperature: float,
+    seed: Optional[int],
+) -> Dict[str, Any]:
+    drugs = context.get("drugs", {}) or {}
+    drug_a = (drugs.get("a", {}) or {}).get("name", "Drug A")
+    drug_b = (drugs.get("b", {}) or {}).get("name", "Drug B")
+    pkpd = context.get("pkpd", {}) or {}
+    pk_summary = pkpd.get("pk_summary") or "No PK mechanism was identified in the provided evidence."
+    pd_summary = pkpd.get("pd_summary") or "No PD mechanism was identified in the provided evidence."
+    caveats = context.get("caveats") or ["No additional caveats supplied."]
+    sources = _format_sources(context)
+
+    text = (
+        f"## Bottom Line\n"
+        f"Bottom-line risk: evidence-grounded prototype assessment for {drug_a} + {drug_b}; "
+        f"use the structured risk panel for severity.\n\n"
+        f"## Interaction Mechanism\n"
+        f"PK: {pk_summary}\n\nPD: {pd_summary}\n\n"
+        f"## Clinical Concern\n"
+        f"Review the returned risk domains, FAERS terms, and mechanism cards before interpreting clinical importance.\n\n"
+        f"## Monitoring & Actions\n"
+        f"Qualitative review and monitoring; no patient-specific dosing advice generated by the mock provider.\n\n"
+        f"## Evidence Limitations\n"
+        f"Evidence used: {sources}\n\n"
+        f"Uncertainty / missing evidence: " + "; ".join(str(c) for c in caveats[:5]) + "\n\n"
+        f"Research prototype only."
+    )
+    return {
+        "text": _append_disclaimer(text, mode),
+        "usage": {},
+        "meta": {
+            "provider": "mock",
+            "model": selected_model,
+            "temperature": temperature,
+            "seed": seed,
+            "ts": int(time.time()),
+        },
+    }
+
+
+def _mock_followup_response(
+    context: Dict[str, Any],
+    mode: str,
+    *,
+    question: str,
+    selected_model: str,
+    temperature: float,
+    seed: Optional[int],
+) -> Dict[str, Any]:
+    drugs = context.get("drugs", {}) or {}
+    drug_a = (drugs.get("a", {}) or {}).get("name", "Drug A")
+    drug_b = (drugs.get("b", {}) or {}).get("name", "Drug B")
+    text = (
+        "## Direct Answer\n"
+        f"For {drug_a} + {drug_b}, this follow-up should be answered against the same evidence record: {question}\n\n"
+        "## What To Monitor\n"
+        "- Use qualitative, evidence-linked monitoring only.\n"
+        "- Do not add numeric dosing or timing details unless they are present in the retrieved context.\n\n"
+        "## Evidence Boundary\n"
+        "This mock follow-up does not call an LLM; inspect the evidence panel for source-level details."
+    )
+    return {
+        "text": _append_disclaimer(text, mode),
+        "usage": {},
+        "meta": {
+            "provider": "mock",
+            "model": selected_model,
+            "temperature": temperature,
+            "seed": seed,
+            "followup": True,
+            "ts": int(time.time()),
+        },
+    }
+
+
+def _generate_nvidia_response(
+    prompt: str,
+    mode: str,
+    *,
+    model_name: str,
+    temperature: float,
+    top_p: float,
+    max_tokens: Optional[int],
+    stream: bool,
+    seed: Optional[int],
+) -> Dict[str, Any]:
+    settings = get_settings()
+    if not settings.nvidia_api_key:
+        return _fallback("NVIDIA provider selected but NVIDIA_API_KEY is not configured.")
+    if not model_name:
+        return _fallback("NVIDIA provider selected but NVIDIA_MODEL is not configured.")
+
+    payload = {
+        "model": model_name,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": float(temperature),
+        "top_p": float(top_p),
+        "stream": bool(stream),
+    }
+    if max_tokens is not None:
+        payload["max_tokens"] = int(max_tokens)
+    if seed is not None:
+        payload["seed"] = int(seed)
+    if settings.nvidia_reasoning_effort in {"low", "medium", "high"}:
+        payload["reasoning_effort"] = settings.nvidia_reasoning_effort
+
+    import requests
+    from requests import exceptions as request_exceptions
+
+    start = time.time()
+    try:
+        endpoint_url = _nvidia_chat_completions_url(settings.nvidia_base_url)
+        response = requests.post(
+            endpoint_url,
+            headers={
+                "Authorization": f"Bearer {settings.nvidia_api_key}",
+                "Content-Type": "application/json",
+                "Accept": "text/event-stream" if stream else "application/json",
+            },
+            json=payload,
+            stream=bool(stream),
+            timeout=settings.llm_timeout_s,
+        )
+        if response.status_code != 200:
+            return _fallback(_format_nvidia_error(response, endpoint_url))
+
+        usage = {}
+        if stream:
+            text = _collect_openai_stream(response)
+        else:
+            data = response.json()
+            usage = data.get("usage", {})
+            choices = data.get("choices") or []
+            message = (choices[0].get("message") or {}) if choices else {}
+            text = _extract_openai_message_text(message)
+            if not text:
+                text = _extract_openai_reasoning_text(message)
+        if not text:
+            return _fallback(
+                "NVIDIA provider returned an empty visible answer. For GPT-OSS models, increase "
+                "LLM_MAX_TOKENS or set NVIDIA_REASONING_EFFORT=low in .env."
+            )
+        return {
+            "text": _append_disclaimer(text, mode),
+            "usage": usage,
+            "meta": {
+                "provider": "nvidia",
+                "model": model_name,
+                "temperature": temperature,
+                "top_p": top_p,
+                "max_tokens": max_tokens,
+                "stream": bool(stream),
+                "seed": seed,
+                "latency_seconds": round(time.time() - start, 3),
+                "ts": int(time.time()),
+            },
+        }
+    except request_exceptions.Timeout:
+        return _fallback(
+            "NVIDIA provider timed out before returning a completion. The endpoint and key may be configured, "
+            "but the hosted model did not respond within the configured timeout. Try NVIDIA_REASONING_EFFORT=low, "
+            "a smaller LLM_MAX_TOKENS value, or retry after checking NVIDIA service status."
+        )
+    except Exception as e:
+        return _fallback(f"NVIDIA provider exception: {e}")
+
+
+def _nvidia_chat_completions_url(base_url: str) -> str:
+    """Accept either a root URL, /v1 base URL, or full chat-completions endpoint."""
+    default_base = "https://integrate.api.nvidia.com/v1"
+    cleaned = (base_url or default_base).strip().rstrip("/")
+    if not cleaned:
+        cleaned = default_base
+
+    if cleaned.endswith("/v1/chat/completions") or cleaned.endswith("/chat/completions"):
+        return cleaned
+    if cleaned.endswith("/v1"):
+        return cleaned + "/chat/completions"
+    return cleaned + "/v1/chat/completions"
+
+
+def _format_nvidia_error(response: Any, endpoint_url: str) -> str:
+    preview = _response_error_preview(response)
+    safe_url = _redact_url(endpoint_url)
+    msg = f"NVIDIA provider error {response.status_code} at {safe_url}: {preview}"
+    if response.status_code == 404:
+        msg += (
+            ". The client normalized the endpoint to NVIDIA's documented chat-completions route. "
+            "If this repeats after restarting Streamlit, verify model access for this API key and "
+            "run scripts/check_nvidia.py --stream to test NVIDIA outside the frontend."
+        )
+    return msg
+
+
+def _response_error_preview(response: Any, max_chars: int = 240) -> str:
+    try:
+        data = response.json()
+        err = data.get("error") if isinstance(data, dict) else None
+        if isinstance(err, dict):
+            text = str(err.get("message") or err)
+        else:
+            text = str(data)
+    except Exception:
+        text = str(getattr(response, "text", "") or "")
+    text = re.sub(r"\s+", " ", text).strip() or "empty response body"
+    if len(text) > max_chars:
+        return text[: max_chars - 1].rstrip() + "..."
+    return text
+
+
+def _extract_openai_message_text(message: Dict[str, Any]) -> str:
+    content = message.get("content")
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts: List[str] = []
+        for item in content:
+            if isinstance(item, dict):
+                if isinstance(item.get("text"), str):
+                    parts.append(item["text"])
+                elif isinstance(item.get("content"), str):
+                    parts.append(item["content"])
+            elif isinstance(item, str):
+                parts.append(item)
+        return "\n".join(part.strip() for part in parts if part and part.strip()).strip()
+    return ""
+
+
+def _extract_openai_reasoning_text(message: Dict[str, Any]) -> str:
+    for key in ("reasoning_content", "reasoning"):
+        value = message.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _redact_url(url: str) -> str:
+    try:
+        parts = urlsplit(url)
+        return urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
+    except Exception:
+        return "(invalid endpoint URL)"
+
+
+def _collect_openai_stream(response: Any) -> str:
+    content_chunks: List[str] = []
+    reasoning_chunks: List[str] = []
+    for raw_line in response.iter_lines(decode_unicode=True):
+        if not raw_line:
+            continue
+        line = str(raw_line).strip()
+        if not line.startswith("data:"):
+            continue
+        payload = line[len("data:"):].strip()
+        if payload == "[DONE]":
+            break
+        try:
+            data = json.loads(payload)
+        except json.JSONDecodeError:
+            continue
+        for choice in data.get("choices", []) or []:
+            delta = choice.get("delta") or {}
+            reasoning = delta.get("reasoning_content")
+            if reasoning:
+                reasoning_chunks.append(str(reasoning))
+            content = delta.get("content")
+            if content:
+                content_chunks.append(str(content))
+    content = "".join(content_chunks).strip()
+    if content:
+        return content
+    return "".join(reasoning_chunks).strip()
+
+
 def build_prompt(
     context: Dict[str, Any],
     mode: str,
@@ -200,7 +602,11 @@ def build_prompt(
         mode_lower = (mode or "").lower()
         if mode_lower in {"patient", "pt"}:
             blocks["USER_QUESTION"] = f"Can I take {blocks.get('DRUG_A', 'drug A')} and {blocks.get('DRUG_B', 'drug B')} together?"
-        elif mode_lower in {"pharma", "pv", "safety", "pharmacovigilance", "pharmaceuticals"}:
+        elif (
+            mode_lower in {"pharma", "pv", "safety", "pharmacovigilance", "pharmaceuticals", "research"}
+            or "pharmacovigilance" in mode_lower
+            or "research" in mode_lower
+        ):
             blocks["USER_QUESTION"] = f"Prepare a risk brief for {blocks.get('DRUG_A', 'drug A')} + {blocks.get('DRUG_B', 'drug B')}."
         else:
             blocks["USER_QUESTION"] = f"Evaluate potential interactions between {blocks.get('DRUG_A', 'drug A')} and {blocks.get('DRUG_B', 'drug B')} and provide a clinician-facing summary."
@@ -281,6 +687,94 @@ def build_prompt(
 
     return prompt
 
+
+def build_followup_prompt(
+    context: Dict[str, Any],
+    mode: str,
+    *,
+    question: str,
+    history: Optional[List[Dict[str, str]]] = None,
+    prior_assessment: Optional[str] = None,
+) -> str:
+    """Build a short follow-up-only prompt without reusing the full analysis template."""
+    blocks = _summarize_context(context or {}, mode)
+    hist_block, hist_truncated = _format_history(history or [], budget_chars=900)
+    prior = _compact_text(prior_assessment or "", max_chars=1800)
+    raw_context = _compact_json(context or {}, max_chars=2200)
+    question_text = _compact_text(question or "", max_chars=1000)
+
+    mode_lower = (mode or "").lower()
+    if mode_lower in {"patient", "pt"}:
+        audience_instruction = (
+            "Audience: patient-facing. Use plain language and do not suggest changing, stopping, "
+            "or dose-adjusting medicine without a doctor or pharmacist."
+        )
+        word_limit = "120-180 words"
+    elif (
+        mode_lower in {"pharma", "pv", "safety", "pharmacovigilance", "pharmaceuticals", "research", "pv_research"}
+        or "pharmacovigilance" in mode_lower
+        or "research" in mode_lower
+    ):
+        audience_instruction = (
+            "Audience: pharmacovigilance/research. Be neutral, evidence-scoped, and explicit about signal limitations."
+        )
+        word_limit = "150-250 words"
+    else:
+        audience_instruction = (
+            "Audience: clinician. Be practical, conservative, and concise."
+        )
+        word_limit = "150-250 words"
+
+    prompt = f"""
+SYSTEM:
+You answer follow-up questions for an existing INFERMed drug-interaction record.
+The full interaction analysis has already been shown to the user. Do not repeat it.
+Use the retrieved CONTEXT as the primary evidence. You may use general pharmacology knowledge only when you label it exactly as:
+"general pharmacology knowledge, not directly observed in the retrieved datasets".
+
+{audience_instruction}
+
+USER FOLLOW-UP QUESTION:
+{question_text}
+
+DRUG PAIR:
+{blocks.get("DRUG_A", "Drug A")} + {blocks.get("DRUG_B", "Drug B")}
+
+PREVIOUS ANSWER SUMMARY:
+{prior or "(not provided)"}
+
+RECENT FOLLOW-UP THREAD:
+{hist_block or "(none)"}
+
+CONTEXT:
+- PK summary: {blocks.get("PK_SUMMARY", "(no PK evidence)")}
+- PD summary: {blocks.get("PD_SUMMARY", "(no PD evidence)")}
+- FAERS summary, associative only: {blocks.get("FAERS_SUMMARY", "No FAERS evidence.")}
+- Risk flags: {blocks.get("RISK_FLAGS", "(no risk flags)")}
+- Mechanistic evidence: {blocks.get("EVIDENCE_TABLE", "(no evidence table)")}
+- Sources: {blocks.get("SOURCES", "(no sources listed)")}
+- Caveats: {blocks.get("CAVEATS", "(none)")}
+- Raw context, compact: {raw_context}
+
+MANDATORY RESPONSE RULES:
+1. Answer only the follow-up question. Do not produce the full five-section interaction assessment.
+2. Do not use these headings: Bottom Line, Interaction Mechanism, Clinical Concern, Monitoring & Actions, Evidence Limitations.
+3. Use exactly these headings:
+   ## Direct Answer
+   ## What To Monitor
+   ## Evidence Boundary
+4. Keep the whole answer {word_limit}.
+5. Do not invent numeric dose reductions, monitoring intervals, laboratory thresholds, eGFR cutoffs, INR targets, QTc cutoffs, or named alternative drugs unless the exact value/name appears in CONTEXT.
+6. If the follow-up asks about patient factors such as elderly age, renal impairment, hepatic impairment, or QT risk, separate what is in the retrieved evidence from general pharmacology knowledge.
+7. If evidence is missing, say so directly instead of filling the gap with confident instructions.
+8. End with one short sentence reminding that the response is informational and should be checked by a licensed clinician.
+"""
+
+    if blocks.get("__TRUNCATED__") or hist_truncated:
+        prompt += "\n\n[Note: some context or thread history was truncated for length.]"
+
+    return prompt.strip()
+
 # ========== Template helpers ==========
 def _select_template(mode: str) -> str:
     key_raw = (mode or "").strip().lower()
@@ -288,7 +782,11 @@ def _select_template(mode: str) -> str:
         key = "DOCTOR"
     elif key_raw in {"patient", "pt"}:
         key = "PATIENT"
-    elif key_raw in {"pharma", "pv", "safety", "pharmacovigilance", "pharmaceuticals"}:
+    elif (
+        key_raw in {"pharma", "pv", "safety", "pharmacovigilance", "pharmaceuticals", "research"}
+        or "pharmacovigilance" in key_raw
+        or "research" in key_raw
+    ):
         key = "PHARMA"
     else:
         key = (mode or "").strip().upper() or "DOCTOR"
@@ -349,10 +847,21 @@ def _format_history(
 
 # ========== Small helpers ==========
 def _as_str_list(xs: Any) -> List[str]:
+    if isinstance(xs, dict):
+        xs = [xs]
     out: List[str] = []
     for x in xs or []:
         if isinstance(x, dict):
-            s = (x.get("label") or x.get("uri") or "").strip()
+            s = str(
+                x.get("label")
+                or x.get("name")
+                or x.get("displayName")
+                or x.get("uniprot_id")
+                or x.get("pathway_name")
+                or x.get("enzyme_name")
+                or x.get("uri")
+                or ""
+            ).strip()
         else:
             s = str(x).strip()
         if s:
@@ -380,6 +889,13 @@ def _compact_json(obj: Any, max_chars: int = 3000) -> str:
     if len(s) > max_chars:
         s = s[: max_chars - 1] + "…"
     return s
+
+
+def _compact_text(value: str, max_chars: int) -> str:
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    if len(text) > max_chars:
+        return text[: max_chars - 1].rstrip() + "..."
+    return text
 
 # ========== Context summarization & truncation ==========
 def _summarize_context(ctx: Dict[str, Any], mode: str) -> Dict[str, str]:
@@ -718,8 +1234,159 @@ def _format_evidence_table(ctx: Dict[str, Any], mode: str) -> str:
         lines.append(f"B pathways: {', '.join(pb)}")
     if not cp_mech and not pa and not pb:
         lines.append("Pathways: (none)")
+
+    chembl_summary = _format_chembl_enrichment(mech.get("chembl_enrichment"))
+    enrichment_sources = []
+    if mech.get("uniprot_ids_a") or mech.get("uniprot_ids_b") or mech.get("uniprot_targets_a") or mech.get("uniprot_targets_b"):
+        enrichment_sources.append("UniProt")
+    if mech.get("kegg_pathways_a") or mech.get("kegg_pathways_b") or mech.get("kegg_common_pathways") or mech.get("kegg_enzymes_a") or mech.get("kegg_enzymes_b"):
+        enrichment_sources.append("KEGG")
+    if mech.get("reactome_pathways_a") or mech.get("reactome_pathways_b"):
+        enrichment_sources.append("Reactome")
+    if chembl_summary:
+        enrichment_sources.append("ChEMBL")
+
+    if enrichment_sources:
+        lines.append("Returned enrichment sources: " + ", ".join(enrichment_sources))
+
+    uni_a = _as_str_list(mech.get("uniprot_ids_a", []))[:8]
+    uni_b = _as_str_list(mech.get("uniprot_ids_b", []))[:8]
+    if uni_a:
+        lines.append(f"UniProt A accessions: {', '.join(uni_a)}")
+    if uni_b:
+        lines.append(f"UniProt B accessions: {', '.join(uni_b)}")
+
+    uni_targets_a = _format_protein_records(mech.get("uniprot_targets_a"))[:5]
+    uni_targets_b = _format_protein_records(mech.get("uniprot_targets_b"))[:5]
+    if uni_targets_a:
+        lines.append(f"UniProt A target details: {', '.join(uni_targets_a)}")
+    if uni_targets_b:
+        lines.append(f"UniProt B target details: {', '.join(uni_targets_b)}")
+
+    kegg_common = _format_pathway_records(mech.get("kegg_common_pathways"))[:5]
+    kegg_a = _format_pathway_records(mech.get("kegg_pathways_a"))[:5]
+    kegg_b = _format_pathway_records(mech.get("kegg_pathways_b"))[:5]
+    kegg_enzymes_a = _format_enzyme_records(mech.get("kegg_enzymes_a"))[:5]
+    kegg_enzymes_b = _format_enzyme_records(mech.get("kegg_enzymes_b"))[:5]
+    reactome_a = _format_pathway_records(mech.get("reactome_pathways_a"))[:5]
+    reactome_b = _format_pathway_records(mech.get("reactome_pathways_b"))[:5]
+    if kegg_common:
+        lines.append(f"KEGG common pathways: {', '.join(kegg_common)}")
+    if kegg_a:
+        lines.append(f"KEGG A pathways: {', '.join(kegg_a)}")
+    if kegg_b:
+        lines.append(f"KEGG B pathways: {', '.join(kegg_b)}")
+    if kegg_enzymes_a:
+        lines.append(f"KEGG A enzyme hints: {', '.join(kegg_enzymes_a)}")
+    if kegg_enzymes_b:
+        lines.append(f"KEGG B enzyme hints: {', '.join(kegg_enzymes_b)}")
+    if reactome_a:
+        lines.append(f"Reactome A pathways: {', '.join(reactome_a)}")
+    if reactome_b:
+        lines.append(f"Reactome B pathways: {', '.join(reactome_b)}")
+
+    if chembl_summary:
+        lines.append(f"ChEMBL activity: {chembl_summary}")
     
     return " | ".join(lines)
+
+
+def _format_pathway_records(value: Any) -> List[str]:
+    rows = value or []
+    if isinstance(rows, dict):
+        rows = [rows]
+    out: List[str] = []
+    for item in rows:
+        if isinstance(item, dict):
+            pathway_id = item.get("pathway_id") or item.get("id") or item.get("stId") or item.get("dbId")
+            name = item.get("pathway_name") or item.get("name") or item.get("displayName")
+            if pathway_id and name:
+                out.append(f"{pathway_id}: {name}")
+            elif name:
+                out.append(str(name))
+            elif pathway_id:
+                out.append(str(pathway_id))
+        else:
+            text = str(item).strip()
+            if text:
+                out.append(text)
+    return out
+
+
+def _format_protein_records(value: Any) -> List[str]:
+    rows = value or []
+    if isinstance(rows, dict):
+        rows = [rows]
+    out: List[str] = []
+    for item in rows:
+        if isinstance(item, dict):
+            accession = item.get("uniprot_id") or item.get("primaryAccession") or item.get("accession")
+            name = item.get("name") or item.get("protein_name") or item.get("original_id")
+            genes = item.get("gene_names") or []
+            if isinstance(genes, str):
+                genes = [genes]
+            gene_text = f" ({', '.join(str(g) for g in genes[:3] if g)})" if genes else ""
+            if accession and name:
+                out.append(f"{accession}: {name}{gene_text}")
+            elif accession:
+                out.append(str(accession))
+            elif name:
+                out.append(str(name))
+        else:
+            text = str(item).strip()
+            if text:
+                out.append(text)
+    return out
+
+
+def _format_enzyme_records(value: Any) -> List[str]:
+    rows = value or []
+    if isinstance(rows, dict):
+        rows = [rows]
+    out: List[str] = []
+    for item in rows:
+        if isinstance(item, dict):
+            enzyme_id = item.get("enzyme_id") or item.get("id")
+            name = item.get("enzyme_name") or item.get("name")
+            if enzyme_id and name:
+                out.append(f"{enzyme_id}: {name}")
+            elif name:
+                out.append(str(name))
+            elif enzyme_id:
+                out.append(str(enzyme_id))
+        else:
+            text = str(item).strip()
+            if text:
+                out.append(text)
+    return out
+
+
+def _format_chembl_enrichment(value: Any) -> str:
+    if not isinstance(value, dict):
+        return ""
+    parts: List[str] = []
+    for side, label in (("a", "A"), ("b", "B")):
+        data = value.get(side)
+        if not isinstance(data, dict):
+            continue
+        validation = data.get("chembl_validation") or {}
+        strengths = data.get("enzyme_strength") or {}
+        side_parts: List[str] = []
+        if validation.get("found"):
+            matches = _as_str_list(validation.get("matches", []))[:5]
+            mismatches = _as_str_list(validation.get("mismatches", []))[:5]
+            if matches:
+                side_parts.append("validated " + ", ".join(matches))
+            if mismatches:
+                side_parts.append("additional " + ", ".join(mismatches))
+        for strength in ("strong", "moderate", "weak"):
+            values = _as_str_list(strengths.get(strength, []))[:5]
+            if values:
+                side_parts.append(f"{strength} {', '.join(values)}")
+        if side_parts:
+            parts.append(f"{label}: " + "; ".join(side_parts))
+    return " / ".join(parts)
+
 
 def _format_sources(ctx: Dict[str, Any]) -> str:
     src = ctx.get("sources", {}) or {}
@@ -728,7 +1395,20 @@ def _format_sources(ctx: Dict[str, Any]) -> str:
         lst = src.get(key, []) or []
         return f"{key}: " + (", ".join(lst) if lst else "(none)")
 
-    return "; ".join([fmt("duckdb"), fmt("qlever"), fmt("openfda")])
+    ordered = [
+        "duckdb",
+        "qlever",
+        "openfda",
+        "apis",
+        "canonical",
+        "semantic",
+        "reranking",
+        "query_expansion",
+        "hybrid_search",
+        "adaptive_retrieval",
+    ]
+    extras = [key for key in src.keys() if key not in ordered]
+    return "; ".join(fmt(key) for key in ordered + extras)
 
 def _format_caveats(ctx: Dict[str, Any]) -> str:
     cv = ctx.get("caveats", []) or []

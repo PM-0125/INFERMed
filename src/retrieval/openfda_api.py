@@ -4,6 +4,8 @@
 import os
 import json
 import time
+import shutil
+import logging
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Optional, Dict, List, Tuple
@@ -15,15 +17,44 @@ import plotly.express as px
 
 # Our atomic cache helpers (support ttl=seconds)
 from src.utils.caching import load_json, save_json, load_text, save_text
+from src.core.evidence import EvidenceItem
+from src.config.settings import get_settings
 
 # ----------------------------------------------------------------------------------------------------------------------
 # Config
 # ----------------------------------------------------------------------------------------------------------------------
 
-DEFAULT_CACHE_DIR = "data/openfda"
+LOG = logging.getLogger(__name__)
+
+DEFAULT_CACHE_DIR = "data/cache/openfda"
+LEGACY_CACHE_DIR = "data/openfda"
 DEFAULT_TTL_SECONDS = 7 * 24 * 3600  # 7 days
 DEFAULT_TIMEOUT = 8  # seconds
 CACHE_VERSION = "v2"  # bump to invalidate old cache keys after logic changes
+
+
+def _maybe_migrate_legacy_cache(cache_dir: Path) -> None:
+    """
+    Preserve old OpenFDA cache files after moving the default cache location.
+
+    This is intentionally copy-only: the legacy directory is left in place so a
+    rollback or external script still has its cache until the user removes it.
+    """
+    default_dir = Path(DEFAULT_CACHE_DIR)
+    legacy_dir = Path(LEGACY_CACHE_DIR)
+    try:
+        if cache_dir.resolve() != default_dir.resolve():
+            return
+        if not legacy_dir.exists() or legacy_dir.resolve() == cache_dir.resolve():
+            return
+        for item in legacy_dir.iterdir():
+            if not item.is_file():
+                continue
+            target = cache_dir / item.name
+            if not target.exists():
+                shutil.copy2(item, target)
+    except Exception as exc:
+        LOG.debug("OpenFDA legacy cache migration skipped: %s", exc)
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -83,8 +114,10 @@ class OpenFDAClient:
     SUMMARY_LIMIT = 3
 
     def __init__(self, cache_dir: str = DEFAULT_CACHE_DIR, ttl_seconds: int = DEFAULT_TTL_SECONDS):
+        get_settings()
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
+        _maybe_migrate_legacy_cache(self.cache_dir)
         ttl_days= os.getenv("OPENFDA_TTL_DAYS")
         if ttl_days is not None:
             try:
@@ -287,6 +320,42 @@ class OpenFDAClient:
         c1 = Counter(self._fetch_and_cache_counts(FaersQuery(drug1, "patient.reaction.reactionmeddrapt.exact")))
         c2 = Counter(self._fetch_and_cache_counts(FaersQuery(drug2, "patient.reaction.reactionmeddrapt.exact")))
         return (c1 & c2).most_common(int(top_k))
+
+    def get_drug_reaction_evidence(self, drug: str, top_k: int = 10) -> List[EvidenceItem]:
+        try:
+            reactions = self.get_top_reactions(drug, top_k=top_k)
+        except Exception:
+            return []
+        return [
+            EvidenceItem(
+                source="OpenFDA FAERS",
+                evidence_type="openfda_reaction_signal",
+                subject=drug,
+                predicate="reported_reaction",
+                object=str(reaction),
+                confidence="associative reporting signal, not causal incidence",
+                raw={"count": int(count)},
+            )
+            for reaction, count in reactions
+        ]
+
+    def get_pair_reaction_evidence(self, drug_a: str, drug_b: str, top_k: int = 10) -> List[EvidenceItem]:
+        try:
+            reactions = self.get_combination_reactions(drug_a, drug_b, top_k=top_k)
+        except Exception:
+            return []
+        return [
+            EvidenceItem(
+                source="OpenFDA FAERS",
+                evidence_type="openfda_reaction_signal",
+                subject=f"{drug_a} + {drug_b}",
+                predicate="reported_combination_reaction",
+                object=str(reaction),
+                confidence="associative reporting signal, not causal incidence",
+                raw={"count": int(count)},
+            )
+            for reaction, count in reactions
+        ]
 
     # ------------------------ plotting helpers (unchanged API) ------------------------
 
