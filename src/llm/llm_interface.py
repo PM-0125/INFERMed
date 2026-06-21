@@ -20,9 +20,7 @@ if os.getenv("INFERMED_LOAD_DOTENV", "").strip().lower() in {"1", "true", "yes",
         pass
 
 # ========== Configuration ==========
-OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 MODEL_NAME = os.getenv("OLLAMA_MODEL", "gpt-oss")
-TIMEOUT_S = float(os.getenv("OLLAMA_TIMEOUT_S", "5000"))
 TEMPLATES_PATH = os.getenv(
     "PROMPT_TEMPLATES",
     os.path.join(os.path.dirname(__file__), "prompt_templates.txt"),
@@ -36,8 +34,6 @@ DECODE_DEFAULTS = {
     "repeat_penalty": 1.05,
     "num_ctx": 8192,
 }
-
-DEFAULT_NUM_PREDICT = int(os.getenv("OLLAMA_NUM_PREDICT", "-1"))
 
 # -------- Minimal built-in templates (used only if file is missing) --------
 DEFAULT_TEMPLATES: Dict[str, str] = {
@@ -158,8 +154,8 @@ def generate_response(
     prompt = build_prompt(context or {}, mode, history=history)
     settings = get_settings()
 
-    selected_model = model_name or MODEL_NAME
-    num_predict = int(max_tokens) if (max_tokens is not None) else DEFAULT_NUM_PREDICT
+    selected_model = model_name or settings.ollama_model or MODEL_NAME
+    num_predict = int(max_tokens) if (max_tokens is not None) else int(settings.ollama_num_predict)
 
     if settings.llm_provider == "mock":
         return _mock_response(context or {}, mode, selected_model="mock", temperature=temperature, seed=seed)
@@ -191,7 +187,7 @@ def generate_response(
 
     try:
         import requests
-        r = requests.post(f"{OLLAMA_HOST}/api/generate", json=payload, timeout=TIMEOUT_S)
+        r = requests.post(f"{settings.ollama_host}/api/generate", json=payload, timeout=settings.ollama_timeout_s)
         if r.status_code != 200:
             return _fallback(f"Ollama error {r.status_code}: {r.text[:200]}")
 
@@ -238,8 +234,8 @@ def generate_followup_response(
     )
     settings = get_settings()
 
-    selected_model = model_name or MODEL_NAME
-    num_predict = int(max_tokens) if (max_tokens is not None) else DEFAULT_NUM_PREDICT
+    selected_model = model_name or settings.ollama_model or MODEL_NAME
+    num_predict = int(max_tokens) if (max_tokens is not None) else int(settings.ollama_num_predict)
 
     if settings.llm_provider == "mock":
         return _mock_followup_response(
@@ -281,7 +277,7 @@ def generate_followup_response(
 
     try:
         import requests
-        r = requests.post(f"{OLLAMA_HOST}/api/generate", json=payload, timeout=TIMEOUT_S)
+        r = requests.post(f"{settings.ollama_host}/api/generate", json=payload, timeout=settings.ollama_timeout_s)
         if r.status_code != 200:
             return _fallback(f"Ollama error {r.status_code}: {r.text[:200]}")
 
@@ -421,61 +417,114 @@ def _generate_nvidia_response(
     from requests import exceptions as request_exceptions
 
     start = time.time()
-    try:
-        endpoint_url = _nvidia_chat_completions_url(settings.nvidia_base_url)
-        response = requests.post(
-            endpoint_url,
-            headers={
-                "Authorization": f"Bearer {settings.nvidia_api_key}",
-                "Content-Type": "application/json",
-                "Accept": "text/event-stream" if stream else "application/json",
-            },
-            json=payload,
-            stream=bool(stream),
-            timeout=settings.llm_timeout_s,
-        )
-        if response.status_code != 200:
-            return _fallback(_format_nvidia_error(response, endpoint_url))
+    endpoint_url = _nvidia_chat_completions_url(settings.nvidia_base_url)
+    attempts = _nvidia_retry_attempts()
+    last_error = ""
 
-        usage = {}
-        if stream:
-            text = _collect_openai_stream(response)
-        else:
-            data = response.json()
-            usage = data.get("usage", {})
-            choices = data.get("choices") or []
-            message = (choices[0].get("message") or {}) if choices else {}
-            text = _extract_openai_message_text(message)
-            if not text:
-                text = _extract_openai_reasoning_text(message)
-        if not text:
-            return _fallback(
-                "NVIDIA provider returned an empty visible answer. For GPT-OSS models, increase "
-                "LLM_MAX_TOKENS or set NVIDIA_REASONING_EFFORT=low in .env."
+    for attempt in range(attempts):
+        try:
+            response = requests.post(
+                endpoint_url,
+                headers={
+                    "Authorization": f"Bearer {settings.nvidia_api_key}",
+                    "Content-Type": "application/json",
+                    "Accept": "text/event-stream" if stream else "application/json",
+                },
+                json=payload,
+                stream=bool(stream),
+                timeout=settings.llm_timeout_s,
             )
-        return {
-            "text": _append_disclaimer(text, mode),
-            "usage": usage,
-            "meta": {
-                "provider": "nvidia",
-                "model": model_name,
-                "temperature": temperature,
-                "top_p": top_p,
-                "max_tokens": max_tokens,
-                "stream": bool(stream),
-                "seed": seed,
-                "latency_seconds": round(time.time() - start, 3),
-                "ts": int(time.time()),
-            },
-        }
-    except request_exceptions.Timeout:
-        return _fallback(
-            "NVIDIA provider timed out before returning a completion. The endpoint and key may be configured, "
-            "but the hosted model did not respond within the configured timeout. Try NVIDIA_REASONING_EFFORT=low, "
-            "a smaller LLM_MAX_TOKENS value, or retry after checking NVIDIA service status."
-        )
-    except Exception as e:
-        return _fallback(f"NVIDIA provider exception: {e}")
+            if response.status_code != 200:
+                last_error = _format_nvidia_error(response, endpoint_url)
+                if _should_retry_nvidia_response(response.status_code, attempt, attempts):
+                    _close_response(response)
+                    _sleep_before_nvidia_retry(attempt)
+                    continue
+                return _fallback(last_error)
+
+            usage = {}
+            if stream:
+                text = _collect_openai_stream(response)
+            else:
+                data = response.json()
+                usage = data.get("usage", {})
+                choices = data.get("choices") or []
+                message = (choices[0].get("message") or {}) if choices else {}
+                text = _extract_openai_message_text(message)
+                if not text:
+                    text = _extract_openai_reasoning_text(message)
+            if not text:
+                last_error = (
+                    "NVIDIA provider returned an empty visible answer. For GPT-OSS models, increase "
+                    "LLM_MAX_TOKENS or set NVIDIA_REASONING_EFFORT=low in .env."
+                )
+                if attempt < attempts - 1:
+                    _sleep_before_nvidia_retry(attempt)
+                    continue
+                return _fallback(last_error)
+            return {
+                "text": _append_disclaimer(text, mode),
+                "usage": usage,
+                "meta": {
+                    "provider": "nvidia",
+                    "model": model_name,
+                    "temperature": temperature,
+                    "top_p": top_p,
+                    "max_tokens": max_tokens,
+                    "stream": bool(stream),
+                    "seed": seed,
+                    "latency_seconds": round(time.time() - start, 3),
+                    "retry_attempts": attempt + 1,
+                    "ts": int(time.time()),
+                },
+            }
+        except request_exceptions.Timeout:
+            last_error = (
+                "NVIDIA provider timed out before returning a completion. The endpoint and key may be configured, "
+                "but the hosted model did not respond within the configured timeout. Try NVIDIA_REASONING_EFFORT=low, "
+                "a smaller LLM_MAX_TOKENS value, or retry after checking NVIDIA service status."
+            )
+            if attempt < attempts - 1:
+                _sleep_before_nvidia_retry(attempt)
+                continue
+            return _fallback(last_error)
+        except request_exceptions.RequestException as exc:
+            last_error = f"NVIDIA provider request exception: {exc}"
+            if attempt < attempts - 1:
+                _sleep_before_nvidia_retry(attempt)
+                continue
+            return _fallback(last_error)
+        except ValueError as exc:
+            last_error = f"NVIDIA provider returned an invalid JSON response: {exc}"
+            if attempt < attempts - 1:
+                _sleep_before_nvidia_retry(attempt)
+                continue
+            return _fallback(last_error)
+
+    return _fallback(last_error or "NVIDIA provider failed after retries.")
+
+
+def _nvidia_retry_attempts() -> int:
+    raw = os.getenv("NVIDIA_RETRY_ATTEMPTS", "2")
+    try:
+        return max(1, min(int(raw), 5))
+    except ValueError:
+        return 2
+
+
+def _should_retry_nvidia_response(status_code: int, attempt: int, attempts: int) -> bool:
+    return status_code in {502, 503, 504} and attempt < attempts - 1
+
+
+def _sleep_before_nvidia_retry(attempt: int) -> None:
+    time.sleep(min(2.0 * (attempt + 1), 6.0))
+
+
+def _close_response(response: Any) -> None:
+    try:
+        response.close()
+    except Exception:
+        pass
 
 
 def _nvidia_chat_completions_url(base_url: str) -> str:

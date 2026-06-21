@@ -258,7 +258,6 @@ def summarize_pkpd_risk(drugA: str, drugB: str, mech: Dict[str, Any]) -> Dict[st
                 for kegg_enzyme in kegg_enzymes_a:
                     kegg_lower = kegg_enzyme.lower()
                     if "cytochrome p450" in kegg_lower or "cyp" in kegg_lower:
-                        import re
                         cyp_match = re.search(r"cyp\s*(\d+[a-z]?\d*)", kegg_lower, re.IGNORECASE)
                         if cyp_match:
                             cyp_canon = f"cyp{cyp_match.group(1).lower()}"
@@ -272,7 +271,6 @@ def summarize_pkpd_risk(drugA: str, drugB: str, mech: Dict[str, Any]) -> Dict[st
                 for kegg_enzyme in kegg_enzymes_b:
                     kegg_lower = kegg_enzyme.lower()
                     if "cytochrome p450" in kegg_lower or "cyp" in kegg_lower:
-                        import re
                         cyp_match = re.search(r"cyp\s*(\d+[a-z]?\d*)", kegg_lower, re.IGNORECASE)
                         if cyp_match:
                             cyp_canon = f"cyp{cyp_match.group(1).lower()}"
@@ -329,7 +327,6 @@ def summarize_pkpd_risk(drugA: str, drugB: str, mech: Dict[str, Any]) -> Dict[st
         for target in targets_a:
             target_str = str(target)
             # Try to extract UniProt ID (format: P12345 or Q12345)
-            import re
             uniprot_match = re.search(r"([PQO][0-9A-Z]{5})", target_str, re.IGNORECASE)
             if uniprot_match:
                 uniprot_ids_a.append(uniprot_match.group(1).upper())

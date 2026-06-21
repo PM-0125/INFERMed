@@ -1,214 +1,269 @@
-# INFERMed: Intelligent Navigator for Evidence-based Retrieval in Medicine
+# INFERMed
 
-> ⚠️ **Notice**: This system is a work in progress as part of an academic master's thesis. While it uses verified datasets and knowledge sources, it is not intended for direct clinical use without supervision from licensed professionals.
+**Intelligent Navigator for Evidence-based Retrieval in Medicine**
 
-## Overview
+INFERMed is a research-stage, evidence-first drug interaction platform. It combines deterministic retrieval, curated PK/PD knowledge, public biomedical sources, local analytical datasets, and LLM summarization to produce inspectable drug-drug interaction assessments.
 
-**INFERMed** is a biomedical drug interaction checker built using a **Retrieval-Augmented Generation (RAG)** architecture. It intelligently predicts and explains potential drug–drug interactions by combining pharmacokinetic/pharmacodynamic (PK/PD) knowledge, real-world adverse event reports, and curated clinical datasets. These insights are synthesized using a locally hosted large language model (LLM), offering personalized and context-aware recommendations for different user types.
+The project began as published thesis research and is now being refined into a product-grade research platform with medical and pharmacovigilance reviewers.
 
----
+Published chapter: [INFERMed: A PK/PD-Aware Retrieval-Augmented System for Explainable Drug-Drug Interaction Analysis](https://link.springer.com/chapter/10.1007/978-3-032-23241-0_9)
 
-## 🧠 Data Sources and Knowledge Integration
+## License And Use Boundary
 
-* **PubChem RDF (Knowledge Graph)**
-  Queried via **QLever SPARQL engine** to extract graph-based knowledge such as drug targets, metabolic pathways, and protein interactions.
+INFERMed is **source-available for non-commercial research, evaluation, and educational use** under the [PolyForm Noncommercial License 1.0.0](LICENSE).
 
-* **Tabular Clinical Datasets (DuckDB)**
-  Stored in **Parquet format** and accessed with DuckDB for high-speed interaction lookups:
+This is intentionally not an OSI open-source license because commercial use is not permitted.
 
-  * `TwoSides`: Side-effect pairs and PRR (Proportional Reporting Ratio)
-  * `DILIrank`, `DICTRank`, `DIQT`: Risk rankings for liver injury, cardiotoxicity, and QT prolongation
-  * `DrugBankXML`: Drug mechanisms, targets, and known interactions (converted to Parquet)
+Permitted examples:
 
-* **OpenFDA API**
-  Used to query real-world adverse event data from FAERS (FDA Adverse Event Reporting System). Responses are **cached locally** in structured format to improve speed and reduce API dependency.
+- Academic research and reproducibility review
+- Non-commercial evaluation by clinicians, pharmacovigilance reviewers, and biomedical researchers
+- Educational demonstrations
+- Non-commercial contributions back to this repository
 
-* **External REST APIs (Enrichment)**
-  Additional APIs are integrated to enrich and disambiguate data:
-  * **UniProt REST API**: Protein-level data (targets, transporters, enzymes) with functional annotations
-  * **KEGG REST API**: Drug pathways, metabolism maps, and enzyme interactions
-  * **Reactome REST API**: Mechanistic biological pathways involving drug targets
-  * **PubChem REST API**: Protein label resolution and pharmacokinetic properties (molecular weight, LogP, H-bonding)
+Not permitted without prior written permission:
 
-* **Canonical PK/PD Dictionary**
-  A curated local JSON dictionary (`data/dictionary/canonical_pkpd.json`) providing authoritative, well-established interaction data with detailed mechanism descriptions, severity ratings, and evidence levels.
+- Commercial products or services
+- Paid hosted access or SaaS use
+- Clinical deployment or operational medical decision support
+- Resale, sublicensing, or white-labeling
+- Use in proprietary commercial workflows
+- Commercial derivatives or competing commercial platforms
 
-* **Local LLM (via Ollama)**
-  A locally hosted language model that generates final natural language responses using retrieved evidence as context. Supports multiple models including Mistral, MedGemma, and others.
+Unauthorized use outside the license terminates the granted rights and may expose the user or organization to legal remedies.
 
----
+## Medical Safety Notice
 
-## 👥 User Modes
+INFERMed is research software. It is **not a medical device**, **not certified clinical decision support**, and **not a substitute for licensed clinical judgment, approved labeling, institutional policy, or patient-specific care**.
 
-The Streamlit-based UI provides three tailored interaction modes:
+Outputs may contain model errors, incomplete evidence, source limitations, or general pharmacology assumptions. All outputs must be reviewed by qualified medical, pharmacy, or pharmacovigilance professionals before any real-world interpretation.
 
-* 🧺 **Doctor Mode**: Detailed mechanistic explanations with biochemical and molecular insights
-* 🧕‍♂️ **Patient Mode**: Simplified advice and warnings in layman-friendly language
-* 🧪 **Pharma Mode**: In-depth safety and statistical context, ideal for research or regulatory use
+Patients should never act on INFERMed output without consulting a licensed clinician or pharmacist.
 
----
+## What INFERMed Does
 
-## 🔧 System Architecture
+For a drug pair, INFERMed assembles an interaction record from multiple evidence layers, normalizes the evidence into structured JSON, and asks an LLM to explain what the retrieved evidence supports.
 
-Modular backend components are organized as follows:
+The response is designed to remain inspectable:
 
-* `src/retrieval/duckdb_query.py`
-  Retrieves structured interaction data from Parquet datasets using DuckDB.
+- AI explanation is shown beside evidence cards.
+- Evidence is divided by source and mechanism.
+- PK/PD reasoning remains visible instead of hidden inside the model answer.
+- Source limitations are preserved.
+- Public-safe and licensed/local modes are separated.
 
-* `src/retrieval/qlever_query.py`
-  Interfaces with QLever to extract graph-based PK/PD relationships from PubChem RDF. Also integrates UniProt, KEGG, and Reactome APIs for target enrichment and pathway discovery.
+Current primary workflow:
 
-* `src/retrieval/openfda_api.py`
-  Queries and caches FDA-reported adverse event data via the OpenFDA API.
-
-* `src/retrieval/uniprot_client.py`
-  Client for UniProt REST API to obtain protein metadata, functional annotations, and transporter classifications.
-
-* `src/retrieval/kegg_client.py`
-  Client for KEGG REST API to retrieve drug pathways, metabolism maps, and common pathway analysis.
-
-* `src/retrieval/reactome_client.py`
-  Client for Reactome REST API to discover mechanistic biological pathways involving drug targets.
-
-* `src/retrieval/pubchem_client.py`
-  Client for PubChem REST API to resolve protein labels and retrieve pharmacokinetic properties.
-
-* `src/utils/pkpd_utils.py`
-  Synthesizes PK/PD evidence from multiple sources, detects enzyme/target/pathway overlaps, and integrates canonical interaction data. Generates compact risk summaries for LLM consumption.
-
-* `src/llm/llm_interface.py`
-  Interfaces with a local LLM via Ollama using structured prompts and pre-assembled context. Handles prompt template selection, context summarization, and response generation.
-
-* `src/llm/rag_pipeline.py`
-  Orchestrates sequential retrieval from DuckDB, QLever, and OpenFDA. Integrates external API enrichment and canonical dictionary lookups. Selects prompt templates based on user mode and generates the final explanation via LLM.
-
-* `src/frontend/app.py`
-  The Streamlit-based frontend for entering drug names, selecting user mode, and viewing interaction explanations with supporting evidence.
-
-* `src/utils/`
-  Shared utility functions (caching, parsing, pathway analysis, normalization, etc.).
-
----
-
-## 📁 Repository Structure
-
-```bash
-INFERMed/
-├── data/
-│   ├── duckdb/         # Parquet files (e.g., twosides.parquet)
-│   ├── dictionary/     # Canonical PK/PD dictionary (canonical_pkpd.json)
-│   ├── openfda/        # Cached OpenFDA JSON responses
-│   ├── cache/          # Cached contexts and LLM responses
-│   └── pubchem/        # Filtered PubChem RDF .ttl or QLever index
-├── models/             # Local LLM models (not tracked in Git)
-├── scripts/            # Setup and utility scripts
-├── src/
-│   ├── frontend/       # Streamlit UI
-│   ├── llm/            # RAG orchestration and LLM interface
-│   ├── retrieval/      # Query interfaces (DuckDB, QLever, OpenFDA, UniProt, KEGG, Reactome, PubChem)
-│   └── utils/          # Shared utilities and PK/PD synthesis tools
-├── tests/              # Unit tests and sample validation inputs
-├── requirements.txt    # Python dependencies
-├── .gitignore         # Excludes datasets, cache, models
-└── README.md          # This document
+```text
+User enters drug pair
+  -> FastAPI backend retrieves evidence
+  -> Evidence is normalized into an interaction record
+  -> PK/PD utilities synthesize mechanism and risk signals
+  -> LLM writes a role-aware explanation
+  -> React frontend displays answer plus evidence cards
 ```
 
----
+## Current Architecture
 
-## 🚀 Getting Started
+```text
+frontend/                  React + Vite user interface
+src/api/                   FastAPI application
+src/llm/                   RAG pipeline, prompt templates, LLM provider interface
+src/retrieval/             Source clients and retrieval adapters
+src/utils/                 PK/PD synthesis, cache helpers, normalization utilities
+data/                      Project dictionaries and local-only generated data folders
+scripts/                   Data preparation and utility scripts
+run_guidance/              How-to-run notes
+tests/                     Unit and integration-oriented tests
+```
 
-1. **Set up environment**
+## Evidence Sources
 
-   ```bash
-   pip install -r requirements.txt
-   ```
+INFERMed uses a tiered evidence model rather than treating all sources as equal.
 
-   *(Ensure Python 3.10+ is installed. Ollama should also be set up for local LLM hosting.)*
+### Public and Public-Safe Sources
 
-2. **Prepare datasets**
-   Download and place the following files in `data/duckdb/`:
+- **OpenFDA FAERS**: adverse-event reporting signals. These are associative reports, not causal proof.
+- **PubChem REST / PubChemRDF**: compound identifiers, structures, and RDF-backed biomedical relationships.
+- **ChEMBL**: bioactivity and target-related enrichment when available.
+- **UniProt**: protein target, enzyme, and transporter metadata.
+- **KEGG**: pathway and drug metabolism context.
+- **Reactome**: biological pathway enrichment.
+- **Canonical PK/PD dictionary**: curated local mechanism hints and known interaction summaries.
 
-   * `twosides.parquet`
-   * `DILIrank.parquet`
-   * `DIQT.parquet`
-   * `DICTRank.parquet`
-   * `DrugBankXML.parquet`
+### Local Analytical Sources
 
-3. **Configure PubChem knowledge graph**
+- **TWOSIDES**: side-effect pair and PRR-derived signal context.
+- **DILIrank**: drug-induced liver injury concern.
+- **DICT / DICTRank**: cardiotoxicity-oriented risk context.
+- **DIQT**: QT-prolongation-oriented risk context.
 
-   * Filter relevant `.ttl` files and place them in `data/pubchem/`
-   * Build a QLever index if needed and connect via `qlever_query.py`
-   * Set environment variables for QLever endpoints:
-     ```bash
-     export CORE_ENDPOINT=<your_qlever_core_endpoint>
-     export DISEASE_ENDPOINT=<your_qlever_disease_endpoint>
-     export BIO_ENDPOINT=<your_qlever_bio_endpoint>  # Optional but recommended
-     ```
+### Restricted Or Licensed Sources
 
-4. **Set up canonical PK/PD dictionary** (optional but recommended)
-   * Place `canonical_pkpd.json` in `data/dictionary/` for authoritative interaction data
+DrugBank-derived files are not licensed for general redistribution through this repository. If used, they must be supplied separately by a user or institution with valid permission.
 
-5. **Run the app**
+See [NOTICE.md](NOTICE.md) and [data_license.md](data_license.md) for third-party data, source links, and API boundaries.
 
-   ```bash
-   streamlit run src/frontend/app.py
-   ```
+Generated datasets, source caches, embedding indexes, and licensed/private data are not committed to Git. Build or copy those artifacts into `data/` locally, or into an external deployment volume such as `/srv/infermed-data` on the host.
 
----
+## Data Modes
 
-## ⚡ Performance Tips
+Recommended public demo mode:
 
-* **Caching**: The system implements multi-level caching:
-  * OpenFDA API responses are cached in `data/cache/openfda/`
-  * Assembled contexts are cached in `data/cache/contexts/`
-  * Generated LLM responses are cached in `data/cache/responses/`
-* **Context Truncation**: To manage context size, the system applies top-K truncation:
-  * Side effects: top 25 per drug
-  * FAERS reactions: top 10 per drug and for combinations
-  * Targets: top 32 per drug
-  * Pathways: top 24 per drug
-* **Timeout Management**: 
-  * QLever SPARQL queries: 90 seconds
-  * OpenFDA API: 8 seconds with retry logic
-  * Enrichment APIs (UniProt, KEGG, Reactome, PubChem): 10-15 seconds
-* Use filtered PubChem data to avoid massive memory overhead
-* Tune prompt templates (`src/llm/prompt_templates.txt`) per user mode to optimize LLM responses
+```dotenv
+INFERMED_DATA_MODE=public_safe
+ENABLE_DRUGBANK=false
+```
 
----
+Private licensed/local evaluation only:
 
-## 🧚️ Testing & Evaluation
+```dotenv
+INFERMED_DATA_MODE=local_dev
+ENABLE_DRUGBANK=true
+```
 
-* Run functional tests in `tests/`
-* Evaluate system on common DDI pairs (e.g., simvastatin + clarithromycin, warfarin + ciprofloxacin)
-* Test with multiple drug combinations to verify API integrations and canonical dictionary usage
-* Compare INFERMed explanations to baseline tools like Drugs.com or Medscape
-* Check evidence grounding: all claims should be traceable to retrieved data sources
+Do not enable restricted datasets for public demos unless licensing and deployment permissions are clear.
 
----
+## Data And Cache Storage
 
-## 💪 Recent Enhancements
+The repository keeps only small project-authored dictionaries under version control. Bulk parquet files, source caches, API payload caches, and licensed datasets are local/deployment artifacts.
 
-* **External API Integration**: Added UniProt, KEGG, and Reactome REST APIs for comprehensive target and pathway enrichment
-* **Canonical PK/PD Dictionary**: Integrated authoritative interaction data with detailed mechanisms and severity ratings
-* **Enhanced PK/PD Synthesis**: Improved overlap detection and risk summarization with multi-source evidence integration
-* **Evidence Grounding**: Strict evidence-first reasoning with explicit source attribution and caveat documentation
+Default local cache behavior remains file based:
 
-## 🔮 Future Extensions
+```dotenv
+CACHE_BACKEND=file
+OPENFDA_CACHE_DIR=data/cache/openfda
+```
 
-* Add drug–gene or protein–protein interaction graphs
-* Incorporate vector search for literature context (e.g., PubMed abstracts)
-* Add multilingual support (e.g., Polish mode for local deployment)
-* Expand LLM reasoning with Chain-of-Thought prompting or QA-GNN integration
-* Implement parallel retrieval for improved latency
+For a shared cloud host, use the SQLite cache backend so generated API/source payloads live in one durable database:
 
----
+```dotenv
+CACHE_BACKEND=sqlite
+SQLITE_CACHE_PATH=/srv/infermed-data/cache/infermed_cache.sqlite
+OPENFDA_CACHE_DIR=/srv/infermed-data/cache/openfda
+DUCKDB_DIR=/srv/infermed-data/duckdb
+```
 
-## 🤝 Contribution & License
+SQLite is a deployment convenience for source payload caching. It does not replace the analytical parquet datasets.
 
-This codebase is part of a personal academic research project and is not intended for public or commercial deployment without explicit permission.
+## Local Development
 
-> **Disclaimer:** INFERMed combines deterministic querying and probabilistic language generation to provide informative summaries about drug–drug interactions. While all data sources used are scientifically verified or publicly available, **this tool is not a substitute for medical advice**. All final decisions must be made by **licensed healthcare professionals** or **qualified experts in pharmaceutical safety**. Patients should always consult their doctor or pharmacist before acting on any output from this system.
+Create and use the repository virtual environment instead of global Python.
 
----
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+```
 
-**INFERMed** – because understanding what happens *between the lines* (of prescriptions) can save lives.
+Run the backend:
+
+```powershell
+python -m uvicorn src.api.app:app --host 127.0.0.1 --port 8000
+```
+
+Run the frontend:
+
+```powershell
+cd frontend
+npm install
+npm run dev -- --host 0.0.0.0 --port 5173
+```
+
+Build the frontend:
+
+```powershell
+cd frontend
+npm run build
+```
+
+## Environment
+
+The backend reads runtime configuration from `.env`. Do not commit `.env`, API keys, provider keys, licensed dataset paths, or private deployment notes.
+
+Recommended hosted cloud settings use local Ollama models on the GPU host:
+
+```dotenv
+LLM_PROVIDER=ollama
+OLLAMA_HOST=http://127.0.0.1:11434
+OLLAMA_MODEL=gpt-oss:20b
+OLLAMA_TIMEOUT_S=800
+OLLAMA_NUM_PREDICT=3072
+LLM_TEMPERATURE=0.1
+LLM_TOP_P=0.9
+LLM_MAX_TOKENS=3072
+LLM_STREAM=false
+```
+
+Recommended initial model set for the 48 GB VRAM host:
+
+- `gpt-oss:20b`: primary interactive explanation and tool-calling model.
+- `qwen3:30b`: deeper research/adjudication model for slower, higher-effort runs.
+- `bge-m3`: embedding model for retrieval and future semantic cache/index work.
+
+NVIDIA API settings are useful for local development or fallback testing on a different machine, but should not be required on the cloud host:
+
+```dotenv
+LLM_PROVIDER=nvidia
+NVIDIA_BASE_URL=https://integrate.api.nvidia.com/v1
+NVIDIA_MODEL=openai/gpt-oss-120b
+NVIDIA_REASONING_EFFORT=low
+NVIDIA_STREAM=true
+LLM_TEMPERATURE=0.1
+LLM_TOP_P=0.9
+LLM_MAX_TOKENS=3072
+LLM_STREAM=true
+LLM_TIMEOUT_S=800
+NVIDIA_RETRY_ATTEMPTS=2
+```
+
+Use NVIDIA `medium` reasoning only after latency and gateway stability are acceptable for the demo.
+
+## Testing
+
+Run backend tests:
+
+```powershell
+pytest
+```
+
+Run focused checks:
+
+```powershell
+pytest tests/test_llm.py
+pytest tests/test_pkpd_utils.py tests/test_rag_pipeline.py
+```
+
+Run frontend checks:
+
+```powershell
+cd frontend
+npm run lint
+npm run build
+```
+
+## Deployment Direction
+
+For the current external testing phase, the recommended deployment is a single cloud host:
+
+```text
+Caddy
+  -> serves frontend/dist
+  -> proxies /api to FastAPI on 127.0.0.1:8000
+```
+
+The project can be source-controlled on GitHub, but GitHub Pages cannot host the backend. Vercel can host frontend previews later, but the simplest reliable demo is frontend and backend on the same cloud machine behind Caddy.
+
+## Contributing
+
+Contributions are welcome for non-commercial research use. By contributing, you agree that your contribution is provided under the same non-commercial project license and does not introduce restricted data, secrets, or commercial-use rights.
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md) and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) before opening issues or pull requests.
+
+## Contact
+
+For research collaboration, licensing, or commercial permission requests:
+
+- Pranjul Mishra
+- Email: pranjul.mishra@proton.me
+- GitHub: [PM-0125](https://github.com/PM-0125)

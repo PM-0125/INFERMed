@@ -19,7 +19,30 @@ python -m venv .venv --prompt infermed
 
 Runtime configuration is read from `.env`. Do not commit `.env` or API keys.
 
-For the current NVIDIA-backed demo path, keep:
+For the hosted cloud resource, use local Ollama inference:
+
+```env
+INFERMED_DATA_MODE=public_safe
+ENABLE_DRUGBANK=false
+ENABLE_QLEVER=false
+LLM_PROVIDER=ollama
+OLLAMA_HOST=http://127.0.0.1:11434
+OLLAMA_MODEL=gpt-oss:20b
+OLLAMA_TIMEOUT_S=800
+OLLAMA_NUM_PREDICT=3072
+```
+
+Recommended initial model pulls on the cloud host:
+
+```bash
+ollama pull gpt-oss:20b
+ollama pull qwen3:30b
+ollama pull bge-m3
+```
+
+Use `gpt-oss:20b` as the served default for multi-user testing. Keep `qwen3:30b` available for slower research/adjudication paths after the tool-calling architecture is in place.
+
+For a local NVIDIA-backed development path, keep:
 
 ```env
 INFERMED_DATA_MODE=public_safe
@@ -34,6 +57,19 @@ LLM_TIMEOUT_S=300
 
 `NVIDIA_API_KEY` must be set locally in `.env`.
 
+Generated caches and datasets are local artifacts. They are ignored by Git and should be rebuilt or copied into the runtime data volume.
+
+For a deployment host, prefer:
+
+```env
+DUCKDB_DIR=/srv/infermed-data/duckdb
+OPENFDA_CACHE_DIR=/srv/infermed-data/cache/openfda
+CACHE_BACKEND=sqlite
+SQLITE_CACHE_PATH=/srv/infermed-data/cache/infermed_cache.sqlite
+```
+
+The SQLite cache backend is used by the JSON/text cache helpers and is suitable for OpenFDA/source payload caching. Context caches can be regenerated and should not be treated as source data.
+
 `NVIDIA_BASE_URL` can be the service root shown above, `https://integrate.api.nvidia.com/v1`, or the full `https://integrate.api.nvidia.com/v1/chat/completions` endpoint. The client normalizes these forms internally.
 
 For GPT-OSS models, `NVIDIA_REASONING_EFFORT` can be `low`, `medium`, or `high`; NVIDIA defaults it to `medium`. Use `low` for interactive demos, `medium` for balanced output, and `high` only when slower, deeper analysis is acceptable:
@@ -42,7 +78,7 @@ For GPT-OSS models, `NVIDIA_REASONING_EFFORT` can be `low`, `medium`, or `high`;
 NVIDIA_REASONING_EFFORT=low
 ```
 
-Before debugging Streamlit, validate NVIDIA directly. Use `--stream` to match the frontend path and NVIDIA's example code:
+Before debugging a local NVIDIA setup, validate NVIDIA directly. Use `--stream` to match the frontend path and NVIDIA's example code:
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\check_nvidia.py --stream --timeout 120 --reasoning-effort low
@@ -126,6 +162,8 @@ Public-safe parquet conversion is handled by:
 
 Configured datasets are described in `data_manifest.yaml`. Missing public files are warnings/source-status entries, not startup failures.
 
+Do not commit generated parquet files. Keep them under `data/duckdb/` locally or `/srv/infermed-data/duckdb` on the deployment host.
+
 ## 5. Optional OpenFDA
 
 OpenFDA is public-safe and cached under `data/cache/openfda`.
@@ -140,7 +178,7 @@ FAERS/OpenFDA outputs are reporting signals only. Do not present them as causal 
 
 ## 6. Optional QLever Enhancement
 
-QLever is not required for the NVIDIA demo runtime and should remain disabled by default:
+QLever is not required for the current hosted demo runtime and should remain disabled by default:
 
 ```env
 ENABLE_QLEVER=false
@@ -160,7 +198,7 @@ When QLever is disabled, the app should report it as disabled, not failed.
 
 ## 7. Optional Semantic Search And Reranking
 
-Embedding search and cross-encoder reranking are optional local enhancements. They require `sentence-transformers` model loading and may download model weights, so keep them disabled for the default NVIDIA demo:
+Embedding search and cross-encoder reranking are optional local enhancements. They require model loading and may download model weights, so keep them disabled for the default external demo until the indexes are prepared:
 
 ```env
 ENABLE_SEMANTIC_SEARCH=false
@@ -209,7 +247,7 @@ The **evidence mode** is an internal configuration concept, not a user-facing fe
 
 | `INFERMED_DATA_MODE` | DuckDB | QLever | DrugBank | Use case |
 |---|---|---|---|---|
-| `public_safe` | enabled | disabled | disabled | NVIDIA demo, public deployments |
+| `public_safe` | enabled | disabled | disabled | Hosted Ollama demo, public deployments |
 | `local_dev` | enabled | disabled | enabled (if key set) | Local development with licensed data |
 | `full_research_future` | enabled | enabled | optional | Full RDF + licensed dataset research |
 
@@ -223,7 +261,7 @@ If you add a new metric that should also be developer-only, follow the same patt
 
 ### When to change data_mode
 
-- **NVIDIA demo**: keep `public_safe`
+- **Hosted Ollama demo**: keep `public_safe`
 - **Local testing with DrugBank parquet**: switch to `local_dev` and set `ENABLE_DRUGBANK=true`
 - **Research path with full RDF**: switch to `full_research_future` and configure QLever endpoints
 

@@ -27,14 +27,16 @@ env/
 *.csv
 *.tsv
 *.duckdb
-!data/**/*.json
-!data/**/*.pkl
-!data/**/*.parquet
-!data/**/*.csv
-!data/**/*.tsv
-data/cache/feedback/
+data/raw/
+data/private/
+data/duckdb/
+data/cache/
 data/openfda/
-data/duckdb/drugbank.parquet
+data/pubchem/
+data/pubchem_list/
+data/qlever/
+!data/dictionary/
+!data/dictionary/*.json
 
 # Caches & Indices
 /cache/

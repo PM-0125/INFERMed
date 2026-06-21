@@ -150,6 +150,50 @@ def test_nvidia_reasoning_effort_is_optional_payload_field(monkeypatch):
     assert "OK" in out["text"]
 
 
+def test_nvidia_retries_transient_gateway_error(monkeypatch):
+    monkeypatch.setenv("LLM_PROVIDER", "nvidia")
+    monkeypatch.setenv("NVIDIA_API_KEY", "test-key")
+    monkeypatch.setenv("NVIDIA_MODEL", "openai/gpt-oss-120b")
+    monkeypatch.setenv("LLM_STREAM", "false")
+    monkeypatch.setenv("NVIDIA_RETRY_ATTEMPTS", "2")
+
+    import requests
+
+    calls = {"count": 0, "closed": False}
+
+    class GatewayResp:
+        status_code = 504
+        text = ""
+
+        def json(self):
+            raise ValueError("not json")
+
+        def close(self):
+            calls["closed"] = True
+
+    class OkResp:
+        status_code = 200
+        text = ""
+
+        def json(self):
+            return {"choices": [{"message": {"content": "OK"}}], "usage": {}}
+
+    def fake_post(url, **kwargs):
+        calls["count"] += 1
+        return GatewayResp() if calls["count"] == 1 else OkResp()
+
+    monkeypatch.setattr(requests, "post", fake_post, raising=True)
+    monkeypatch.setattr("src.llm.llm_interface.time.sleep", lambda seconds: None)
+
+    out = generate_response(MINIMAL_CTX, "Doctor", seed=123)
+
+    assert calls["count"] == 2
+    assert calls["closed"] is True
+    assert out["meta"]["provider"] == "nvidia"
+    assert out["meta"]["retry_attempts"] == 2
+    assert "OK" in out["text"]
+
+
 def test_nvidia_uses_dedicated_timeout_and_non_stream_default(monkeypatch):
     monkeypatch.setenv("LLM_PROVIDER", "nvidia")
     monkeypatch.setenv("NVIDIA_API_KEY", "test-key")

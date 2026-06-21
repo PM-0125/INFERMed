@@ -61,6 +61,8 @@ class Settings:
     data_manifest_path: str = "data_manifest.yaml"
     duckdb_dir: str = "data/duckdb"
     openfda_cache_dir: str = "data/cache/openfda"
+    cache_backend: str = "file"
+    sqlite_cache_path: str = "data/cache/infermed_cache.sqlite"
 
     enable_duckdb: bool = True
     enable_drugbank: bool = False
@@ -83,6 +85,8 @@ class Settings:
     nvidia_reasoning_effort: str = ""
     ollama_host: str = "http://localhost:11434"
     ollama_model: str = "gpt-oss"
+    ollama_timeout_s: float = 5000.0
+    ollama_num_predict: int = -1
     llm_temperature: float = 1.0
     llm_top_p: float = 1.0
     llm_max_tokens: int = 4096
@@ -110,6 +114,8 @@ def get_settings() -> Settings:
         data_manifest_path=_env_str("DATA_MANIFEST_PATH", "data_manifest.yaml"),
         duckdb_dir=_env_str("DUCKDB_DIR", "data/duckdb"),
         openfda_cache_dir=_env_str("OPENFDA_CACHE_DIR", "data/cache/openfda"),
+        cache_backend=_env_str("CACHE_BACKEND", "file").lower(),
+        sqlite_cache_path=_env_str("SQLITE_CACHE_PATH", "data/cache/infermed_cache.sqlite"),
         enable_duckdb=_env_bool("ENABLE_DUCKDB", True),
         enable_drugbank=enable_drugbank,
         enable_qlever=enable_qlever,
@@ -130,6 +136,8 @@ def get_settings() -> Settings:
         nvidia_reasoning_effort=_env_str("NVIDIA_REASONING_EFFORT", "").lower(),
         ollama_host=_env_str("OLLAMA_HOST", "http://localhost:11434"),
         ollama_model=_env_str("OLLAMA_MODEL", "gpt-oss"),
+        ollama_timeout_s=_env_float("OLLAMA_TIMEOUT_S", _env_float("LLM_TIMEOUT_S", 5000.0)),
+        ollama_num_predict=_env_int("OLLAMA_NUM_PREDICT", -1),
         llm_temperature=_env_float("LLM_TEMPERATURE", _env_float("NVIDIA_TEMPERATURE", 1.0)),
         llm_top_p=_env_float("LLM_TOP_P", _env_float("NVIDIA_TOP_P", 1.0)),
         llm_max_tokens=_env_int("LLM_MAX_TOKENS", _env_int("NVIDIA_MAX_TOKENS", 4096)),

@@ -106,6 +106,28 @@ def test_summarize_pkpd_risk_messages():
     assert "overlap_targets" in s["pd_detail"]
 
 
+def test_summarize_pkpd_handles_uniprot_only_on_second_drug(monkeypatch):
+    class Settings:
+        enable_reactome = False
+        enable_uniprot = True
+        enable_kegg = False
+
+    monkeypatch.setattr("src.utils.pkpd_utils.get_settings", lambda: Settings())
+
+    mech = {
+        "enzymes": {},
+        "targets_a": [],
+        "targets_b": ["Target Q9Y261"],
+        "pathways_a": [],
+        "pathways_b": [],
+    }
+
+    s = summarize_pkpd_risk("DrugA", "DrugB", mech)
+
+    assert "pk_summary" in s
+    assert "pd_summary" in s
+
+
 # ---------------------- FAERS formatting ----------------------
 
 def test_topk_faers_basic_and_empty_and_malformed():
