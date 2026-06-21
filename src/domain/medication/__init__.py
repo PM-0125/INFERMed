@@ -1,0 +1,2 @@
+"""Medication identity domain."""
+

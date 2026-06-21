@@ -6,8 +6,10 @@ from typing import Any
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-from src.api.schemas import AnalyzeRequest, FollowUpRequest
+from src.api.schemas import AnalyzeRequest, FollowUpRequest, MedicationSetAnalyzeRequest
 from src.api.transformers import build_interaction_result, cited_cards_from_context
+from src.application.commands import AnalyzeMedicationSetCommand
+from src.application.use_cases.analyze_medication_set import AnalyzeMedicationSetUseCase
 from src.config.settings import get_settings
 from src.llm.llm_interface import generate_followup_response, generate_response
 from src.llm.rag_pipeline import get_context_cached, run_rag
@@ -44,20 +46,53 @@ def health() -> dict[str, Any]:
 
 @app.post("/api/interactions/analyze")
 def analyze_interaction(request: AnalyzeRequest) -> dict[str, Any]:
-    drug_a, drug_b = request.drugs[0], request.drugs[1]
     try:
-        rag_output = run_rag(
-            drug_a,
-            drug_b,
-            mode=request.mode,
-            use_cache_context=not request.refreshEvidence,
-            use_cache_response=False,
-            model_name=None,
+        analysis = AnalyzeMedicationSetUseCase(rag_runner=run_rag).execute(
+            AnalyzeMedicationSetCommand(
+                medications=request.drugs,
+                audience=request.mode,
+                refresh_evidence=request.refreshEvidence,
+                analysis_depth="standard",
+            )
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Interaction analysis failed: {exc}") from exc
 
-    return build_interaction_result(rag_output, fallback_drug_a=drug_a, fallback_drug_b=drug_b)
+    drug_a, drug_b = analysis.executed_pair
+    response = build_interaction_result(analysis.rag_output, fallback_drug_a=drug_a, fallback_drug_b=drug_b)
+    response.update(analysis.to_read_model())
+    return response
+
+
+@app.post("/api/medication-sets/analyze")
+def analyze_medication_set(request: MedicationSetAnalyzeRequest) -> dict[str, Any]:
+    try:
+        analysis = AnalyzeMedicationSetUseCase(rag_runner=run_rag).execute(
+            AnalyzeMedicationSetCommand(
+                medications=request.medication_texts,
+                audience=request.audience,
+                patient_context=request.patient_context,
+                refresh_evidence=request.refresh_evidence,
+                analysis_depth=request.analysis_depth,
+            )
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Medication-set analysis failed: {exc}") from exc
+
+    drug_a, drug_b = analysis.executed_pair
+    legacy = build_interaction_result(analysis.rag_output, fallback_drug_a=drug_a, fallback_drug_b=drug_b)
+    return {
+        **analysis.to_read_model(),
+        "top_risks": [analysis.decision.to_dict()],
+        "topRisks": [analysis.decision.to_dict()],
+        "explanation": {"sections": legacy["assessment"]},
+        "evidence_panels": legacy["evidence"],
+        "evidencePanels": legacy["evidence"],
+        "source_status": legacy["evidence"].get("sources", []),
+        "sourceStatus": legacy["evidence"].get("sources", []),
+        "limitations": analysis.decision.source_limitations,
+        "compatibility": legacy,
+    }
 
 
 @app.post("/api/interactions/followup")

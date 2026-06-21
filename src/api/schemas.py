@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -10,6 +10,7 @@ QUESTION_MAX_LENGTH: int = 1000
 
 AudienceMode = Literal["doctor", "patient", "pv_research"]
 ConversationRole = Literal["user", "assistant"]
+AnalysisDepth = Literal["standard", "deep_research"]
 
 
 class AnalyzeRequest(BaseModel):
@@ -21,6 +22,30 @@ class AnalyzeRequest(BaseModel):
     @classmethod
     def validate_drugs(cls, value: list[str]) -> list[str]:
         return _normalize_drugs(value)
+
+
+class MedicationEntry(BaseModel):
+    text: str = Field(min_length=1, max_length=DRUG_NAME_MAX_LENGTH)
+
+    @field_validator("text")
+    @classmethod
+    def validate_text(cls, value: str) -> str:
+        cleaned = _reject_control_chars(value.strip(), "medication")
+        if not cleaned:
+            raise ValueError("Medication text cannot be empty")
+        return " ".join(cleaned.split())
+
+
+class MedicationSetAnalyzeRequest(BaseModel):
+    medications: list[MedicationEntry] = Field(min_length=2)
+    audience: AudienceMode = "doctor"
+    patient_context: Optional[dict[str, Any]] = None
+    refresh_evidence: bool = False
+    analysis_depth: AnalysisDepth = "standard"
+
+    @property
+    def medication_texts(self) -> list[str]:
+        return [item.text for item in self.medications]
 
 
 class ConversationTurn(BaseModel):

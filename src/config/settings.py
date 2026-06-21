@@ -63,6 +63,7 @@ class Settings:
     openfda_cache_dir: str = "data/cache/openfda"
     cache_backend: str = "file"
     sqlite_cache_path: str = "data/cache/infermed_cache.sqlite"
+    enable_event_store: bool = False
 
     enable_duckdb: bool = True
     enable_drugbank: bool = False
@@ -109,13 +110,16 @@ def get_settings() -> Settings:
         enable_drugbank = False
         enable_qlever = False
 
+    cache_backend = _env_str("CACHE_BACKEND", "file").lower()
+
     return Settings(
         data_mode=mode,  # type: ignore[arg-type]
         data_manifest_path=_env_str("DATA_MANIFEST_PATH", "data_manifest.yaml"),
         duckdb_dir=_env_str("DUCKDB_DIR", "data/duckdb"),
         openfda_cache_dir=_env_str("OPENFDA_CACHE_DIR", "data/cache/openfda"),
-        cache_backend=_env_str("CACHE_BACKEND", "file").lower(),
+        cache_backend=cache_backend,
         sqlite_cache_path=_env_str("SQLITE_CACHE_PATH", "data/cache/infermed_cache.sqlite"),
+        enable_event_store=_env_bool("ENABLE_EVENT_STORE", cache_backend == "sqlite"),
         enable_duckdb=_env_bool("ENABLE_DUCKDB", True),
         enable_drugbank=enable_drugbank,
         enable_qlever=enable_qlever,

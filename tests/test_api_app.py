@@ -39,6 +39,38 @@ def test_analyze_endpoint_uses_uncached_llm_response(monkeypatch):
     assert calls["kwargs"]["use_cache_response"] is False
     assert calls["kwargs"]["model_name"] is None
     assert response.json()["assessment"][0]["title"] == "Bottom Line"
+    assert response.json()["analysisId"].startswith("ana_")
+    assert response.json()["decision"]["analysis_id"] == response.json()["analysisId"]
+
+
+def test_medication_set_endpoint_returns_future_read_model(monkeypatch):
+    def fake_run_rag(*args, **kwargs):
+        return {
+            "context": {
+                "drugs": {"a": {"name": args[0]}, "b": {"name": args[1]}},
+                "signals": {"tabular": {"prr": 2.5}, "faers": {}, "mechanistic": {}},
+                "pkpd": {"pk_detail": {"overlaps": {}}, "pd_detail": {}},
+            },
+            "answer": {"text": "## Bottom Line\nUse caution."},
+        }
+
+    monkeypatch.setattr("src.api.app.run_rag", fake_run_rag)
+    client = TestClient(app)
+    response = client.post(
+        "/api/medication-sets/analyze",
+        json={
+            "medications": [{"text": "warfarin"}, {"text": "fluconazole"}],
+            "audience": "doctor",
+            "refresh_evidence": False,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["analysisId"].startswith("ana_")
+    assert payload["normalizedMedications"][0]["normalized_name"] == "warfarin"
+    assert payload["topRisks"][0]["analysis_id"] == payload["analysisId"]
+    assert "compatibility" in payload
 
 
 def test_followup_endpoint_uses_scoped_followup_prompt(monkeypatch):
