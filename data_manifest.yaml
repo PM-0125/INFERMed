@@ -32,7 +32,7 @@ datasets:
     source_label: DIQT
 
   drugbank:
-    file: data/private/drugbank.parquet
+    file: data/duckdb/drugbank.parquet
     backend: duckdb
     visibility: restricted_local
     enabled_in_public_safe: false

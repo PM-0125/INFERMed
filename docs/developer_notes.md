@@ -1,6 +1,8 @@
 # INFERMed Run Guidance
 
-This guide describes the current public-safe demo path and the optional enhanced paths.
+This guide describes the current local workstation runtime and the optional enhanced paths.
+
+Cloud access is paused. Until it returns, development, data checks, backend tests, and frontend testing should run on this device.
 
 ## 1. Environment
 
@@ -19,7 +21,33 @@ python -m venv .venv --prompt infermed
 
 Runtime configuration is read from `.env`. Do not commit `.env` or API keys.
 
-For the hosted cloud resource, use local Ollama inference:
+For current local development, use either deterministic mock output for tests or the local NVIDIA API configuration in `.env` for answer-quality work. This workstation has a 4 GB NVIDIA GPU, so it is not an appropriate target for the larger Ollama models planned for the cloud host.
+
+Recommended local smoke-test mode:
+
+```env
+INFERMED_DATA_MODE=public_safe
+ENABLE_DRUGBANK=false
+ENABLE_QLEVER=false
+LLM_PROVIDER=mock
+```
+
+Recommended local answer-quality mode:
+
+```env
+INFERMED_DATA_MODE=public_safe
+ENABLE_DRUGBANK=false
+ENABLE_QLEVER=false
+LLM_PROVIDER=nvidia
+NVIDIA_BASE_URL=https://integrate.api.nvidia.com
+NVIDIA_MODEL=openai/gpt-oss-120b
+LLM_STREAM=false
+LLM_TIMEOUT_S=300
+```
+
+`NVIDIA_API_KEY` must be set locally in `.env`.
+
+Cloud settings are deferred until the cloud host is available again:
 
 ```env
 INFERMED_DATA_MODE=public_safe
@@ -42,24 +70,17 @@ ollama pull bge-m3
 
 Use `gpt-oss:20b` as the served default for multi-user testing. Keep `qwen3:30b` available for slower research/adjudication paths after the tool-calling architecture is in place.
 
-For a local NVIDIA-backed development path, keep:
+Generated caches and datasets are local artifacts. They are ignored by Git and should be rebuilt or copied into `data/` on this workstation.
+
+Local data paths:
 
 ```env
-INFERMED_DATA_MODE=public_safe
-ENABLE_DRUGBANK=false
-ENABLE_QLEVER=false
-LLM_PROVIDER=nvidia
-NVIDIA_BASE_URL=https://integrate.api.nvidia.com
-NVIDIA_MODEL=openai/gpt-oss-120b
-LLM_STREAM=false
-LLM_TIMEOUT_S=300
+DUCKDB_DIR=data/duckdb
+OPENFDA_CACHE_DIR=data/cache/openfda
+CACHE_BACKEND=file
 ```
 
-`NVIDIA_API_KEY` must be set locally in `.env`.
-
-Generated caches and datasets are local artifacts. They are ignored by Git and should be rebuilt or copied into the runtime data volume.
-
-For a deployment host, prefer:
+For a future deployment host, prefer:
 
 ```env
 DUCKDB_DIR=/srv/infermed-data/duckdb
@@ -86,6 +107,13 @@ Before debugging a local NVIDIA setup, validate NVIDIA directly. Use `--stream` 
 
 ## 2. Run Tests
 
+First verify local data/runtime status:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\local_healthcheck.py --skip-dotenv
+.\.venv\Scripts\python.exe scripts\local_healthcheck.py --data-mode local_dev --enable-drugbank --skip-dotenv
+```
+
 Run the focused no-secret verification set:
 
 ```powershell
@@ -103,7 +131,7 @@ The product-facing frontend is a React/Vite app under `frontend/`. It uses sampl
 Start the backend API from the repo root:
 
 ```powershell
-.\.venv\Scripts\python.exe -m uvicorn src.api.app:app --host 0.0.0.0 --port 8000 --reload
+.\.venv\Scripts\python.exe -m uvicorn src.api.app:app --host 127.0.0.1 --port 8000 --reload
 ```
 
 The frontend reads `frontend/.env.local`:
@@ -116,7 +144,7 @@ Then start Vite:
 
 ```powershell
 npm.cmd --prefix frontend install
-npm.cmd --prefix frontend run dev -- --host 0.0.0.0 --port 5173
+npm.cmd --prefix frontend run dev -- --host 127.0.0.1 --port 5173
 ```
 
 Open `http://localhost:5173`.
@@ -219,13 +247,13 @@ DrugBank is restricted/local development only. Use it only if you have valid lic
 Build licensed DrugBank parquet with:
 
 ```powershell
-.\.venv\Scripts\python.exe scripts\build_drugbank_parquet.py xml --xml data\private\drugbank.xml --out data\private\drugbank.parquet
+.\.venv\Scripts\python.exe scripts\build_drugbank_parquet.py xml --xml data\private\drugbank.xml --out data\duckdb\drugbank.parquet
 ```
 
 Patch an older local DrugBank parquet with enzyme-action mapping:
 
 ```powershell
-.\.venv\Scripts\python.exe scripts\build_drugbank_parquet.py patch-existing --parquet data\private\drugbank.parquet
+.\.venv\Scripts\python.exe scripts\build_drugbank_parquet.py patch-existing --parquet data\duckdb\drugbank.parquet
 ```
 
 Then enable only for local development:

@@ -104,7 +104,7 @@ DrugBank-derived files are not licensed for general redistribution through this 
 
 See [NOTICE.md](NOTICE.md) and [data_license.md](data_license.md) for third-party data, source links, and API boundaries.
 
-Generated datasets, source caches, embedding indexes, and licensed/private data are not committed to Git. Build or copy those artifacts into `data/` locally, or into an external deployment volume such as `/srv/infermed-data` on the host.
+Generated datasets, source caches, embedding indexes, and licensed/private data are not committed to Git. During the current local-only development phase, build or copy those artifacts into `data/` on this workstation. A future deployment host can use an external volume such as `/srv/infermed-data` when cloud access returns.
 
 ## Data Modes
 
@@ -135,7 +135,7 @@ CACHE_BACKEND=file
 OPENFDA_CACHE_DIR=data/cache/openfda
 ```
 
-For a shared cloud host, use the SQLite cache backend so generated API/source payloads live in one durable database:
+For a shared cloud host later, use the SQLite cache backend so generated API/source payloads live in one durable database:
 
 ```dotenv
 CACHE_BACKEND=sqlite
@@ -149,6 +149,8 @@ SQLite is a deployment convenience for source payload caching. It does not repla
 ## Local Development
 
 Create and use the repository virtual environment instead of global Python.
+
+Current active development is local-only because cloud access is paused. See [docs/local_development.md](docs/local_development.md) for the local data and runtime checklist.
 
 ```powershell
 python -m venv .venv
@@ -181,7 +183,7 @@ npm run build
 
 The backend reads runtime configuration from `.env`. Do not commit `.env`, API keys, provider keys, licensed dataset paths, or private deployment notes.
 
-Recommended hosted cloud settings use local Ollama models on the GPU host:
+Recommended hosted cloud settings, once cloud access returns, use local Ollama models on the GPU host:
 
 ```dotenv
 LLM_PROVIDER=ollama
@@ -244,7 +246,7 @@ npm run build
 
 ## Deployment Direction
 
-For the current external testing phase, the recommended deployment is a single cloud host:
+When cloud access returns, the recommended deployment is a single cloud host:
 
 ```text
 Caddy
