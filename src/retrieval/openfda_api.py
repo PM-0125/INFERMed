@@ -114,16 +114,11 @@ class OpenFDAClient:
     SUMMARY_LIMIT = 3
 
     def __init__(self, cache_dir: str = DEFAULT_CACHE_DIR, ttl_seconds: int = DEFAULT_TTL_SECONDS):
-        get_settings()
+        settings = get_settings()
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         _maybe_migrate_legacy_cache(self.cache_dir)
-        ttl_days= os.getenv("OPENFDA_TTL_DAYS")
-        if ttl_days is not None:
-            try:
-                ttl_seconds = int(float(ttl_days)) * 24 * 3600
-            except Exception:
-                pass
+        ttl_seconds = int(settings.openfda_ttl_days) * 24 * 3600
         self.ttl_seconds = int(ttl_seconds)
         self.api_key = os.getenv("OPENFDA_API_KEY")  # optional, but recommended
 

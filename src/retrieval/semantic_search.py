@@ -13,9 +13,11 @@ from __future__ import annotations
 
 import os
 import json
+import hashlib
 import importlib.util
 import logging
 import pickle
+import re
 from functools import lru_cache
 from typing import Any, Dict, List, Optional, Tuple
 from pathlib import Path
@@ -45,6 +47,49 @@ SIMILARITY_THRESHOLD = float(os.getenv("SEMANTIC_SIMILARITY_THRESHOLD", "0.5"))
 os.makedirs(EMBEDDING_CACHE_DIR, exist_ok=True)
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+class _LexicalFallbackEmbeddingModel:
+    """Dependency-free embedding fallback for offline tests and restricted dev hosts."""
+
+    def __init__(self, dimensions: int = 384):
+        self.dimensions = dimensions
+
+    def encode(self, texts: List[str], show_progress_bar: bool = False) -> np.ndarray:
+        rows = [self._embed(text) for text in texts]
+        return np.vstack(rows) if rows else np.zeros((0, self.dimensions), dtype=np.float32)
+
+    def _embed(self, text: str) -> np.ndarray:
+        value = (text or "").strip().lower()
+        vec = np.zeros(self.dimensions, dtype=np.float32)
+        features = self._features(value)
+        if not features:
+            vec[0] = 1.0
+            return vec
+        for feature in features:
+            digest = hashlib.blake2b(feature.encode("utf-8"), digest_size=8).digest()
+            bucket = int.from_bytes(digest[:4], "big") % self.dimensions
+            sign = 1.0 if digest[4] % 2 == 0 else -1.0
+            vec[bucket] += sign
+        norm = np.linalg.norm(vec)
+        return vec / (norm + 1e-8)
+
+    @staticmethod
+    def _features(value: str) -> List[str]:
+        tokens = re.findall(r"[a-z0-9]+", value)
+        features = list(tokens)
+        compact = "".join(tokens)
+        for n in (3, 4, 5):
+            if len(compact) >= n:
+                features.extend(compact[i : i + n] for i in range(0, len(compact) - n + 1))
+        return features
+
+
 class SemanticSearcher:
     """
     Semantic search using sentence transformers for drug and side effect similarity.
@@ -69,13 +114,21 @@ class SemanticSearcher:
         
         try:
             sentence_transformer = _load_sentence_transformer()
-            if sentence_transformer is None:
-                LOG.info("sentence-transformers is unavailable; semantic search disabled")
+            if sentence_transformer is not None:
+                if _env_bool("SEMANTIC_LOCAL_FILES_ONLY", True):
+                    self.model = sentence_transformer(self.model_name, local_files_only=True)
+                else:
+                    self.model = sentence_transformer(self.model_name)
+                LOG.info(f"Initialized embedding model: {self.model_name}")
                 return
-            self.model = sentence_transformer(self.model_name)
-            LOG.info(f"Initialized embedding model: {self.model_name}")
+            LOG.info("sentence-transformers is unavailable")
         except Exception as e:
-            LOG.error(f"Failed to initialize embedding model: {e}")
+            LOG.warning(f"Failed to initialize embedding model; using fallback if enabled: {e}")
+
+        if _env_bool("SEMANTIC_OFFLINE_FALLBACK", True):
+            self.model = _LexicalFallbackEmbeddingModel()
+            LOG.info("Initialized offline lexical embedding fallback")
+        else:
             self.model = None
     
     def build_drug_index(self, drug_names: List[str], force_rebuild: bool = False) -> bool:
@@ -89,7 +142,7 @@ class SemanticSearcher:
         Returns:
             True if index was built successfully
         """
-        if not HAS_EMBEDDINGS or self.model is None:
+        if self.model is None:
             return False
         
         cache_path = os.path.join(self.cache_dir, "drug_index.pkl")
@@ -167,7 +220,7 @@ class SemanticSearcher:
         Returns:
             List of (drug_name, similarity_score) tuples, sorted by similarity
         """
-        if not HAS_EMBEDDINGS or self.model is None or not self.drug_index:
+        if self.model is None or not self.drug_index:
             return []
         
         if not query or not query.strip():
@@ -212,7 +265,7 @@ class SemanticSearcher:
         Returns:
             True if index was built successfully
         """
-        if not HAS_EMBEDDINGS or self.model is None:
+        if self.model is None:
             return False
         
         cache_path = os.path.join(self.cache_dir, "side_effect_index.pkl")
@@ -283,7 +336,7 @@ class SemanticSearcher:
         Returns:
             List of (side_effect_name, similarity_score) tuples
         """
-        if not HAS_EMBEDDINGS or self.model is None or not self.side_effect_index:
+        if self.model is None or not self.side_effect_index:
             return []
         
         if not query or not query.strip():

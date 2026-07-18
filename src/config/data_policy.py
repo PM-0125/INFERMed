@@ -118,6 +118,15 @@ def get_source_status(settings: Settings | None = None) -> list[SourceStatus]:
     statuses.extend(
         [
             SourceStatus("OpenFDA cache/API", settings.enable_openfda, settings.enable_openfda, "Availability checked per request"),
+            SourceStatus("openFDA Drug Label API", settings.enable_openfda_label, settings.enable_openfda_label, "Public SPL-derived label sections"),
+            SourceStatus("DailyMed SPL API", settings.enable_dailymed, settings.enable_dailymed, "Public SPL metadata"),
+            SourceStatus("RxNorm/RxClass API", settings.enable_rxnorm, settings.enable_rxnorm, "Public NLM medication identity and class normalization"),
+            SourceStatus(
+                "FDA CYP/transporter reference",
+                True,
+                Path("data/reference/fda_ddi_tables.json").exists(),
+                "Downloaded with scripts/download_public_sources.py",
+            ),
             SourceStatus(
                 "PubChem PUG-REST",
                 settings.enable_pubchem_rest,
@@ -134,6 +143,31 @@ def get_source_status(settings: Settings | None = None) -> list[SourceStatus]:
             SourceStatus("KEGG", settings.enable_kegg, settings.enable_kegg, "Required public enrichment"),
             SourceStatus("Reactome", settings.enable_reactome, settings.enable_reactome, "Required public enrichment"),
             SourceStatus("UniProt", settings.enable_uniprot, settings.enable_uniprot, "Required public enrichment"),
+            SourceStatus("FDA PGx biomarker pages", settings.enable_fda_pgx, settings.enable_fda_pgx, "Public FDA page lookup; matched per request"),
+            SourceStatus("Europe PMC REST API", settings.enable_europe_pmc, settings.enable_europe_pmc, "Public literature metadata search"),
+            SourceStatus("Open Targets GraphQL API", settings.enable_open_targets, settings.enable_open_targets, "Public target-disease/drug search; best-effort per request"),
+            SourceStatus("STRING API", settings.enable_stringdb, settings.enable_stringdb, "Public protein association lookup with rate limiting"),
+            SourceStatus(
+                "BioGRID REST API",
+                settings.enable_biogrid,
+                settings.enable_biogrid and bool(settings.biogrid_access_key),
+                "BIOGRID_ACCESS_KEY configured" if settings.biogrid_access_key else "Requires BIOGRID_ACCESS_KEY",
+            ),
+            SourceStatus("DrugCentral API", settings.enable_drugcentral, settings.enable_drugcentral, "Public structure and target/activity lookup"),
+            SourceStatus(
+                "NCI-ALMANAC raw rebuild input",
+                settings.enable_nci_almanac,
+                Path("data/raw/nci_almanac/ComboDrugGrowth_Nov2017.zip").exists(),
+                "Downloaded raw rebuild input" if Path("data/raw/nci_almanac/ComboDrugGrowth_Nov2017.zip").exists() else "Bulk/local research source; run scripts/download_research_sources.py",
+            ),
+            SourceStatus(
+                "SIDER/nSIDES/OFFSIDES",
+                settings.enable_sider_nsides_offsides,
+                Path("data/raw/sider/meddra_all_se.tsv.gz").exists() or Path("data/raw/nsides/OFFSIDES.csv.xz").exists(),
+                "Downloaded local research snapshot"
+                if Path("data/raw/sider/meddra_all_se.tsv.gz").exists() or Path("data/raw/nsides/OFFSIDES.csv.xz").exists()
+                else "Bulk/local research source; run scripts/download_research_sources.py",
+            ),
             SourceStatus(
                 "Canonical PK/PD dictionary",
                 settings.enable_canonical_pkpd,

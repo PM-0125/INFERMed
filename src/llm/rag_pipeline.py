@@ -6,9 +6,10 @@ import json
 import hashlib
 import logging
 import re
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout, as_completed
 from dataclasses import asdict
-from typing import Any, Dict, Tuple, Optional, List
-from datetime import datetime
+from typing import Any, Callable, Dict, Tuple, Optional, List
+from datetime import datetime, timezone
 from collections.abc import Mapping  # <-- for _jsonify_sets
 
 LOG = logging.getLogger(__name__)
@@ -51,7 +52,12 @@ from src.utils.context_filtering import filter_context_by_relevance, filter_cont
 from src.llm.llm_interface import generate_response, MODEL_NAME as LLM_MODEL_NAME
 
 # ----------------- versioning & caching -----------------
-VERSION = 9  # bump when schema/logic changes to invalidate old cached contexts
+# Version 12: Adds NCI-ALMANAC parquet evidence under signals.tabular.nci_almanac.
+# Version 11: Adds API-first research enrichment under signals.research_enrichment
+#             for FDA PGx, Europe PMC, Open Targets, STRING, and optional BioGRID.
+# Version 10: Adds openFDA label, DailyMed, RxNorm/RxClass, and FDA CYP/transporter
+#             reference evidence under signals.clinical_reference.
+VERSION = 12  # bump when schema/logic changes to invalidate old cached contexts
 # Version 9: OpenFDA cache moved under data/cache; public REST enrichment schema
 #            now includes required PubChem IDs and source-specific enrichment slots.
 # Version 8: FORCED ENABLEMENT of all RAG features - semantic search, reranking, query expansion,
@@ -356,6 +362,53 @@ def _ensure_enrichment_schema(mech: Dict[str, Any]) -> Dict[str, Any]:
     return mech
 
 
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+
+
+def _run_parallel_source_tasks(
+    tasks: Dict[str, Callable[[], Any]],
+    *,
+    timeout_s: float,
+    caveats: List[str],
+    label: str,
+    max_workers: int = 6,
+) -> Dict[str, Any]:
+    """Run independent source lookups with a bounded wait and return partial results."""
+    if not tasks:
+        return {}
+
+    results: Dict[str, Any] = {}
+    worker_count = max(1, min(max_workers, len(tasks)))
+    executor = ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="infermed-source")
+    futures = {executor.submit(fn): name for name, fn in tasks.items()}
+
+    try:
+        for future in as_completed(futures, timeout=max(0.1, timeout_s)):
+            name = futures[future]
+            try:
+                results[name] = future.result()
+            except Exception as exc:
+                caveats.append(f"{name} enrichment failed: {exc}")
+    except FuturesTimeout:
+        pending = [name for future, name in futures.items() if not future.done()]
+        if pending:
+            caveats.append(
+                f"{label} timed out after {timeout_s:.1f}s; using partial results "
+                f"without {', '.join(pending)}."
+            )
+        for future in futures:
+            if not future.done():
+                future.cancel()
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
+
+    return results
+
+
 def _pathway_names(rows: Any) -> List[str]:
     out: List[str] = []
     for row in rows or []:
@@ -502,61 +555,50 @@ def _enrich_mechanistic_with_public_rest(
     """
     mech = dict(mech or {})
     _ensure_enrichment_schema(mech)
+    rest_timeout_s = _env_float("INFERMED_PUBLIC_REST_TIMEOUT_S", 35.0)
 
+    phase_tasks: Dict[str, Callable[[], Any]] = {}
     if settings.enable_pubchem_rest:
-        try:
+        def _pubchem_rest() -> Dict[str, Any]:
             from src.retrieval import pubchem_client as pc
 
+            out: Dict[str, Any] = {}
             for side, drug in (("a", drugA), ("b", drugB)):
                 ids_key = f"ids_{side}"
                 pk_key = f"pk_data_{side}"
                 ids = dict(mech.get(ids_key) or {})
+                pk_data = dict(mech.get(pk_key) or {})
                 cid = ids.get("pubchem_cid") or ids.get("pubchem") or ids.get("cid")
                 if not cid:
                     cid = pc.get_compound_cid_by_name(drug)
                     if cid:
                         ids["pubchem_cid"] = str(cid)
-                        mech[ids_key] = ids
-                if not mech.get(pk_key):
+                if not pk_data:
                     if cid:
-                        mech[pk_key] = pc.get_compound_pk_data(str(cid))
+                        pk_data = pc.get_compound_pk_data(str(cid)) or {}
                     else:
-                        mech[pk_key] = pc.get_compound_pk_data_by_name(drug)
-        except Exception as e:
-            caveats.append(f"PubChem REST enrichment failed: {e}")
+                        pk_data = pc.get_compound_pk_data_by_name(drug) or {}
+                out[side] = {"ids": ids, "pk_data": pk_data}
+            return out
+
+        phase_tasks["PubChem REST API"] = _pubchem_rest
 
     if settings.enable_kegg:
-        try:
+        def _kegg_rest() -> Dict[str, Any]:
             from src.retrieval import kegg_client as kg
 
-            kegg_pathways_a = kg.get_drug_pathways(drugA)
-            kegg_pathways_b = kg.get_drug_pathways(drugB)
-            kegg_common = kg.get_common_pathways(drugA, drugB)
-            kegg_enzymes_a = kg.get_drug_enzymes(drugA)
-            kegg_enzymes_b = kg.get_drug_enzymes(drugB)
+            return {
+                "pathways_a": kg.get_drug_pathways(drugA),
+                "pathways_b": kg.get_drug_pathways(drugB),
+                "common_pathways": kg.get_common_pathways(drugA, drugB),
+                "enzymes_a": kg.get_drug_enzymes(drugA),
+                "enzymes_b": kg.get_drug_enzymes(drugB),
+            }
 
-            if kegg_pathways_a:
-                mech["kegg_pathways_a"] = kegg_pathways_a[:5]
-                mech["pathways_a"] = _append_unique(mech.get("pathways_a"), _pathway_names(kegg_pathways_a), limit=24)
-            if kegg_pathways_b:
-                mech["kegg_pathways_b"] = kegg_pathways_b[:5]
-                mech["pathways_b"] = _append_unique(mech.get("pathways_b"), _pathway_names(kegg_pathways_b), limit=24)
-            if kegg_common:
-                mech["kegg_common_pathways"] = kegg_common[:5]
-                mech["common_pathways"] = _append_unique(mech.get("common_pathways"), _pathway_names(kegg_common), limit=24)
-            if kegg_enzymes_a:
-                mech["kegg_enzymes_a"] = kegg_enzymes_a[:8]
-                side_roles = mech["enzymes"].setdefault("a", {})
-                side_roles["substrate"] = _append_unique(side_roles.get("substrate"), _enzyme_tokens_from_kegg(kegg_enzymes_a))
-            if kegg_enzymes_b:
-                mech["kegg_enzymes_b"] = kegg_enzymes_b[:8]
-                side_roles = mech["enzymes"].setdefault("b", {})
-                side_roles["substrate"] = _append_unique(side_roles.get("substrate"), _enzyme_tokens_from_kegg(kegg_enzymes_b))
-        except Exception as e:
-            caveats.append(f"KEGG enrichment failed: {e}")
+        phase_tasks["KEGG REST API"] = _kegg_rest
 
     if settings.enable_chembl:
-        try:
+        def _chembl_rest() -> Dict[str, Any]:
             from src.retrieval import chembl_client as chembl
 
             enzymes = mech.get("enzymes") or {}
@@ -565,48 +607,127 @@ def _enrich_mechanistic_with_public_rest(
                 enrichment["a"] = _normalize_chembl_side(chembl.enrich_mechanistic_data(drugA, enzymes.get("a", {}) or {}))
             if not _chembl_side_has_content(enrichment.get("b")):
                 enrichment["b"] = _normalize_chembl_side(chembl.enrich_mechanistic_data(drugB, enzymes.get("b", {}) or {}))
-            mech["chembl_enrichment"] = enrichment
-            _merge_chembl_inhibitors(mech, enrichment)
-        except Exception as e:
-            caveats.append(f"ChEMBL enrichment failed: {e}")
+            return enrichment
+
+        phase_tasks["ChEMBL REST API"] = _chembl_rest
+
+    phase_results = _run_parallel_source_tasks(
+        phase_tasks,
+        timeout_s=rest_timeout_s,
+        caveats=caveats,
+        label="Public mechanistic source enrichment",
+        max_workers=3,
+    )
+
+    pubchem = phase_results.get("PubChem REST API") or {}
+    for side in ("a", "b"):
+        side_data = pubchem.get(side) or {}
+        ids = side_data.get("ids")
+        pk_data = side_data.get("pk_data")
+        if isinstance(ids, Mapping) and ids:
+            mech[f"ids_{side}"] = dict(mech.get(f"ids_{side}") or {}, **dict(ids))
+        if isinstance(pk_data, Mapping) and pk_data:
+            mech[f"pk_data_{side}"] = dict(pk_data)
+
+    kegg = phase_results.get("KEGG REST API") or {}
+    kegg_pathways_a = kegg.get("pathways_a") or []
+    kegg_pathways_b = kegg.get("pathways_b") or []
+    kegg_common = kegg.get("common_pathways") or []
+    kegg_enzymes_a = kegg.get("enzymes_a") or []
+    kegg_enzymes_b = kegg.get("enzymes_b") or []
+    if kegg_pathways_a:
+        mech["kegg_pathways_a"] = kegg_pathways_a[:5]
+        mech["pathways_a"] = _append_unique(mech.get("pathways_a"), _pathway_names(kegg_pathways_a), limit=24)
+    if kegg_pathways_b:
+        mech["kegg_pathways_b"] = kegg_pathways_b[:5]
+        mech["pathways_b"] = _append_unique(mech.get("pathways_b"), _pathway_names(kegg_pathways_b), limit=24)
+    if kegg_common:
+        mech["kegg_common_pathways"] = kegg_common[:5]
+        mech["common_pathways"] = _append_unique(mech.get("common_pathways"), _pathway_names(kegg_common), limit=24)
+    if kegg_enzymes_a:
+        mech["kegg_enzymes_a"] = kegg_enzymes_a[:8]
+        side_roles = mech["enzymes"].setdefault("a", {})
+        side_roles["substrate"] = _append_unique(side_roles.get("substrate"), _enzyme_tokens_from_kegg(kegg_enzymes_a))
+    if kegg_enzymes_b:
+        mech["kegg_enzymes_b"] = kegg_enzymes_b[:8]
+        side_roles = mech["enzymes"].setdefault("b", {})
+        side_roles["substrate"] = _append_unique(side_roles.get("substrate"), _enzyme_tokens_from_kegg(kegg_enzymes_b))
+
+    chembl_enrichment = phase_results.get("ChEMBL REST API")
+    if chembl_enrichment:
+        enrichment = _normalize_chembl_enrichment(chembl_enrichment)
+        mech["chembl_enrichment"] = enrichment
+        _merge_chembl_inhibitors(mech, enrichment)
 
     if settings.enable_uniprot:
-        try:
+        def _uniprot_rest() -> Dict[str, Any]:
             from src.retrieval import uniprot_client as uc
 
+            out: Dict[str, Any] = {}
             for side in ("a", "b"):
                 seeds = _uniprot_seed_terms(mech, side)
                 if not seeds:
                     continue
                 enriched = uc.enrich_protein_list(seeds[:8])
                 if enriched:
-                    mech[f"uniprot_targets_{side}"] = _merge_records(mech.get(f"uniprot_targets_{side}"), enriched, limit=12)
-                    mech[f"uniprot_ids_{side}"] = _append_unique(
-                        mech.get(f"uniprot_ids_{side}"),
-                        _extract_uniprot_accessions(enriched),
-                        limit=12,
-                    )
-        except Exception as e:
-            caveats.append(f"UniProt enrichment failed: {e}")
+                    out[side] = {
+                        "targets": enriched,
+                        "ids": _extract_uniprot_accessions(enriched),
+                    }
+            return out
+
+        uniprot = _run_parallel_source_tasks(
+            {"UniProt REST API": _uniprot_rest},
+            timeout_s=rest_timeout_s,
+            caveats=caveats,
+            label="UniProt target enrichment",
+            max_workers=1,
+        ).get("UniProt REST API") or {}
+        for side in ("a", "b"):
+            side_data = uniprot.get(side) or {}
+            if side_data.get("targets"):
+                mech[f"uniprot_targets_{side}"] = _merge_records(
+                    mech.get(f"uniprot_targets_{side}"),
+                    side_data.get("targets"),
+                    limit=12,
+                )
+            if side_data.get("ids"):
+                mech[f"uniprot_ids_{side}"] = _append_unique(
+                    mech.get(f"uniprot_ids_{side}"),
+                    side_data.get("ids"),
+                    limit=12,
+                )
 
     if settings.enable_reactome:
-        try:
+        def _reactome_rest() -> Dict[str, Any]:
             from src.retrieval import reactome_client as rc
 
+            out: Dict[str, Any] = {}
             for side, drug in (("a", drugA), ("b", drugB)):
                 uniprot_ids = _append_unique([], mech.get(f"uniprot_ids_{side}"), limit=12)
                 if not uniprot_ids:
                     continue
                 pathways = rc.get_drug_target_pathways(drug, uniprot_ids[:8])
                 if pathways:
-                    mech[f"reactome_pathways_{side}"] = _merge_records(mech.get(f"reactome_pathways_{side}"), pathways, limit=10)
-                    mech[f"pathways_{side}"] = _append_unique(
-                        mech.get(f"pathways_{side}"),
-                        _pathway_names(pathways),
-                        limit=24,
-                    )
-        except Exception as e:
-            caveats.append(f"Reactome enrichment failed: {e}")
+                    out[side] = pathways
+            return out
+
+        reactome = _run_parallel_source_tasks(
+            {"Reactome REST API": _reactome_rest},
+            timeout_s=rest_timeout_s,
+            caveats=caveats,
+            label="Reactome pathway enrichment",
+            max_workers=1,
+        ).get("Reactome REST API") or {}
+        for side in ("a", "b"):
+            pathways = reactome.get(side) or []
+            if pathways:
+                mech[f"reactome_pathways_{side}"] = _merge_records(mech.get(f"reactome_pathways_{side}"), pathways, limit=10)
+                mech[f"pathways_{side}"] = _append_unique(
+                    mech.get(f"pathways_{side}"),
+                    _pathway_names(pathways),
+                    limit=24,
+                )
 
     _ensure_enrichment_schema(mech)
     return mech
@@ -638,6 +759,289 @@ def _bool_qlever_contributed_raw(raw: Dict[str, Any]) -> bool:
     )
 
 
+def _collect_public_clinical_reference(
+    drugA: str,
+    drugB: str,
+    settings: Any,
+    caveats: List[str],
+) -> Dict[str, Any]:
+    reference: Dict[str, Any] = {
+        "rxnorm": {},
+        "openfda_label": {},
+        "dailymed": {},
+        "fda_ddi_reference": {},
+    }
+
+    timeout_s = _env_float("INFERMED_CLINICAL_REF_TIMEOUT_S", 20.0)
+    tasks: Dict[str, Callable[[], Any]] = {}
+
+    if settings.enable_rxnorm:
+        def _rxnorm_lookup() -> Dict[str, Any]:
+            from src.retrieval.rxnorm_client import RxNormClient
+
+            client = RxNormClient()
+            return {
+                "a": client.resolve_drug(drugA),
+                "b": client.resolve_drug(drugB),
+            }
+
+        tasks["RxNorm/RxClass API"] = _rxnorm_lookup
+
+    if settings.enable_openfda_label:
+        def _openfda_label_lookup() -> Dict[str, Any]:
+            from src.retrieval.openfda_label_client import OpenFDALabelClient
+
+            client = OpenFDALabelClient()
+            return {
+                "a": client.get_label(drugA),
+                "b": client.get_label(drugB),
+            }
+
+        tasks["openFDA Drug Label API"] = _openfda_label_lookup
+
+    if settings.enable_dailymed:
+        def _dailymed_lookup() -> Dict[str, Any]:
+            from src.retrieval.dailymed_client import DailyMedClient
+
+            client = DailyMedClient()
+            return {
+                "a": client.get_spl_metadata(drugA),
+                "b": client.get_spl_metadata(drugB),
+            }
+
+        tasks["DailyMed SPL API"] = _dailymed_lookup
+
+    def _fda_reference_lookup() -> Dict[str, Any]:
+        from src.retrieval.fda_reference import match_fda_ddi_reference
+
+        return {
+            "a": match_fda_ddi_reference(drugA),
+            "b": match_fda_ddi_reference(drugB),
+        }
+
+    tasks["FDA CYP/transporter reference"] = _fda_reference_lookup
+
+    results = _run_parallel_source_tasks(
+        tasks,
+        timeout_s=timeout_s,
+        caveats=caveats,
+        label="Public clinical reference lookup",
+        max_workers=4,
+    )
+    reference["rxnorm"] = results.get("RxNorm/RxClass API") or {}
+    reference["openfda_label"] = results.get("openFDA Drug Label API") or {}
+    reference["dailymed"] = results.get("DailyMed SPL API") or {}
+    reference["fda_ddi_reference"] = results.get("FDA CYP/transporter reference") or {}
+
+    return reference
+
+
+def _clinical_reference_has_content(reference: Dict[str, Any]) -> bool:
+    rxnorm = reference.get("rxnorm") or {}
+    labels = reference.get("openfda_label") or {}
+    dailymed = reference.get("dailymed") or {}
+    fda_ddi = reference.get("fda_ddi_reference") or {}
+    return bool(
+        any((rxnorm.get(side) or {}).get("resolved") for side in ("a", "b"))
+        or any((labels.get(side) or {}).get("found") for side in ("a", "b"))
+        or any((dailymed.get(side) or {}).get("found") for side in ("a", "b"))
+        or any((fda_ddi.get(side) or {}).get("matches") for side in ("a", "b"))
+    )
+
+
+def _rxnorm_id(reference: Dict[str, Any], side: str) -> Optional[str]:
+    value = (((reference.get("rxnorm") or {}).get(side) or {}).get("rxcui"))
+    if value:
+        return str(value)
+    label_rxcuis = (((reference.get("openfda_label") or {}).get(side) or {}).get("rxcui") or [])
+    if label_rxcuis:
+        return str(label_rxcuis[0])
+    return None
+
+
+def _research_seed_terms(mech: Dict[str, Any], *, limit: int = 16) -> List[str]:
+    seeds: List[Any] = []
+    for key in (
+        "uniprot_ids_a",
+        "uniprot_ids_b",
+        "uniprot_targets_a",
+        "uniprot_targets_b",
+        "targets_a",
+        "targets_b",
+        "kegg_enzymes_a",
+        "kegg_enzymes_b",
+    ):
+        seeds.extend(_iter_list(mech.get(key)))
+
+    enzymes = mech.get("enzymes") or {}
+    if isinstance(enzymes, Mapping):
+        for side in ("a", "b"):
+            roles = enzymes.get(side) or {}
+            if not isinstance(roles, Mapping):
+                continue
+            for role in ("substrate", "inhibitor", "inducer"):
+                seeds.extend(_iter_list(roles.get(role)))
+
+    cleaned: List[str] = []
+    for item in seeds:
+        if isinstance(item, Mapping):
+            for key in ("gene_names", "uniprot_id", "primaryAccession", "accession", "name", "protein_name", "enzyme_name"):
+                value = item.get(key)
+                if isinstance(value, list):
+                    cleaned.extend(str(v) for v in value)
+                elif value:
+                    cleaned.append(str(value))
+        else:
+            cleaned.append(str(item))
+
+    out: List[str] = []
+    seen: set[str] = set()
+    for text in cleaned:
+        text = re.sub(r"\s+", " ", str(text or "")).strip()
+        if not text or len(text) < 2:
+            continue
+        # STRING/BioGRID work best with gene/protein identifiers; very long labels
+        # are usually descriptions and make poor query seeds.
+        if len(text) > 64:
+            continue
+        key = text.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(text)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _collect_api_research_enrichment(
+    drugA: str,
+    drugB: str,
+    mech: Dict[str, Any],
+    settings: Any,
+    caveats: List[str],
+) -> Dict[str, Any]:
+    """Collect public API research context that supplements, but does not replace, PK/PD evidence."""
+    enrichment: Dict[str, Any] = {
+        "europe_pmc": {},
+        "fda_pgx": {},
+        "open_targets": {},
+        "stringdb": {},
+        "biogrid": {},
+        "drugcentral": {},
+        "local_bulk_sources": {
+            "nci_almanac": {
+                "enabled": bool(getattr(settings, "enable_nci_almanac", False)),
+                "runtime": "DuckDB parquet layer when nci_almanac.parquet is present.",
+                "scope": "Experimental oncology cell-line combination screen; hypothesis support only.",
+            },
+            "sider_nsides_offsides": {
+                "enabled": bool(getattr(settings, "enable_sider_nsides_offsides", False)),
+                "runtime": "DuckDB parquet layer when OFFSIDES/SIDER parquet files are present.",
+                "scope": "Adverse-event and label side-effect context, not causal incidence.",
+            },
+        },
+    }
+    timeout_s = _env_float("INFERMED_RESEARCH_API_TIMEOUT_S", 24.0)
+    seeds = _research_seed_terms(mech)
+    tasks: Dict[str, Callable[[], Any]] = {}
+
+    if getattr(settings, "enable_europe_pmc", False):
+        def _europe_pmc_lookup() -> Dict[str, Any]:
+            from src.retrieval.research_api_clients import EuropePMCClient
+
+            return EuropePMCClient().search_interaction_literature(drugA, drugB, limit=5)
+
+        tasks["Europe PMC REST API"] = _europe_pmc_lookup
+
+    if getattr(settings, "enable_fda_pgx", False):
+        def _fda_pgx_lookup() -> Dict[str, Any]:
+            from src.retrieval.research_api_clients import FDAPGxClient
+
+            return FDAPGxClient().get_pair_matches(drugA, drugB)
+
+        tasks["FDA PGx biomarker pages"] = _fda_pgx_lookup
+
+    if getattr(settings, "enable_open_targets", False):
+        def _open_targets_lookup() -> Dict[str, Any]:
+            from src.retrieval.research_api_clients import OpenTargetsClient
+
+            client = OpenTargetsClient()
+            protein_hits = {}
+            for seed in seeds[:4]:
+                protein_hits[seed] = client.search(seed, limit=3)
+            return {
+                "a": client.search(drugA, limit=5),
+                "b": client.search(drugB, limit=5),
+                "protein_seeds": protein_hits,
+            }
+
+        tasks["Open Targets GraphQL API"] = _open_targets_lookup
+
+    if getattr(settings, "enable_stringdb", False) and seeds:
+        def _string_lookup() -> Dict[str, Any]:
+            from src.retrieval.research_api_clients import StringDBClient
+
+            return StringDBClient(caller_identity=settings.string_caller_identity).get_network_summary(seeds[:12])
+
+        tasks["STRING API"] = _string_lookup
+
+    if getattr(settings, "enable_drugcentral", False):
+        def _drugcentral_lookup() -> Dict[str, Any]:
+            from src.retrieval.research_api_clients import DrugCentralClient
+
+            client = DrugCentralClient()
+            return {
+                "a": client.get_drug_summary(drugA, target_limit=12),
+                "b": client.get_drug_summary(drugB, target_limit=12),
+            }
+
+        tasks["DrugCentral DRS API"] = _drugcentral_lookup
+
+    if getattr(settings, "enable_biogrid", False):
+        def _biogrid_lookup() -> Dict[str, Any]:
+            from src.retrieval.research_api_clients import BioGRIDClient
+
+            return BioGRIDClient(access_key=settings.biogrid_access_key).get_interactions(seeds[:12])
+
+        tasks["BioGRID REST API"] = _biogrid_lookup
+
+    results = _run_parallel_source_tasks(
+        tasks,
+        timeout_s=timeout_s,
+        caveats=caveats,
+        label="API-first research enrichment",
+        max_workers=5,
+    )
+    enrichment["europe_pmc"] = results.get("Europe PMC REST API") or {}
+    enrichment["fda_pgx"] = results.get("FDA PGx biomarker pages") or {}
+    enrichment["open_targets"] = results.get("Open Targets GraphQL API") or {}
+    enrichment["stringdb"] = results.get("STRING API") or {}
+    enrichment["biogrid"] = results.get("BioGRID REST API") or {}
+    enrichment["drugcentral"] = results.get("DrugCentral DRS API") or {}
+    enrichment["query_seeds"] = seeds
+    return enrichment
+
+
+def _research_enrichment_has_content(enrichment: Dict[str, Any]) -> bool:
+    if not isinstance(enrichment, Mapping):
+        return False
+    europe = enrichment.get("europe_pmc") or {}
+    pgx = enrichment.get("fda_pgx") or {}
+    open_targets = enrichment.get("open_targets") or {}
+    stringdb = enrichment.get("stringdb") or {}
+    biogrid = enrichment.get("biogrid") or {}
+    drugcentral = enrichment.get("drugcentral") or {}
+    return bool(
+        (isinstance(europe, Mapping) and europe.get("found"))
+        or (isinstance(pgx, Mapping) and pgx.get("found"))
+        or any((open_targets.get(side) or {}).get("found") for side in ("a", "b"))
+        or (isinstance(stringdb, Mapping) and stringdb.get("found"))
+        or (isinstance(biogrid, Mapping) and biogrid.get("found"))
+        or any((drugcentral.get(side) or {}).get("found") for side in ("a", "b"))
+    )
+
+
 # ----------------- public pipeline -----------------
 def retrieve_and_normalize(
     drugA: str,
@@ -660,6 +1064,7 @@ def retrieve_and_normalize(
             parquet_dir,
             enable_drugbank=settings.enable_drugbank,
             enable_duckdb=settings.enable_duckdb,
+            enable_nci_almanac=settings.enable_nci_almanac,
         )
     except Exception as e:
         caveats.append(f"DuckDB init failed: {e}")
@@ -669,6 +1074,7 @@ def retrieve_and_normalize(
         parquet_dir,
         enable_drugbank=settings.enable_drugbank,
         enable_duckdb=settings.enable_duckdb,
+        enable_nci_almanac=settings.enable_nci_almanac,
     )
 
     a, b = drugA, drugB
@@ -680,6 +1086,7 @@ def retrieve_and_normalize(
     se_a_raw: List[str] = []
     se_b_raw: List[str] = []
     se_pair_raw: List[str] = []
+    nci_almanac_rows: List[Dict[str, Any]] = []
     db_targets_a: List[str] = []
     db_targets_b: List[str] = []
 
@@ -843,6 +1250,7 @@ def retrieve_and_normalize(
         dict_b = db.get_dictrank_score(b)
         diqt_a = db.get_diqt_score(a)
         diqt_b = db.get_diqt_score(b)
+        nci_almanac_rows = db.get_nci_almanac_pair(a, b, top_k=12) if hasattr(db, "get_nci_almanac_pair") else []
 
         # DrugBank targets (PD fallback) - use query expansion
         db_targets_a = []
@@ -978,6 +1386,13 @@ def retrieve_and_normalize(
     faers_b = _to_pairs_list(faers_b)
     faers_combo = _to_pairs_list(faers_combo)
 
+    # 5b) Public clinical authority and identity context.
+    clinical_reference = _collect_public_clinical_reference(a, b, settings, caveats)
+
+    # 5c) API-first research context. This supplements source review and
+    # hypothesis generation; it does not alter deterministic PK/PD scoring.
+    research_enrichment = _collect_api_research_enrichment(a, b, mech, settings, caveats)
+
     # 6) Build normalized context (matches llm_interface expectations)
     ql_contrib = _bool_qlever_contributed(mech)
 
@@ -1058,6 +1473,9 @@ def retrieve_and_normalize(
         available_sources = db.get_available_sources()
         duckdb_label_by_key = {
             "twosides": "TwoSides",
+            "offsides": "OFFSIDES",
+            "sider_label_side_effects": "SIDER",
+            "nci_almanac": "NCI-ALMANAC",
             "dilirank": "DILIrank",
             "dictrank": "DICTRank",
             "diqt": "DIQT",
@@ -1076,11 +1494,42 @@ def retrieve_and_normalize(
         api_sources.append("Reactome REST API")
     if settings.enable_chembl:
         api_sources.append("ChEMBL REST API")
+    if settings.enable_openfda_label:
+        api_sources.append("openFDA Drug Label API")
+    if settings.enable_dailymed:
+        api_sources.append("DailyMed SPL API")
+    if settings.enable_rxnorm:
+        api_sources.append("RxNorm/RxClass API")
+    if (clinical_reference.get("fda_ddi_reference") or {}).get("a", {}).get("matches") or (
+        clinical_reference.get("fda_ddi_reference") or {}
+    ).get("b", {}).get("matches"):
+        api_sources.append("FDA CYP/transporter reference")
+    if settings.enable_fda_pgx:
+        api_sources.append("FDA PGx biomarker pages")
+    if settings.enable_europe_pmc:
+        api_sources.append("Europe PMC REST API")
+    if settings.enable_open_targets:
+        api_sources.append("Open Targets GraphQL API")
+    if settings.enable_stringdb:
+        api_sources.append("STRING API")
+    if settings.enable_drugcentral:
+        api_sources.append("DrugCentral DRS API")
+    if settings.enable_biogrid:
+        api_sources.append("BioGRID REST API")
+
+    ids_a = dict(qlev.get("ids_a", {}) or mech.get("ids_a", {}) or {})
+    ids_b = dict(qlev.get("ids_b", {}) or mech.get("ids_b", {}) or {})
+    rxnorm_a = _rxnorm_id(clinical_reference, "a")
+    rxnorm_b = _rxnorm_id(clinical_reference, "b")
+    if rxnorm_a:
+        ids_a.setdefault("rxcui", rxnorm_a)
+    if rxnorm_b:
+        ids_b.setdefault("rxcui", rxnorm_b)
 
     context: Dict[str, Any] = {
         "drugs": {
-            "a": {"name": a, "synonyms": qlev.get("synonyms_a", []) or mech.get("synonyms_a", []), "ids": qlev.get("ids_a", {}) or mech.get("ids_a", {})},
-            "b": {"name": b, "synonyms": qlev.get("synonyms_b", []) or mech.get("synonyms_b", []), "ids": qlev.get("ids_b", {}) or mech.get("ids_b", {})},
+            "a": {"name": a, "synonyms": qlev.get("synonyms_a", []) or mech.get("synonyms_a", []), "ids": ids_a},
+            "b": {"name": b, "synonyms": qlev.get("synonyms_b", []) or mech.get("synonyms_b", []), "ids": ids_b},
         },
         "signals": {
             "tabular": {
@@ -1093,6 +1542,7 @@ def retrieve_and_normalize(
                 "dict_b": dict_b if dict_b is not None else "unknown",
                 "diqt_a": diqt_a,
                 "diqt_b": diqt_b,
+                "nci_almanac": nci_almanac_rows,
             },
             "mechanistic": mech,
             "faers": {
@@ -1100,6 +1550,8 @@ def retrieve_and_normalize(
                 "top_reactions_b": faers_b,
                 "combo_reactions": faers_combo,
             },
+            "clinical_reference": clinical_reference,
+            "research_enrichment": research_enrichment,
         },
         "caveats": caveats_agg,
         "pkpd": pkpd,
@@ -1118,11 +1570,13 @@ def retrieve_and_normalize(
         "meta": {
             "drug_pair": f"{drugA}|{drugB}",
             "pair_key": _pair_key(drugA, drugB),
-            "created_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+            "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
             "version": VERSION,
             "data_mode": settings.data_mode,
             "qlever_contributed_raw": ql_raw_contrib,
             "qlever_contributed": ql_contrib,
+            "clinical_reference_contributed": _clinical_reference_has_content(clinical_reference),
+            "research_enrichment_contributed": _research_enrichment_has_content(research_enrichment),
         },
     }
 
@@ -1402,6 +1856,8 @@ def _feedback_context_snapshot(context: Dict[str, Any], *, mode: Optional[str] =
     tabular = signals.get("tabular", {}) or {}
     faers = signals.get("faers", {}) or {}
     mechanistic = signals.get("mechanistic", {}) or {}
+    clinical_reference = signals.get("clinical_reference", {}) or {}
+    research_enrichment = signals.get("research_enrichment", {}) or {}
     pkpd = context.get("pkpd", {}) or {}
     meta = context.get("meta", {}) or {}
 
@@ -1441,6 +1897,32 @@ def _feedback_context_snapshot(context: Dict[str, Any], *, mode: Optional[str] =
             "targets_b": mechanistic.get("targets_b", [])[:10],
             "pathways_a": mechanistic.get("pathways_a", [])[:10],
             "pathways_b": mechanistic.get("pathways_b", [])[:10],
+            "clinical_reference": {
+                "rxnorm": clinical_reference.get("rxnorm", {}),
+                "openfda_label_found": {
+                    side: bool(((clinical_reference.get("openfda_label", {}) or {}).get(side) or {}).get("found"))
+                    for side in ("a", "b")
+                },
+                "dailymed_found": {
+                    side: bool(((clinical_reference.get("dailymed", {}) or {}).get(side) or {}).get("found"))
+                    for side in ("a", "b")
+                },
+            },
+            "research_enrichment": {
+                "europe_pmc_count": len(((research_enrichment.get("europe_pmc") or {}).get("articles") or []))
+                if isinstance(research_enrichment, Mapping)
+                else 0,
+                "fda_pgx_found": bool((research_enrichment.get("fda_pgx") or {}).get("found"))
+                if isinstance(research_enrichment, Mapping)
+                else False,
+                "stringdb_found": bool((research_enrichment.get("stringdb") or {}).get("found"))
+                if isinstance(research_enrichment, Mapping)
+                else False,
+                "opentargets_found": bool(
+                    isinstance(research_enrichment, Mapping)
+                    and any(((research_enrichment.get("open_targets") or {}).get(side) or {}).get("found") for side in ("a", "b"))
+                ),
+            },
         },
         "caveats": (context.get("caveats") or [])[:10],
     }

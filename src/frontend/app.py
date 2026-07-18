@@ -512,7 +512,7 @@ def _render_pair_inputs():
         <div id="interaction-search" class="product-shell">
           <div class="search-band">
             <div class="search-title">Search Drug-Drug Interactions</div>
-            <div class="search-subtitle">Enter two medicines to retrieve public evidence, risk signals, mechanisms, and a generated assessment.</div>
+            <div class="search-subtitle">Enter medicines to retrieve public evidence, risk signals, mechanisms, and a generated assessment.</div>
         """,
         unsafe_allow_html=True,
     )

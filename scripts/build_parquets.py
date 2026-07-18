@@ -4,6 +4,8 @@
 
 Supported datasets:
   - TWOSIDES CSV -> drug_a, drug_b, side_effect, prr
+  - OFFSIDES CSV -> drug_name, side_effect, prr
+  - SIDER label side effects -> drug_name, side_effect, source_label
   - DICTRank Excel -> drug_name, score
   - DILIrank Excel -> drug_name, dili_score
   - DIQT Excel -> drug_name, score
@@ -16,8 +18,9 @@ from __future__ import annotations
 
 import argparse
 import re
+import zipfile
 from pathlib import Path
-from typing import Iterable, List, Optional
+from typing import Dict, Iterable, List, Optional
 
 import pandas as pd
 
@@ -152,6 +155,231 @@ def convert_twosides_csv(csv_path: str, out_parquet: str) -> None:
 ################################################################################
 # DICTRank Excel â†’ Parquet
 ################################################################################
+
+def convert_offsides_csv(csv_path: str, out_parquet: str) -> None:
+    """Normalize OFFSIDES to: drug_name, side_effect, prr, mean_reporting_frequency."""
+    p = Path(csv_path)
+    assert p.exists(), f"CSV not found: {csv_path}"
+
+    df = pd.read_csv(p, compression="infer", low_memory=False)
+    cols = {c.lower(): c for c in df.columns}
+    name_col = cols.get("drug_concept_name") or cols.get("drug_name") or cols.get("drug")
+    se_col = cols.get("condition_concept_name") or cols.get("side_effect") or cols.get("adverse_event")
+    prr_col = cols.get("prr")
+    freq_col = cols.get("mean_reporting_frequency")
+    if not name_col or not se_col:
+        raise ValueError(f"OFFSIDES: could not infer drug and side-effect columns from {list(df.columns)}")
+
+    out = pd.DataFrame(
+        {
+            "drug_name": df[name_col].map(_norm_name_lower),
+            "side_effect": df[se_col].map(_norm_name),
+            "prr": pd.to_numeric(df[prr_col], errors="coerce") if prr_col else None,
+            "mean_reporting_frequency": pd.to_numeric(df[freq_col], errors="coerce") if freq_col else None,
+        }
+    )
+    for col in ("a", "b", "c", "d"):
+        if col in cols:
+            out[col.upper()] = pd.to_numeric(df[cols[col]], errors="coerce")
+    out = out.dropna(subset=["drug_name", "side_effect"])
+    out = out[(out["drug_name"] != "") & (out["side_effect"] != "")]
+    out = out.drop_duplicates(subset=["drug_name", "side_effect"])
+    Path(out_parquet).parent.mkdir(parents=True, exist_ok=True)
+    out.to_parquet(out_parquet, index=False)
+    print(f"[OK] OFFSIDES -> {out_parquet}  (rows={len(out)})")
+
+
+def convert_sider_label_side_effects(
+    drug_names_path: str,
+    label_side_effects_path: str,
+    out_parquet: str,
+) -> None:
+    """Normalize SIDER label side effects to: drug_name, stitch_id, side_effect, source_label."""
+    names_p = Path(drug_names_path)
+    se_p = Path(label_side_effects_path)
+    assert names_p.exists(), f"SIDER drug_names.tsv not found: {drug_names_path}"
+    assert se_p.exists(), f"SIDER label side-effects file not found: {label_side_effects_path}"
+
+    names = pd.read_csv(names_p, sep="\t", header=None, names=["stitch_id", "drug_name"], dtype=str)
+    name_map = dict(zip(names["stitch_id"], names["drug_name"].map(_norm_name_lower)))
+
+    df = pd.read_csv(
+        se_p,
+        sep="\t",
+        compression="infer",
+        header=None,
+        names=["source_label", "stitch_flat", "stitch_stereo", "umls_found", "meddra_type", "meddra_id", "side_effect"],
+        dtype=str,
+        low_memory=False,
+    )
+    df = df[df["meddra_type"].str.upper().eq("PT")]
+    flat_names = df["stitch_flat"].map(name_map)
+    stereo_names = df["stitch_stereo"].map(name_map)
+    drug_names = flat_names.fillna(stereo_names)
+    stitch_id = df["stitch_flat"].where(flat_names.notna(), df["stitch_stereo"])
+    out = pd.DataFrame(
+        {
+            "drug_name": drug_names,
+            "stitch_id": stitch_id,
+            "side_effect": df["side_effect"].map(_norm_name),
+            "source_label": df["source_label"].map(_norm_name),
+            "meddra_id": df["meddra_id"].map(_norm_name),
+        }
+    )
+    out = out.dropna(subset=["drug_name", "side_effect"])
+    out = out[(out["drug_name"] != "") & (out["side_effect"] != "")]
+    out = out.drop_duplicates(subset=["drug_name", "side_effect"])
+    Path(out_parquet).parent.mkdir(parents=True, exist_ok=True)
+    out.to_parquet(out_parquet, index=False)
+    print(f"[OK] SIDER label SE -> {out_parquet}  (rows={len(out)})")
+
+
+def _norm_nsc(value) -> Optional[str]:
+    if value is None or pd.isna(value):
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if text.endswith(".0"):
+        text = text[:-2]
+    return text
+
+
+def _load_nci_compound_names(compound_names_path: str) -> pd.DataFrame:
+    p = Path(compound_names_path)
+    assert p.exists(), f"NCI-ALMANAC compound names file not found: {compound_names_path}"
+    df = pd.read_csv(p, sep="\t", header=None, names=["nsc", "drug_name"], dtype=str)
+    out = pd.DataFrame(
+        {
+            "nsc": df["nsc"].map(_norm_nsc),
+            "drug_name": df["drug_name"].map(_norm_name_lower),
+            "display_name": df["drug_name"].map(_norm_name),
+        }
+    )
+    out = out.dropna(subset=["nsc", "drug_name"])
+    out = out[(out["nsc"] != "") & (out["drug_name"] != "")]
+    return out.drop_duplicates(subset=["nsc", "drug_name"]).reset_index(drop=True)
+
+
+def convert_nci_almanac_zip(
+    zip_path: str,
+    compound_names_path: str,
+    out_parquet: str,
+    compound_out_parquet: Optional[str] = None,
+    chunksize: int = 250_000,
+) -> None:
+    """Normalize NCI-ALMANAC growth-screen rows to parquet for DuckDB lookup.
+
+    Outputs:
+      - nci_almanac.parquet: pair/cell-line screen rows with canonical names and scores
+      - nci_almanac_compounds.parquet: NSC-to-name alias index for fast query resolution
+
+    NCI-ALMANAC score = expected growth - observed percent growth. Larger positive
+    values mean stronger-than-expected cell growth inhibition in this experimental assay.
+    """
+    zip_p = Path(zip_path)
+    assert zip_p.exists(), f"NCI-ALMANAC zip not found: {zip_path}"
+
+    out_p = Path(out_parquet)
+    compound_out_p = Path(compound_out_parquet) if compound_out_parquet else out_p.with_name("nci_almanac_compounds.parquet")
+    out_p.parent.mkdir(parents=True, exist_ok=True)
+    compound_out_p.parent.mkdir(parents=True, exist_ok=True)
+
+    compounds = _load_nci_compound_names(compound_names_path)
+    compounds.to_parquet(compound_out_p, index=False)
+    canonical_by_nsc: Dict[str, str] = compounds.drop_duplicates(subset=["nsc"], keep="first").set_index("nsc")["drug_name"].to_dict()
+    display_by_nsc: Dict[str, str] = compounds.drop_duplicates(subset=["nsc"], keep="first").set_index("nsc")["display_name"].to_dict()
+
+    try:
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+    except ImportError as exc:  # pragma: no cover - environment issue
+        raise RuntimeError("pyarrow is required for chunked NCI-ALMANAC parquet conversion") from exc
+
+    usecols = [
+        "COMBODRUGSEQ",
+        "SCREENER",
+        "STUDY",
+        "TESTDATE",
+        "PANELNBR",
+        "CELLNBR",
+        "NSC1",
+        "SAMPLE1",
+        "CONCINDEX1",
+        "CONC1",
+        "CONCUNIT1",
+        "NSC2",
+        "SAMPLE2",
+        "CONCINDEX2",
+        "CONC2",
+        "CONCUNIT2",
+        "PERCENTGROWTH",
+        "EXPECTEDGROWTH",
+        "SCORE",
+        "VALID",
+        "PANEL",
+        "CELLNAME",
+    ]
+
+    def normalize_chunk(chunk: pd.DataFrame) -> pd.DataFrame:
+        nsc_a = chunk["NSC1"].map(_norm_nsc)
+        nsc_b = chunk["NSC2"].map(_norm_nsc)
+        out = pd.DataFrame(
+            {
+                "combo_drug_seq": pd.to_numeric(chunk["COMBODRUGSEQ"], errors="coerce").astype("Int64"),
+                "screener": chunk["SCREENER"].map(_norm_name),
+                "study": chunk["STUDY"].map(_norm_name),
+                "test_date": chunk["TESTDATE"].map(_norm_name),
+                "panel_nbr": pd.to_numeric(chunk["PANELNBR"], errors="coerce").astype("Int64"),
+                "cell_nbr": pd.to_numeric(chunk["CELLNBR"], errors="coerce").astype("Int64"),
+                "drug_a": nsc_a.map(canonical_by_nsc),
+                "drug_b": nsc_b.map(canonical_by_nsc),
+                "drug_a_display": nsc_a.map(display_by_nsc),
+                "drug_b_display": nsc_b.map(display_by_nsc),
+                "nsc_a": nsc_a,
+                "nsc_b": nsc_b,
+                "sample_a": chunk["SAMPLE1"].map(_norm_nsc),
+                "sample_b": chunk["SAMPLE2"].map(_norm_nsc),
+                "conc_index_a": pd.to_numeric(chunk["CONCINDEX1"], errors="coerce").astype("Int64"),
+                "conc_index_b": pd.to_numeric(chunk["CONCINDEX2"], errors="coerce").astype("Int64"),
+                "conc_a": pd.to_numeric(chunk["CONC1"], errors="coerce"),
+                "conc_b": pd.to_numeric(chunk["CONC2"], errors="coerce"),
+                "conc_unit_a": chunk["CONCUNIT1"].map(_norm_name),
+                "conc_unit_b": chunk["CONCUNIT2"].map(_norm_name),
+                "percent_growth": pd.to_numeric(chunk["PERCENTGROWTH"], errors="coerce"),
+                "expected_growth": pd.to_numeric(chunk["EXPECTEDGROWTH"], errors="coerce"),
+                "score": pd.to_numeric(chunk["SCORE"], errors="coerce"),
+                "valid": chunk["VALID"].map(_norm_name),
+                "panel": chunk["PANEL"].map(_norm_name),
+                "cell_name": chunk["CELLNAME"].map(_norm_name),
+            }
+        )
+        return out.dropna(subset=["nsc_a", "nsc_b"]).reset_index(drop=True)
+
+    rows_written = 0
+    writer: Optional[pq.ParquetWriter] = None
+    with zipfile.ZipFile(zip_p) as zf:
+        names = [name for name in zf.namelist() if name.lower().endswith(".csv")]
+        if not names:
+            raise ValueError(f"NCI-ALMANAC zip has no CSV file: {zip_path}")
+        with zf.open(names[0]) as handle:
+            for chunk in pd.read_csv(handle, usecols=usecols, chunksize=chunksize, low_memory=False):
+                normalized = normalize_chunk(chunk)
+                if normalized.empty:
+                    continue
+                table = pa.Table.from_pandas(normalized, preserve_index=False)
+                if writer is None:
+                    writer = pq.ParquetWriter(out_p, table.schema, compression="zstd")
+                writer.write_table(table)
+                rows_written += len(normalized)
+    if writer is not None:
+        writer.close()
+    else:
+        pd.DataFrame(columns=["nsc_a", "nsc_b", "score"]).to_parquet(out_p, index=False)
+
+    print(f"[OK] NCI-ALMANAC -> {out_parquet}  (rows={rows_written})")
+    print(f"[OK] NCI-ALMANAC compounds -> {compound_out_p}  (rows={len(compounds)})")
+
 
 def convert_dictrank_excel(xlsx_path: str, out_parquet: str) -> None:
     """
@@ -388,6 +616,15 @@ def _build_cli() -> argparse.ArgumentParser:
     twosides.add_argument("--csv", required=True, help="Path to TWOSIDES CSV.")
     twosides.add_argument("--out", required=True, help="Output Parquet file path.")
 
+    offsides = sub.add_parser("offsides", help="Convert OFFSIDES CSV/XZ to Parquet.")
+    offsides.add_argument("--csv", required=True, help="Path to OFFSIDES.csv.xz or CSV.")
+    offsides.add_argument("--out", required=True, help="Output Parquet file path.")
+
+    sider = sub.add_parser("sider-label-se", help="Convert SIDER label side-effect TSV files to Parquet.")
+    sider.add_argument("--drug-names", required=True, help="Path to SIDER drug_names.tsv.")
+    sider.add_argument("--label-se", required=True, help="Path to SIDER meddra_all_label_se.tsv.gz.")
+    sider.add_argument("--out", required=True, help="Output Parquet file path.")
+
     dictrank = sub.add_parser("dictrank", help="Convert DICTRank Excel to Parquet.")
     dictrank.add_argument("--xlsx", required=True, help="Path to dictrank_dataset_508.xlsx.")
     dictrank.add_argument("--out", required=True, help="Output Parquet file path.")
@@ -400,6 +637,13 @@ def _build_cli() -> argparse.ArgumentParser:
     diqt.add_argument("--xlsx", required=True, help='Path to "diqt-drug information.xlsx".')
     diqt.add_argument("--out", required=True, help="Output Parquet file path.")
 
+    nci = sub.add_parser("nci-almanac", help="Convert NCI-ALMANAC combo growth zip to Parquet.")
+    nci.add_argument("--zip", required=True, help="Path to ComboDrugGrowth_Nov2017.zip.")
+    nci.add_argument("--compound-names", required=True, help="Path to ComboCompoundNames_all.txt.")
+    nci.add_argument("--out", required=True, help="Output NCI-ALMANAC Parquet file path.")
+    nci.add_argument("--compound-out", default=None, help="Output compound alias Parquet path. Defaults beside --out.")
+    nci.add_argument("--chunksize", type=int, default=250_000, help="CSV rows per conversion chunk.")
+
     return parser
 
 
@@ -407,12 +651,18 @@ def main(argv: Optional[List[str]] = None) -> None:
     args = _build_cli().parse_args(argv)
     if args.cmd == "twosides":
         convert_twosides_csv(args.csv, args.out)
+    elif args.cmd == "offsides":
+        convert_offsides_csv(args.csv, args.out)
+    elif args.cmd == "sider-label-se":
+        convert_sider_label_side_effects(args.drug_names, args.label_se, args.out)
     elif args.cmd == "dictrank":
         convert_dictrank_excel(args.xlsx, args.out)
     elif args.cmd == "dilirank":
         convert_dilirank_excel(args.xlsx, args.out)
     elif args.cmd == "diqt":
         convert_diqt_excel(args.xlsx, args.out)
+    elif args.cmd == "nci-almanac":
+        convert_nci_almanac_zip(args.zip, args.compound_names, args.out, args.compound_out, chunksize=args.chunksize)
     else:
         raise SystemExit(2)
 

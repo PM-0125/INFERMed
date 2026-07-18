@@ -42,16 +42,26 @@ def build_interaction_result(
     tabular = signals.get("tabular") or {}
     faers = signals.get("faers") or {}
     mechanistic = signals.get("mechanistic") or {}
+    research_enrichment = signals.get("research_enrichment") or {}
     pkpd = context.get("pkpd") or {}
 
     risk_summary = calculate_risk_summary(context)
     risk_level, risk_label, confidence = risk_summary
 
-    return {
-        "drugs": [
+    medication_set_drugs = drugs.get("set") if isinstance(drugs.get("set"), list) else None
+    if medication_set_drugs:
+        mapped_drugs = [
+            map_drug_identity(raw if isinstance(raw, dict) else {"name": str(raw)}, str((raw or {}).get("name") if isinstance(raw, dict) else raw))
+            for raw in medication_set_drugs
+        ]
+    else:
+        mapped_drugs = [
             map_drug_identity(drugs.get("a") or {}, fallback_drug_a),
             map_drug_identity(drugs.get("b") or {}, fallback_drug_b),
-        ],
+        ]
+
+    return {
+        "drugs": mapped_drugs,
         "risk": {
             "level": risk_level,
             "label": risk_label,
@@ -65,7 +75,7 @@ def build_interaction_result(
             "overview": build_overview_card(context, risk_summary),
             "openfda": build_openfda_card(faers),
             "internal": build_internal_card(tabular, pkpd),
-            "mechanisms": build_mechanisms_card(mechanistic, pkpd),
+            "mechanisms": build_mechanisms_card(mechanistic, pkpd, research_enrichment),
             "sources": build_sources_list(context),
             "references": build_references(context),
         },
@@ -80,10 +90,13 @@ def map_drug_identity(raw: Dict[str, Any], fallback_name: str) -> Dict[str, Any]
 
     pubchem_cid = ids.get("pubchem_cid") or ids.get("pubchem") or ids.get("cid")
     drugbank_id = ids.get("drugbank") or ids.get("drugbank_id")
+    rxcui = ids.get("rxcui") or ids.get("rxnorm")
     if pubchem_cid:
         out["pubchemCid"] = str(pubchem_cid)
     if drugbank_id:
         out["drugbankId"] = str(drugbank_id)
+    if rxcui:
+        out["rxcui"] = str(rxcui)
 
     aliases = [str(item).strip() for item in raw.get("synonyms", []) or [] if str(item).strip()]
     if aliases:
@@ -154,6 +167,8 @@ def has_decision_evidence(context: Dict[str, Any]) -> bool:
     if any(_coerce_float(tabular.get(key)) is not None for key in ("dili_a", "dili_b", "dict_a", "dict_b", "diqt_a", "diqt_b")):
         return True
     if any(tabular.get(key) for key in ("side_effects_a", "side_effects_b", "side_effects_pair")):
+        return True
+    if tabular.get("nci_almanac"):
         return True
     if any(faers.get(key) for key in ("top_reactions_a", "top_reactions_b", "combo_reactions")):
         return True
@@ -331,6 +346,8 @@ def build_internal_card(tabular: Dict[str, Any], pkpd: Dict[str, Any]) -> Dict[s
         rows.append({"title": "Drug A side-effect signals", "description": ", ".join(side_a[:MAX_SIDE_EFFECTS]), "meta": _returned_note(len(side_a))})
     if side_b:
         rows.append({"title": "Drug B side-effect signals", "description": ", ".join(side_b[:MAX_SIDE_EFFECTS]), "meta": _returned_note(len(side_b))})
+    nci_rows = _nci_rows(tabular.get("nci_almanac"))
+    rows.extend(nci_rows)
     if not rows:
         rows.append({"title": "No internal rows returned", "description": "No public parquet or canonical rows were available for this query.", "meta": "Internal"})
 
@@ -341,12 +358,17 @@ def build_internal_card(tabular: Dict[str, Any], pkpd: Dict[str, Any]) -> Dict[s
             {"label": "DILI", "value": _score_pair(tabular, "dili_a", "dili_b"), "tone": "neutral"},
             {"label": "DICT", "value": _score_pair(tabular, "dict_a", "dict_b"), "tone": "neutral"},
             {"label": "DIQT", "value": _score_pair(tabular, "diqt_a", "diqt_b"), "tone": "neutral"},
+            {"label": "NCI", "value": _returned_note(len(tabular.get("nci_almanac") or [])), "tone": "neutral"},
         ],
         "rows": rows,
     }
 
 
-def build_mechanisms_card(mechanistic: Dict[str, Any], pkpd: Dict[str, Any]) -> Dict[str, Any]:
+def build_mechanisms_card(
+    mechanistic: Dict[str, Any],
+    pkpd: Dict[str, Any],
+    research_enrichment: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     enzymes = mechanistic.get("enzymes") or {}
     rows: List[Dict[str, str]] = []
     for side_key, label in (("a", "Drug A enzymes"), ("b", "Drug B enzymes")):
@@ -412,6 +434,7 @@ def build_mechanisms_card(mechanistic: Dict[str, Any], pkpd: Dict[str, Any]) -> 
             rows.append({"title": title, "description": ", ".join(values[:MAX_TARGET_VALUES]), "meta": "KEGG"})
 
     rows.extend(_chembl_rows(mechanistic.get("chembl_enrichment")))
+    rows.extend(_research_mechanism_rows(research_enrichment or {}))
 
     if not rows:
         rows.append({"title": "No mechanism rows returned", "description": "No enzyme, target, or pathway rows were available from active sources.", "meta": "Mechanism"})
@@ -454,14 +477,108 @@ def build_sources_list(context: Dict[str, Any]) -> List[Dict[str, str]]:
 def build_references(context: Dict[str, Any]) -> List[Dict[str, str]]:
     rows: List[Dict[str, str]] = []
     drugs = context.get("drugs") or {}
+    clinical = ((context.get("signals") or {}).get("clinical_reference") or {})
+    research = ((context.get("signals") or {}).get("research_enrichment") or {})
     for side in ("a", "b"):
         drug = drugs.get(side) or {}
         name = str(drug.get("name") or f"Drug {side.upper()}")
         ids = drug.get("ids") or {}
         if ids.get("pubchem_cid"):
             rows.append({"title": f"{name} PubChem compound", "description": f"PubChem CID {ids['pubchem_cid']}", "meta": "PubChem"})
+        if ids.get("rxcui"):
+            rows.append({"title": f"{name} RxNorm concept", "description": f"RxCUI {ids['rxcui']}", "meta": "RxNorm"})
         if ids.get("drugbank"):
             rows.append({"title": f"{name} DrugBank record", "description": f"DrugBank ID {ids['drugbank']}", "meta": "Licensed if enabled"})
+
+        label = (((clinical.get("openfda_label") or {}).get(side) or {}))
+        if label.get("found"):
+            sections = label.get("sections") or {}
+            section_names = ", ".join(str(key).replace("_", " ") for key in list(sections.keys())[:4])
+            rows.append(
+                {
+                    "title": f"{name} openFDA label",
+                    "description": f"Effective time: {label.get('effective_time') or 'unknown'}; sections: {section_names or 'metadata only'}",
+                    "meta": "openFDA label",
+                }
+            )
+
+        dailymed = (((clinical.get("dailymed") or {}).get(side) or {}))
+        for record in (dailymed.get("records") or [])[:2]:
+            if not isinstance(record, dict):
+                continue
+            title = record.get("title") or record.get("set_id")
+            if title:
+                rows.append(
+                    {
+                        "title": f"{name} DailyMed SPL",
+                        "description": str(title),
+                        "meta": "DailyMed",
+                    }
+                )
+
+        fda_ref = (((clinical.get("fda_ddi_reference") or {}).get(side) or {}))
+        matches = fda_ref.get("matches") or []
+        if matches:
+            rows.append(
+                {
+                    "title": f"{name} FDA CYP/transporter reference",
+                    "description": f"{len(matches)} table row(s) matched the drug name in the local FDA DDI reference snapshot.",
+                    "meta": "FDA DDI",
+                }
+            )
+
+    europe_pmc = research.get("europe_pmc") if isinstance(research, dict) else {}
+    for article in (europe_pmc or {}).get("articles", [])[:5] if isinstance(europe_pmc, dict) else []:
+        if not isinstance(article, dict):
+            continue
+        title = str(article.get("title") or "Europe PMC article").strip()
+        year = str(article.get("year") or "").strip()
+        meta = "Europe PMC" + (f" {year}" if year else "")
+        rows.append(
+            {
+                "title": title,
+                "description": str(article.get("url") or article.get("doi") or article.get("pmid") or "Literature metadata result"),
+                "meta": meta,
+            }
+        )
+
+    pgx = research.get("fda_pgx") if isinstance(research, dict) else {}
+    if isinstance(pgx, dict) and pgx.get("found"):
+        for side, label in (("a", "Drug A"), ("b", "Drug B")):
+            for match in (pgx.get(side) or [])[:2]:
+                if not isinstance(match, dict):
+                    continue
+                rows.append(
+                    {
+                        "title": f"{label} FDA PGx page match",
+                        "description": str(match.get("snippet") or "FDA PGx page match"),
+                        "meta": "FDA PGx",
+                    }
+                )
+
+    drugcentral = research.get("drugcentral") if isinstance(research, dict) else {}
+    if isinstance(drugcentral, dict):
+        for side, label in (("a", "Drug A"), ("b", "Drug B")):
+            payload = drugcentral.get(side) or {}
+            if not isinstance(payload, dict) or not payload.get("found"):
+                continue
+            structure = payload.get("structure") or {}
+            title = structure.get("name") or payload.get("drug") or label
+            details = []
+            if structure.get("cas_reg_no"):
+                details.append(f"CAS {structure['cas_reg_no']}")
+            if structure.get("formula"):
+                details.append(str(structure["formula"]))
+            target_count = len(payload.get("targets") or [])
+            if target_count:
+                details.append(f"{target_count} target/activity row(s)")
+            rows.append(
+                {
+                    "title": f"{title} DrugCentral record",
+                    "description": "; ".join(details) or "DrugCentral API record",
+                    "meta": "DrugCentral",
+                }
+            )
 
     meta = context.get("meta") or {}
     if meta.get("created_at"):
@@ -480,6 +597,151 @@ def cited_cards_from_context(context: Dict[str, Any]) -> List[str]:
     if (context.get("signals") or {}).get("mechanistic"):
         cards.append("Mechanisms")
     return list(dict.fromkeys(cards))
+
+
+def _research_mechanism_rows(research: Dict[str, Any]) -> List[Dict[str, str]]:
+    rows: List[Dict[str, str]] = []
+    if not isinstance(research, dict):
+        return rows
+
+    stringdb = research.get("stringdb") or {}
+    if isinstance(stringdb, dict):
+        mapped = [
+            str(row.get("preferred_name") or row.get("query") or "").strip()
+            for row in (stringdb.get("mapped") or [])
+            if isinstance(row, dict)
+        ]
+        mapped = [value for value in mapped if value]
+        if mapped:
+            rows.append(
+                {
+                    "title": "STRING mapped protein seeds",
+                    "description": ", ".join(mapped[:MAX_TARGET_VALUES]),
+                    "meta": _returned_note(len(mapped)),
+                }
+            )
+        interactions = []
+        for row in (stringdb.get("interactions") or [])[:MAX_TARGET_VALUES]:
+            if not isinstance(row, dict):
+                continue
+            a = row.get("protein_a")
+            b = row.get("protein_b")
+            if a and b:
+                score = row.get("score")
+                interactions.append(f"{a}-{b}" + (f" score {score}" if score is not None else ""))
+        if interactions:
+            rows.append(
+                {
+                    "title": "STRING protein association context",
+                    "description": "; ".join(interactions),
+                    "meta": "Hypothesis context",
+                }
+            )
+
+    drugcentral = research.get("drugcentral") or {}
+    if isinstance(drugcentral, dict):
+        for side, label in (("a", "Drug A"), ("b", "Drug B")):
+            payload = drugcentral.get(side) or {}
+            if not isinstance(payload, dict) or not payload.get("found"):
+                continue
+            structure = payload.get("structure") or {}
+            targets = []
+            for row in (payload.get("targets") or [])[:MAX_TARGET_VALUES]:
+                if not isinstance(row, dict):
+                    continue
+                gene = str(row.get("gene") or "").strip()
+                target_name = str(row.get("target_name") or "").strip()
+                action = str(row.get("action_type") or row.get("act_type") or "").strip()
+                if gene or target_name:
+                    target = gene or target_name
+                    targets.append(target + (f" ({action})" if action else ""))
+            if targets:
+                title_name = structure.get("name") or payload.get("drug") or label
+                rows.append(
+                    {
+                        "title": f"DrugCentral target/activity context: {title_name}",
+                        "description": "; ".join(targets),
+                        "meta": "Mechanism support",
+                    }
+                )
+
+    open_targets = research.get("open_targets") or {}
+    if isinstance(open_targets, dict):
+        hits = []
+        for side in ("a", "b"):
+            payload = open_targets.get(side) or {}
+            if not isinstance(payload, dict):
+                continue
+            for row in (payload.get("hits") or [])[:4]:
+                if isinstance(row, dict):
+                    name = str(row.get("name") or row.get("id") or "").strip()
+                    entity = str(row.get("entity") or "").strip()
+                    if name:
+                        hits.append(name + (f" ({entity})" if entity else ""))
+        if hits:
+            rows.append(
+                {
+                    "title": "Open Targets search context",
+                    "description": ", ".join(hits[:MAX_TARGET_VALUES]),
+                    "meta": "Biology discovery",
+                }
+            )
+
+    biogrid = research.get("biogrid") or {}
+    if isinstance(biogrid, dict) and biogrid.get("interactions"):
+        interactions = []
+        for row in (biogrid.get("interactions") or [])[:MAX_TARGET_VALUES]:
+            if not isinstance(row, dict):
+                continue
+            a = row.get("interactor_a")
+            b = row.get("interactor_b")
+            system = row.get("experimental_system")
+            if a and b:
+                interactions.append(f"{a}-{b}" + (f" ({system})" if system else ""))
+        if interactions:
+            rows.append(
+                {
+                    "title": "BioGRID interaction context",
+                    "description": "; ".join(interactions),
+                    "meta": "Credentialed source",
+                }
+            )
+
+    return rows
+
+
+def _nci_rows(value: Any) -> List[Dict[str, str]]:
+    if not isinstance(value, list) or not value:
+        return []
+    rows: List[Dict[str, str]] = []
+    for item in value[:3]:
+        if not isinstance(item, dict):
+            continue
+        score = _display(item.get("score"), "NA")
+        panel = str(item.get("panel") or "unknown panel")
+        cell = str(item.get("cell_name") or "unknown cell")
+        expected = _display(item.get("expected_growth"), "NA")
+        observed = _display(item.get("percent_growth"), "NA")
+        rows.append(
+            {
+                "title": f"NCI-ALMANAC cell-line screen: {panel} / {cell}",
+                "description": (
+                    f"Score {score} = expected growth minus observed growth "
+                    f"(expected {expected}, observed {observed}). This is experimental oncology-screen evidence, "
+                    "not clinical DDI causality or dosing guidance."
+                ),
+                "meta": "NCI-ALMANAC",
+            }
+        )
+    if len(value) > 3:
+        rows.append(
+            {
+                "title": "NCI-ALMANAC additional rows",
+                "description": f"{len(value) - 3} more matching cell-line assay rows were returned.",
+                "meta": _returned_note(len(value)),
+            }
+        )
+    return rows
 
 
 def _reaction_rows(title: str, rows: List[Tuple[str, int]], *, shown: int = MAX_REACTION_ROWS) -> Tuple[List[Dict[str, str]], int]:

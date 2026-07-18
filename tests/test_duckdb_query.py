@@ -22,6 +22,9 @@ def test_missing_duckdb_dir_is_fail_soft(tmp_path, monkeypatch):
 
     assert c.get_available_sources() == {
         "twosides": False,
+        "offsides": False,
+        "sider_label_side_effects": False,
+        "nci_almanac": False,
         "dilirank": False,
         "dictrank": False,
         "diqt": False,
@@ -32,6 +35,7 @@ def test_missing_duckdb_dir_is_fail_soft(tmp_path, monkeypatch):
     assert c.get_dili_risk("warfarin") is None
     assert c.get_dict_rank("warfarin") == "unknown"
     assert c.get_diqt_score("warfarin") is None
+    assert c.get_nci_almanac_pair("warfarin", "fluconazole") == []
     assert c.get_drug_targets("warfarin") == []
     assert c.get_synonyms("warfarin") == []
 

@@ -4,6 +4,7 @@ pytest>=7.0.0   # (only if you want to install tests alongside)
 python-dotenv>=1.0.0  # For loading .env files
 streamlit>=1.28.0  # For the frontend
 pandas>=2.0.0  # For data handling
+pyarrow>=14.0.0  # For Parquet conversion and chunked local dataset builds
 plotly>=5.0.0  # For visualizations
 requests>=2.31.0  # For API calls
 sentence-transformers>=2.2.0  # For semantic search embeddings

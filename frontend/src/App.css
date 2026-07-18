@@ -476,6 +476,161 @@
   font-weight: 500;
 }
 
+.patient-context-panel {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid rgba(21,101,168,.14);
+  border-radius: 18px;
+  background: rgba(255,255,255,.78);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.72);
+}
+
+.patient-context-label {
+  color: var(--blue);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.patient-context-panel input,
+.patient-context-panel select {
+  min-width: 128px;
+  height: 34px;
+  padding: 0 11px;
+  color: var(--ink);
+  background: var(--surface-card);
+  border: 1px solid rgba(21,101,168,.18);
+  border-radius: 12px;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 650;
+  outline: none;
+}
+
+.patient-context-panel input {
+  min-width: 72px;
+  max-width: 92px;
+}
+
+.patient-context-panel input:focus,
+.patient-context-panel select:focus {
+  border-color: var(--cyan);
+  box-shadow: 0 0 0 3px rgba(0,156,210,.12);
+}
+
+.analysis-progress {
+  margin-top: 22px;
+  border-top: 1px solid var(--line);
+  padding-top: 16px;
+  display: grid;
+  gap: 8px;
+}
+
+.analysis-progress-row {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  color: var(--muted);
+}
+
+.analysis-progress-row span {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--cyan-pale);
+  color: var(--blue);
+  font-size: 11px;
+  font-weight: 900;
+  border: 1px solid var(--cyan-mid);
+}
+
+.analysis-progress-row p {
+  margin: 2px 0 0;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.reasoning-strip {
+  margin: 14px 20px 0;
+  padding: 14px;
+  border: 1px solid rgba(0,156,210,.18);
+  border-radius: var(--r-lg);
+  background:
+    radial-gradient(circle at 8% 0%, rgba(125,212,237,.18), transparent 35%),
+    linear-gradient(135deg, rgba(245,252,255,.96), rgba(246,253,249,.92));
+}
+
+.reasoning-strip-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.reasoning-strip-head strong {
+  color: var(--navy);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.reasoning-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.reasoning-card {
+  min-height: 96px;
+  padding: 12px;
+  border: 1px solid rgba(21,101,168,.16);
+  border-radius: var(--r-md);
+  background: rgba(255,255,255,.82);
+}
+
+.reasoning-card.cluster {
+  border-color: rgba(20,122,71,.20);
+  background: rgba(239,250,244,.82);
+}
+
+.reasoning-card.hypothesis {
+  border-color: rgba(181,94,10,.18);
+  background: rgba(255,248,237,.82);
+}
+
+.reasoning-card span {
+  display: block;
+  color: var(--ink-mid);
+  font-size: 10px;
+  font-weight: 950;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+
+.reasoning-card strong {
+  display: block;
+  color: var(--navy);
+  font-size: 13px;
+  font-weight: 900;
+  line-height: 1.3;
+}
+
+.reasoning-card p {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 /* ============================================================
    WORKSPACE WRAP — main content, edge-to-edge
    ============================================================ */
@@ -1975,9 +2130,32 @@
 }
 
 .architecture-panel,
+.reasoning-architecture-panel,
 .data-source-panel {
   display: grid;
   gap: 18px;
+}
+
+.reasoning-architecture-head {
+  display: grid;
+  grid-template-columns: minmax(0, .72fr) minmax(420px, .48fr);
+  gap: 22px;
+  align-items: end;
+}
+
+.reasoning-architecture-head p {
+  color: var(--ink-mid);
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.reasoning-architecture-panel .mermaid-diagram {
+  min-height: 370px;
+  background:
+    radial-gradient(circle at 17% 22%, rgba(7,152,197,.12), transparent 28%),
+    radial-gradient(circle at 50% 82%, rgba(168,82,10,.08), transparent 25%),
+    radial-gradient(circle at 84% 30%, rgba(180,35,24,.08), transparent 28%),
+    var(--surface-raised);
 }
 
 .mermaid-diagram {
@@ -2350,6 +2528,60 @@
   --source-accent: #C1F8FF;
   --source-ridge: rgba(4,138,164,.18);
 }
+.source-explainer-card.fda-pgx {
+  --source-bg: linear-gradient(135deg, #DCEAF8 0%, #EEF6FC 50%, #FFFFFF 100%);
+  --source-border: #8AB6DA;
+  --source-ink: #185C91;
+  --source-deep: #185C91;
+  --source-mid: #2D7FBA;
+  --source-accent: #C6ECFF;
+  --source-ridge: rgba(45,127,186,.17);
+}
+.source-explainer-card.europe-pmc {
+  --source-bg: linear-gradient(135deg, #DCEFF7 0%, #F0F8FB 52%, #FFFFFF 100%);
+  --source-border: #88BED4;
+  --source-ink: #17637B;
+  --source-deep: #17637B;
+  --source-mid: #2F8EA9;
+  --source-accent: #C7F0F8;
+  --source-ridge: rgba(47,142,169,.16);
+}
+.source-explainer-card.opentargets {
+  --source-bg: linear-gradient(135deg, #D7F0E5 0%, #ECF8F2 52%, #FFFFFF 100%);
+  --source-border: #79C8A2;
+  --source-ink: #126B44;
+  --source-deep: #126B44;
+  --source-mid: #229D65;
+  --source-accent: #C2F2D8;
+  --source-ridge: rgba(34,157,101,.16);
+}
+.source-explainer-card.stringdb {
+  --source-bg: linear-gradient(135deg, #E4F1CD 0%, #F4FAE8 52%, #FFFFFF 100%);
+  --source-border: #A8C96A;
+  --source-ink: #557316;
+  --source-deep: #557316;
+  --source-mid: #7BA326;
+  --source-accent: #DDF4A8;
+  --source-ridge: rgba(123,163,38,.17);
+}
+.source-explainer-card.drugcentral {
+  --source-bg: linear-gradient(135deg, #D8E4F9 0%, #EEF4FF 52%, #FFFFFF 100%);
+  --source-border: #8AA5DA;
+  --source-ink: #244F9B;
+  --source-deep: #244F9B;
+  --source-mid: #3F6EC8;
+  --source-accent: #CADCFF;
+  --source-ridge: rgba(63,110,200,.17);
+}
+.source-explainer-card.biogrid {
+  --source-bg: linear-gradient(135deg, #E7DCF9 0%, #F4EEFC 52%, #FFFFFF 100%);
+  --source-border: #B391DA;
+  --source-ink: #68469B;
+  --source-deep: #68469B;
+  --source-mid: #8B62C8;
+  --source-accent: #E0CEFF;
+  --source-ridge: rgba(139,98,200,.17);
+}
 .source-explainer-card.chembl {
   --source-bg: linear-gradient(135deg, #DFD5FF 0%, #F1ECFF 52%, #FFFFFF 100%);
   --source-border: #9E84E6;
@@ -2394,6 +2626,15 @@
   --source-mid: #526C78;
   --source-accent: #C7E6F3;
   --source-ridge: rgba(82,108,120,.18);
+}
+.source-explainer-card.planned-local {
+  --source-bg: linear-gradient(135deg, #E2EAF0 0%, #F2F6F8 52%, #FFFFFF 100%);
+  --source-border: #9BAFBA;
+  --source-ink: #36515F;
+  --source-deep: #36515F;
+  --source-mid: #607A88;
+  --source-accent: #D5EDF7;
+  --source-ridge: rgba(96,122,136,.18);
 }
 
 .research-use {
@@ -2706,6 +2947,7 @@
   .research-hero,
   .research-hero-body,
   .research-section-head,
+  .reasoning-architecture-head,
   .data-source-head,
   .research-use { grid-template-columns: 1fr; }
   .research-pillar-grid,
@@ -2771,6 +3013,7 @@
     width: 52px;
     height: 52px;
   }
+  .reasoning-architecture-head,
   .data-source-head { gap: 10px; }
   .search-hero {
     margin: 12px 14px 0;
@@ -3179,6 +3422,7 @@
   --source-bg: linear-gradient(135deg, rgba(21,101,168,.26), var(--surface-raised));
   --source-border: rgba(125,212,237,.35);
   --source-ink: #8ED9F0;
+  --source-deep: #8ED9F0;
 }
 
 [data-theme="dark"] .source-explainer-card.pubchem,
@@ -3186,12 +3430,38 @@
   --source-bg: linear-gradient(135deg, rgba(7,152,197,.24), var(--surface-raised));
   --source-border: rgba(125,212,237,.36);
   --source-ink: #7DD4ED;
+  --source-deep: #7DD4ED;
+}
+
+[data-theme="dark"] .source-explainer-card.fda-pgx,
+[data-theme="dark"] .source-explainer-card.europe-pmc {
+  --source-bg: linear-gradient(135deg, rgba(47,142,169,.22), var(--surface-raised));
+  --source-border: rgba(125,212,237,.34);
+  --source-ink: #9ADCEF;
+  --source-deep: #9ADCEF;
+}
+
+[data-theme="dark"] .source-explainer-card.opentargets,
+[data-theme="dark"] .source-explainer-card.stringdb {
+  --source-bg: linear-gradient(135deg, rgba(34,157,101,.22), var(--surface-raised));
+  --source-border: rgba(109,205,163,.34);
+  --source-ink: #91E6BE;
+  --source-deep: #91E6BE;
+}
+
+[data-theme="dark"] .source-explainer-card.drugcentral,
+[data-theme="dark"] .source-explainer-card.biogrid {
+  --source-bg: linear-gradient(135deg, rgba(84,104,190,.24), var(--surface-raised));
+  --source-border: rgba(174,190,255,.34);
+  --source-ink: #BBC8FF;
+  --source-deep: #BBC8FF;
 }
 
 [data-theme="dark"] .source-explainer-card.chembl {
   --source-bg: linear-gradient(135deg, rgba(110,82,204,.24), var(--surface-raised));
   --source-border: rgba(185,167,240,.38);
   --source-ink: #C5B8FF;
+  --source-deep: #C5B8FF;
 }
 
 [data-theme="dark"] .source-explainer-card.uniprot,
@@ -3199,6 +3469,7 @@
   --source-bg: linear-gradient(135deg, rgba(20,122,71,.24), var(--surface-raised));
   --source-border: rgba(109,205,163,.34);
   --source-ink: #8DE2B8;
+  --source-deep: #8DE2B8;
 }
 
 [data-theme="dark"] .source-explainer-card.kegg,
@@ -3206,6 +3477,14 @@
   --source-bg: linear-gradient(135deg, rgba(168,82,10,.24), var(--surface-raised));
   --source-border: rgba(244,184,111,.36);
   --source-ink: #F4B86F;
+  --source-deep: #F4B86F;
+}
+
+[data-theme="dark"] .source-explainer-card.planned-local {
+  --source-bg: linear-gradient(135deg, rgba(96,122,136,.24), var(--surface-raised));
+  --source-border: rgba(174,199,210,.34);
+  --source-ink: #BBD6E3;
+  --source-deep: #BBD6E3;
 }
 
 [data-theme="dark"] .source-type,

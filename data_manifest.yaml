@@ -1,3 +1,48 @@
+runtime:
+  # Data/runtime controls live here. Keep secrets, provider keys, LLM decode
+  # parameters, and QLever endpoints in .env.
+  data_mode: local_dev
+  data_manifest_path: data_manifest.yaml
+
+  paths:
+    duckdb_dir: data/duckdb
+    openfda_cache_dir: data/cache/openfda
+
+  cache:
+    backend: sqlite
+    sqlite_cache_path: data/cache/infermed_cache.sqlite
+    enable_event_store: true
+
+  source_settings:
+    openfda_ttl_days: 30
+    chembl_timeout_s: 20
+
+  sources:
+    duckdb: true
+    drugbank: true
+    qlever: false
+    openfda: true
+    openfda_label: true
+    dailymed: true
+    rxnorm: true
+    pubchem_rest: true
+    pubchem_pugview: true
+    chembl: true
+    kegg: true
+    reactome: true
+    uniprot: true
+    fda_pgx: true
+    europe_pmc: true
+    open_targets: true
+    stringdb: true
+    biogrid: true
+    drugcentral: true
+    nci_almanac: true
+    sider_nsides_offsides: true
+    canonical_pkpd: true
+    semantic_search: false
+    reranking: false
+
 datasets:
   twosides:
     file: data/duckdb/twosides.parquet
@@ -6,6 +51,22 @@ datasets:
     enabled_in_public_safe: true
     required: false
     source_label: TWOSIDES
+
+  offsides:
+    file: data/duckdb/offsides.parquet
+    backend: duckdb
+    visibility: public
+    enabled_in_public_safe: true
+    required: false
+    source_label: OFFSIDES
+
+  sider_label_side_effects:
+    file: data/duckdb/sider_label_side_effects.parquet
+    backend: duckdb
+    visibility: public
+    enabled_in_public_safe: true
+    required: false
+    source_label: SIDER label side effects
 
   dilirank:
     file: data/duckdb/dilirank.parquet
@@ -38,3 +99,35 @@ datasets:
     enabled_in_public_safe: false
     required: false
     source_label: DrugBank local dataset
+
+  nci_almanac:
+    file: data/duckdb/nci_almanac.parquet
+    backend: duckdb
+    visibility: public_research
+    enabled_in_public_safe: false
+    required: false
+    source_label: NCI-ALMANAC
+
+  nci_almanac_raw:
+    file: data/raw/nci_almanac/ComboDrugGrowth_Nov2017.zip
+    backend: local_snapshot
+    visibility: public_research
+    enabled_in_public_safe: false
+    required: false
+    source_label: NCI-ALMANAC raw rebuild input
+
+  sider_raw:
+    file: data/raw/sider/meddra_all_se.tsv.gz
+    backend: local_snapshot
+    visibility: public
+    enabled_in_public_safe: true
+    required: false
+    source_label: SIDER raw snapshot
+
+  offsides_raw:
+    file: data/raw/nsides/OFFSIDES.csv.xz
+    backend: local_snapshot
+    visibility: public
+    enabled_in_public_safe: true
+    required: false
+    source_label: OFFSIDES raw snapshot

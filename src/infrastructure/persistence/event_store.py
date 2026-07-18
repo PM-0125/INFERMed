@@ -91,6 +91,18 @@ class SQLiteEventStore:
                 )
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS analysis_snapshot (
+                    analysis_id TEXT PRIMARY KEY,
+                    context_json TEXT NOT NULL,
+                    decision_json TEXT NOT NULL,
+                    response_read_model_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
             conn.execute("CREATE INDEX IF NOT EXISTS idx_domain_event_analysis ON domain_event(analysis_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_evidence_card_analysis ON evidence_card(analysis_id)")
 
@@ -212,6 +224,59 @@ class SQLiteEventStore:
                 ),
             )
 
+    def append_analysis_snapshot(
+        self,
+        *,
+        analysis_id: str,
+        context: dict[str, Any],
+        decision: dict[str, Any],
+        response_read_model: dict[str, Any],
+    ) -> None:
+        now = utc_now()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO analysis_snapshot
+                    (
+                        analysis_id, context_json, decision_json,
+                        response_read_model_json, created_at, updated_at
+                    )
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(analysis_id) DO UPDATE SET
+                    context_json = excluded.context_json,
+                    decision_json = excluded.decision_json,
+                    response_read_model_json = excluded.response_read_model_json,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    analysis_id,
+                    json.dumps(context, sort_keys=True, ensure_ascii=False, default=str),
+                    json.dumps(decision, sort_keys=True, ensure_ascii=False, default=str),
+                    json.dumps(response_read_model, sort_keys=True, ensure_ascii=False, default=str),
+                    now,
+                    now,
+                ),
+            )
+
+    def get_analysis_snapshot(self, analysis_id: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT context_json, decision_json, response_read_model_json, updated_at
+                FROM analysis_snapshot
+                WHERE analysis_id = ?
+                """,
+                (analysis_id,),
+            ).fetchone()
+        if not row:
+            return None
+        return {
+            "context": json.loads(row[0]),
+            "decision": json.loads(row[1]),
+            "response_read_model": json.loads(row[2]),
+            "updated_at": row[3],
+        }
+
     def list_events(self, analysis_id: str) -> list[dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute(
@@ -235,4 +300,3 @@ class SQLiteEventStore:
             }
             for row in rows
         ]
-

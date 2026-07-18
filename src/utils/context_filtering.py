@@ -131,6 +131,12 @@ def filter_context_by_relevance(
             # FAERS data is already top-K truncated, so we keep it as-is
             # but could filter if needed
             filtered_context["signals"]["faers"] = faers
+
+        # Preserve source-specific sections that are not relevance-ranked here
+        # (for example label, RxNorm, DailyMed, and FDA reference evidence).
+        for key, value in signals.items():
+            if key not in filtered_context["signals"]:
+                filtered_context["signals"][key] = value
     
     # Preserve other context sections
     for key in ["drugs", "caveats", "pkpd", "sources", "source_status", "meta"]:

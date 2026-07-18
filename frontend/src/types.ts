@@ -70,12 +70,32 @@ export interface InteractionResult {
   sourceBadges: string[]
   assessment: AssessmentSection[]
   evidence: EvidenceBundle
+  analysisId?: string
+  executedPairs?: string[][]
+  pairResults?: Array<{
+    pair: string[]
+    decision?: {
+      risk_level: string
+      confidence: string
+      evidence_grade: string
+    }
+    evidence_card_count?: number
+  }>
+  ndrugReasoning?: {
+    pair_count?: number
+    top_pairs?: Array<{ pair?: string[]; risk_level?: string; confidence?: string; evidence_grade?: string }>
+    clusters?: Array<{ label?: string; risk_type?: string; confidence?: string; affected_drugs?: string[] }>
+    evidence_gaps?: Record<string, string[]>
+    hypotheses?: Array<{ statement?: string; support_level?: string; affected_drugs?: string[] }>
+    research_signals?: Array<{ label?: string; support?: string; source_names?: string[]; limitations?: string[] }>
+  }
 }
 
 export interface AnalyzeRequest {
   drugs: string[]
   mode: AudienceMode
   refreshEvidence?: boolean
+  patient_context?: Record<string, unknown>
 }
 
 export interface FollowUpRequest {
@@ -83,6 +103,7 @@ export interface FollowUpRequest {
   drugs: string[]
   mode: AudienceMode
   contextId?: string
+  patient_context?: Record<string, unknown>
   history?: Array<{ role: 'user' | 'assistant'; text: string }>
   priorAssessment?: string
   followUpCount?: number
@@ -91,4 +112,13 @@ export interface FollowUpRequest {
 export interface FollowUpResponse {
   answer: string
   citedCards: string[]
+}
+
+export interface AnalysisProgressEvent {
+  type: 'progress' | 'result' | 'error'
+  stage?: string
+  message?: string
+  payload?: Record<string, unknown>
+  result?: InteractionResult
+  detail?: string
 }

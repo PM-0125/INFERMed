@@ -4,6 +4,21 @@ import shutil
 import tempfile
 import pytest
 
+
+@pytest.fixture(autouse=True)
+def reset_settings_cache(monkeypatch):
+    monkeypatch.setenv("INFERMED_ALLOW_DATA_ENV_OVERRIDES", "true")
+    try:
+        from src.config.settings import get_settings, _load_data_config
+
+        get_settings.cache_clear()
+        _load_data_config.cache_clear()
+        yield
+        get_settings.cache_clear()
+        _load_data_config.cache_clear()
+    except Exception:
+        yield
+
 @pytest.fixture(scope="session")
 def parquet_dir():
     p = os.getenv("DUCKDB_DIR", "").strip()

@@ -4,6 +4,7 @@ import plotly.graph_objs as go
 
 from src.retrieval import openfda_api
 from src.retrieval.openfda_api import OpenFDAClient, FaersQuery
+from src.utils.caching import load_text
 
 CACHE_SUBDIR = "openfda"
 
@@ -66,15 +67,15 @@ def test_fetch_openfda_summary_real(client):
     summary = client.fetch_openfda_summary('ibuprofen', limit=2)
     assert isinstance(summary, str)
     assert summary.startswith('FDA report') or 'No recent FDA event reports' in summary
-    summary_file = Path(client.cache_dir) / f'{openfda_api.CACHE_VERSION}__ibuprofen__summary.json'
-    assert summary_file.exists()
+    cache_key = f'{openfda_api.CACHE_VERSION}__ibuprofen__summary'
+    assert load_text(client.cache_dir, cache_key, ttl=client.ttl_seconds) == summary
 
 
 def test_fetch_openfda_summary_unknown(client):
     msg = client.fetch_openfda_summary('gibberishdrugxyz', limit=1)
     assert msg.startswith('No recent FDA event reports found for gibberishdrugxyz.')
-    summary_file = Path(client.cache_dir) / f'{openfda_api.CACHE_VERSION}__gibberishdrugxyz__summary.json'
-    assert summary_file.exists()
+    cache_key = f'{openfda_api.CACHE_VERSION}__gibberishdrugxyz__summary'
+    assert load_text(client.cache_dir, cache_key, ttl=client.ttl_seconds) == msg
 
 
 def test_plot_helpers(client):

@@ -49,6 +49,8 @@ DEFAULT_TEMPLATES: Dict[str, str] = {
         "- PK summary: {{PK_SUMMARY}}\n"
         "- PD summary: {{PD_SUMMARY}}\n"
         "- Real-world signal summary (FAERS, associative only): {{FAERS_SUMMARY}}\n"
+        "- Clinical label/reference context: {{CLINICAL_REFERENCE}}\n"
+        "- Research/API enrichment context: {{RESEARCH_ENRICHMENT}}\n"
         "- Risk flags (PRR, DILI, DICT, DIQT): {{RISK_FLAGS}}\n"
         "- Mechanistic evidence (enzymes/targets/pathways, possibly with PDB-like IDs): {{EVIDENCE_TABLE}}\n"
         "- Sources: {{SOURCES}}\n"
@@ -73,6 +75,8 @@ DEFAULT_TEMPLATES: Dict[str, str] = {
         "CONTEXT (simplified):\n"
         "- How they may affect each other: {{PK_SUMMARY}} / {{PD_SUMMARY}}\n"
         "- Side effects seen in reports (association only): {{FAERS_SUMMARY}}\n"
+        "- Clinical label/reference context: {{CLINICAL_REFERENCE}}\n"
+        "- Research/API enrichment context: {{RESEARCH_ENRICHMENT}}\n"
         "- Risk flags: {{RISK_FLAGS}}\n"
         "- Sources: {{SOURCES}}\n"
         "- Prior discussion: {{HISTORY}}\n"
@@ -96,6 +100,8 @@ DEFAULT_TEMPLATES: Dict[str, str] = {
         "- PK: {{PK_SUMMARY}}\n"
         "- PD: {{PD_SUMMARY}}\n"
         "- FAERS (associative only): {{FAERS_SUMMARY}}\n"
+        "- Clinical label/reference context: {{CLINICAL_REFERENCE}}\n"
+        "- Research/API enrichment context: {{RESEARCH_ENRICHMENT}}\n"
         "- Risk flags: {{RISK_FLAGS}}\n"
         "- Mechanistic evidence snapshot: {{EVIDENCE_TABLE}}\n"
         "- Sources: {{SOURCES}}\n"
@@ -649,16 +655,28 @@ def build_prompt(
     user_question = _extract_user_question(context, history)
     if not user_question or not user_question.strip():
         mode_lower = (mode or "").lower()
+        medication_set = (context or {}).get("medication_set") or {}
+        medset_drugs = medication_set.get("drugs") or []
+        is_medication_set = len(medset_drugs) > 2
         if mode_lower in {"patient", "pt"}:
-            blocks["USER_QUESTION"] = f"Can I take {blocks.get('DRUG_A', 'drug A')} and {blocks.get('DRUG_B', 'drug B')} together?"
+            if is_medication_set:
+                blocks["USER_QUESTION"] = f"Can I take this medication set together: {', '.join(medset_drugs)}?"
+            else:
+                blocks["USER_QUESTION"] = f"Can I take {blocks.get('DRUG_A', 'drug A')} and {blocks.get('DRUG_B', 'drug B')} together?"
         elif (
             mode_lower in {"pharma", "pv", "safety", "pharmacovigilance", "pharmaceuticals", "research"}
             or "pharmacovigilance" in mode_lower
             or "research" in mode_lower
         ):
-            blocks["USER_QUESTION"] = f"Prepare a risk brief for {blocks.get('DRUG_A', 'drug A')} + {blocks.get('DRUG_B', 'drug B')}."
+            if is_medication_set:
+                blocks["USER_QUESTION"] = f"Prepare a medication-set risk brief for: {', '.join(medset_drugs)}."
+            else:
+                blocks["USER_QUESTION"] = f"Prepare a risk brief for {blocks.get('DRUG_A', 'drug A')} + {blocks.get('DRUG_B', 'drug B')}."
         else:
-            blocks["USER_QUESTION"] = f"Evaluate potential interactions between {blocks.get('DRUG_A', 'drug A')} and {blocks.get('DRUG_B', 'drug B')} and provide a clinician-facing summary."
+            if is_medication_set:
+                blocks["USER_QUESTION"] = f"Evaluate potential interactions across this medication set: {', '.join(medset_drugs)}."
+            else:
+                blocks["USER_QUESTION"] = f"Evaluate potential interactions between {blocks.get('DRUG_A', 'drug A')} and {blocks.get('DRUG_B', 'drug B')} and provide a clinician-facing summary."
     else:
         blocks["USER_QUESTION"] = user_question
     blocks["RAW_CONTEXT_JSON"] = _compact_json(context, max_chars=3000)
@@ -799,6 +817,8 @@ CONTEXT:
 - PK summary: {blocks.get("PK_SUMMARY", "(no PK evidence)")}
 - PD summary: {blocks.get("PD_SUMMARY", "(no PD evidence)")}
 - FAERS summary, associative only: {blocks.get("FAERS_SUMMARY", "No FAERS evidence.")}
+- Clinical label/reference context: {blocks.get("CLINICAL_REFERENCE", "(no label/reference evidence)")}
+- Research/API enrichment context: {blocks.get("RESEARCH_ENRICHMENT", "(no research enrichment evidence)")}
 - Risk flags: {blocks.get("RISK_FLAGS", "(no risk flags)")}
 - Mechanistic evidence: {blocks.get("EVIDENCE_TABLE", "(no evidence table)")}
 - Sources: {blocks.get("SOURCES", "(no sources listed)")}
@@ -949,13 +969,22 @@ def _compact_text(value: str, max_chars: int) -> str:
 # ========== Context summarization & truncation ==========
 def _summarize_context(ctx: Dict[str, Any], mode: str) -> Dict[str, str]:
     drugs = ctx.get("drugs", {}) or {}
-    drug_a = (drugs.get("a", {}) or {}).get("name", "Drug A")
-    drug_b = (drugs.get("b", {}) or {}).get("name", "Drug B")
+    medication_set = ctx.get("medication_set") or {}
+    medset_drugs = medication_set.get("drugs") or []
+    if len(medset_drugs) > 2:
+        drug_a = "Medication set"
+        drug_b = ", ".join(str(item) for item in medset_drugs)
+    else:
+        drug_a = (drugs.get("a", {}) or {}).get("name", "Drug A")
+        drug_b = (drugs.get("b", {}) or {}).get("name", "Drug B")
 
+    medication_set_txt = _format_medication_set(ctx)
     pk_txt, pk_len, pk_prio = _format_pk(ctx)
     pk_meta_txt = _format_pk_meta(ctx)  # NEW: PK metadata from PubChem
     pd_txt, pd_len, pd_prio = _format_pd(ctx)
     faers_txt, faers_len = _format_faers(ctx, limit=5)
+    clinical_reference_txt = _format_clinical_reference(ctx)
+    research_enrichment_txt = _format_research_enrichment(ctx)
     flags_txt = _format_flags(ctx)
     table_txt = _format_evidence_table(ctx, mode)
     sources_txt = _format_sources(ctx)
@@ -967,10 +996,13 @@ def _summarize_context(ctx: Dict[str, Any], mode: str) -> Dict[str, str]:
         budget = 1500
 
     parts: List[Tuple[str, int, int, str]] = [
+        ("MedicationSet", len(medication_set_txt), 1, medication_set_txt),
         ("PK", pk_len, pk_prio, pk_txt),
         ("PK_META", len(pk_meta_txt), 2, pk_meta_txt),  # NEW: PK metadata (high priority, after PK)
         ("PD", pd_len, pd_prio, pd_txt),
         ("FAERS", faers_len, 5, faers_txt),
+        ("ClinicalReference", len(clinical_reference_txt), 4, clinical_reference_txt),
+        ("ResearchEnrichment", len(research_enrichment_txt), 6, research_enrichment_txt),
         ("Flags", len(flags_txt), 10, flags_txt),
         ("Table", len(table_txt), 20, table_txt),
         ("Sources", len(sources_txt), 50, sources_txt),
@@ -1017,10 +1049,13 @@ def _summarize_context(ctx: Dict[str, Any], mode: str) -> Dict[str, str]:
     return {
         "DRUG_A": drug_a,
         "DRUG_B": drug_b,
+        "MEDICATION_SET_SUMMARY": g("MedicationSet", ""),
         "PK_SUMMARY": g("PK", "(no PK evidence)"),
         "PK_META": g("PK_META", ""),  # NEW: PK metadata from PubChem (empty if not available)
         "PD_SUMMARY": g("PD", "(no PD evidence)"),
         "FAERS_SUMMARY": g("FAERS", "No evidence from FAERS."),
+        "CLINICAL_REFERENCE": g("ClinicalReference", "(no label/reference evidence)"),
+        "RESEARCH_ENRICHMENT": g("ResearchEnrichment", "(no research enrichment evidence)"),
         "RISK_FLAGS": g("Flags", "(no tabular risk flags)"),
         "EVIDENCE_TABLE": g("Table", "(no evidence table)"),
         "SOURCES": g("Sources", "(no sources listed)"),
@@ -1029,6 +1064,212 @@ def _summarize_context(ctx: Dict[str, Any], mode: str) -> Dict[str, str]:
     }
 
 # ========== Formatting helpers ==========
+def _format_medication_set(ctx: Dict[str, Any]) -> str:
+    medication_set = ctx.get("medication_set") or {}
+    if not isinstance(medication_set, dict):
+        return ""
+    drugs = medication_set.get("drugs") or []
+    pairs = medication_set.get("top_pairs") or medication_set.get("evaluated_pairs") or []
+    if not drugs and not pairs:
+        return ""
+
+    parts: List[str] = []
+    if drugs:
+        parts.append(f"Medication set: {', '.join(str(item) for item in drugs)}")
+    if pairs:
+        pair_bits = []
+        for row in pairs[:8]:
+            if not isinstance(row, dict):
+                continue
+            pair = row.get("pair") or []
+            pair_label = " + ".join(str(item) for item in pair)
+            risk = row.get("risk_level") or "unknown"
+            confidence = row.get("confidence") or "low"
+            pk = _compact_text(str(row.get("pk_summary") or ""), 140)
+            pd = _compact_text(str(row.get("pd_summary") or ""), 120)
+            pair_bits.append(f"{pair_label}: risk={risk}, confidence={confidence}, PK={pk or 'none'}, PD={pd or 'none'}")
+        if pair_bits:
+            parts.append("Pair ranking: " + " || ".join(pair_bits))
+    patient_context = medication_set.get("patient_context") or {}
+    if isinstance(patient_context, dict) and patient_context:
+        parts.append("Patient context supplied: " + _compact_text(json.dumps(patient_context, ensure_ascii=False, default=str), 500))
+    return " || ".join(parts)
+
+
+def _format_clinical_reference(ctx: Dict[str, Any]) -> str:
+    clinical = ((ctx.get("signals") or {}).get("clinical_reference") or {})
+    if not isinstance(clinical, dict):
+        return ""
+
+    parts: List[str] = []
+
+    rxnorm = clinical.get("rxnorm") or {}
+    for side, label in (("a", "A"), ("b", "B")):
+        payload = rxnorm.get(side) or {}
+        if not isinstance(payload, dict) or not payload.get("resolved"):
+            continue
+        cls = payload.get("classes") or []
+        class_names = []
+        for row in cls[:4]:
+            if isinstance(row, dict) and row.get("class_name"):
+                class_names.append(str(row["class_name"]))
+        detail = f"{label} RxCUI={payload.get('rxcui')} name={payload.get('name')}"
+        if class_names:
+            detail += " classes=" + ", ".join(class_names[:4])
+        parts.append(detail)
+
+    labels = clinical.get("openfda_label") or {}
+    for side, label in (("a", "A"), ("b", "B")):
+        payload = labels.get(side) or {}
+        if not isinstance(payload, dict) or not payload.get("found"):
+            continue
+        sections = payload.get("sections") or {}
+        section_parts = []
+        for key in ("boxed_warning", "contraindications", "drug_interactions", "warnings_and_cautions", "clinical_pharmacology"):
+            text = str(sections.get(key) or "").strip()
+            if text:
+                section_parts.append(f"{key}: {_compact_text(text, 240)}")
+        if section_parts:
+            parts.append(f"{label} openFDA label ({payload.get('effective_time') or 'date unknown'}): " + " | ".join(section_parts[:3]))
+
+    dailymed = clinical.get("dailymed") or {}
+    for side, label in (("a", "A"), ("b", "B")):
+        payload = dailymed.get(side) or {}
+        records = payload.get("records") if isinstance(payload, dict) else None
+        if not records:
+            continue
+        first = records[0]
+        if isinstance(first, dict):
+            title = first.get("title") or first.get("set_id")
+            if title:
+                parts.append(f"{label} DailyMed SPL record: {title}")
+
+    fda_ddi = clinical.get("fda_ddi_reference") or {}
+    for side, label in (("a", "A"), ("b", "B")):
+        payload = fda_ddi.get(side) or {}
+        matches = payload.get("matches") if isinstance(payload, dict) else None
+        if not matches:
+            continue
+        row_summaries = []
+        for match in matches[:3]:
+            if not isinstance(match, dict):
+                continue
+            row = match.get("row") or {}
+            row_summaries.append("; ".join(f"{k}={v}" for k, v in list(row.items())[:3] if v))
+        if row_summaries:
+            parts.append(f"{label} FDA CYP/transporter table match: " + " / ".join(row_summaries))
+
+    return " || ".join(parts[:8])
+
+
+def _format_research_enrichment(ctx: Dict[str, Any]) -> str:
+    enrichment = ((ctx.get("signals") or {}).get("research_enrichment") or {})
+    if not isinstance(enrichment, dict):
+        return ""
+
+    parts: List[str] = []
+
+    literature = enrichment.get("europe_pmc") or {}
+    if isinstance(literature, dict) and literature.get("articles"):
+        article_bits = []
+        for row in (literature.get("articles") or [])[:3]:
+            if not isinstance(row, dict):
+                continue
+            title = _compact_text(row.get("title") or "", 120)
+            year = str(row.get("year") or "").strip()
+            if title:
+                article_bits.append(f"{title}" + (f" ({year})" if year else ""))
+        if article_bits:
+            parts.append("Europe PMC literature metadata: " + " | ".join(article_bits))
+
+    pgx = enrichment.get("fda_pgx") or {}
+    if isinstance(pgx, dict) and pgx.get("found"):
+        snippets = []
+        for side in ("a", "b"):
+            for row in (pgx.get(side) or [])[:2]:
+                if isinstance(row, dict) and row.get("snippet"):
+                    snippets.append(_compact_text(str(row["snippet"]), 160))
+        if snippets:
+            parts.append("FDA PGx page matches: " + " | ".join(snippets[:3]))
+
+    stringdb = enrichment.get("stringdb") or {}
+    if isinstance(stringdb, dict) and stringdb.get("found"):
+        mapped = []
+        for row in (stringdb.get("mapped") or [])[:5]:
+            if isinstance(row, dict):
+                mapped.append(str(row.get("preferred_name") or row.get("query") or "").strip())
+        interactions = []
+        for row in (stringdb.get("interactions") or [])[:3]:
+            if isinstance(row, dict):
+                a = row.get("protein_a")
+                b = row.get("protein_b")
+                if a and b:
+                    interactions.append(f"{a}-{b} score={row.get('score')}")
+        detail = []
+        if mapped:
+            detail.append("mapped proteins=" + ", ".join([m for m in mapped if m][:5]))
+        if interactions:
+            detail.append("protein associations=" + "; ".join(interactions))
+        if detail:
+            parts.append("STRING hypothesis context: " + " | ".join(detail))
+
+    drugcentral = enrichment.get("drugcentral") or {}
+    if isinstance(drugcentral, dict):
+        drugcentral_bits = []
+        for side in ("a", "b"):
+            payload = drugcentral.get(side) or {}
+            if not isinstance(payload, dict) or not payload.get("found"):
+                continue
+            structure = payload.get("structure") or {}
+            label = structure.get("name") or payload.get("drug") or side
+            targets = []
+            for row in (payload.get("targets") or [])[:4]:
+                if not isinstance(row, dict):
+                    continue
+                gene = row.get("gene")
+                action = row.get("action_type") or row.get("act_type")
+                if gene:
+                    targets.append(str(gene) + (f" ({action})" if action else ""))
+            if targets:
+                drugcentral_bits.append(f"{label}: " + ", ".join(targets))
+        if drugcentral_bits:
+            parts.append("DrugCentral target/activity context: " + " | ".join(drugcentral_bits))
+
+    open_targets = enrichment.get("open_targets") or {}
+    if isinstance(open_targets, dict):
+        hits = []
+        for side in ("a", "b"):
+            payload = open_targets.get(side) or {}
+            if not isinstance(payload, dict):
+                continue
+            for row in (payload.get("hits") or [])[:3]:
+                if isinstance(row, dict):
+                    name = row.get("name") or row.get("id")
+                    entity = row.get("entity")
+                    if name:
+                        hits.append(f"{name}" + (f" ({entity})" if entity else ""))
+        if hits:
+            parts.append("Open Targets search hits: " + ", ".join(hits[:6]))
+
+    biogrid = enrichment.get("biogrid") or {}
+    if isinstance(biogrid, dict):
+        if biogrid.get("interactions"):
+            rows = []
+            for row in (biogrid.get("interactions") or [])[:3]:
+                if isinstance(row, dict):
+                    a = row.get("interactor_a")
+                    b = row.get("interactor_b")
+                    system = row.get("experimental_system")
+                    if a and b:
+                        rows.append(f"{a}-{b}" + (f" ({system})" if system else ""))
+            if rows:
+                parts.append("BioGRID interaction context: " + "; ".join(rows))
+        elif biogrid.get("reason"):
+            parts.append("BioGRID unavailable: " + str(biogrid.get("reason")))
+
+    return " || ".join(parts[:8])
+
+
 def _format_pk_meta(ctx: Dict[str, Any]) -> str:
     """
     Format PK metadata from PubChem (qualitative properties like logP, molecular weight, etc.)
@@ -1247,6 +1488,12 @@ def _format_flags(ctx: Dict[str, Any]) -> str:
         f"DIQT(A)={val('diqt_a','NA')}",
         f"DIQT(B)={val('diqt_b','NA')}",
     ]
+    nci_rows = tab.get("nci_almanac") or []
+    if isinstance(nci_rows, list) and nci_rows:
+        top_score = nci_rows[0].get("score") if isinstance(nci_rows[0], dict) else None
+        flags.append(f"NCI-ALMANAC(rows)={len(nci_rows)}")
+        if top_score is not None:
+            flags.append(f"NCI-ALMANAC(top_score)={top_score}")
     return ", ".join(flags)
 
 def _format_evidence_table(ctx: Dict[str, Any], mode: str) -> str:
@@ -1336,8 +1583,40 @@ def _format_evidence_table(ctx: Dict[str, Any], mode: str) -> str:
 
     if chembl_summary:
         lines.append(f"ChEMBL activity: {chembl_summary}")
+
+    nci_summary = _format_nci_almanac(ctx)
+    if nci_summary:
+        lines.append(nci_summary)
     
     return " | ".join(lines)
+
+
+def _format_nci_almanac(ctx: Dict[str, Any]) -> str:
+    tab = (ctx.get("signals", {}) or {}).get("tabular", {}) or {}
+    rows = tab.get("nci_almanac") or []
+    if not isinstance(rows, list) or not rows:
+        return ""
+
+    parts: List[str] = []
+    for row in rows[:3]:
+        if not isinstance(row, dict):
+            continue
+        score = row.get("score")
+        panel = row.get("panel") or "unknown panel"
+        cell = row.get("cell_name") or "unknown cell"
+        expected = row.get("expected_growth")
+        observed = row.get("percent_growth")
+        text = f"{panel}/{cell}: score={score}"
+        if expected is not None and observed is not None:
+            text += f" (expected_growth={expected}, observed_growth={observed})"
+        parts.append(text)
+    if not parts:
+        return ""
+    return (
+        "NCI-ALMANAC experimental combo screen: "
+        + "; ".join(parts)
+        + ". Score means expected growth minus observed growth; use as oncology cell-line hypothesis evidence, not clinical DDI causality."
+    )
 
 
 def _format_pathway_records(value: Any) -> List[str]:

@@ -66,6 +66,7 @@ class FollowUpRequest(BaseModel):
     drugs: list[str] = Field(min_length=2)
     mode: AudienceMode = "doctor"
     contextId: Optional[str] = None
+    patient_context: Optional[dict[str, Any]] = None
     history: list[ConversationTurn] = Field(default_factory=list, max_length=6)
     priorAssessment: Optional[str] = Field(default=None, max_length=4000)
     followUpCount: int = Field(default=0, ge=0, le=3)

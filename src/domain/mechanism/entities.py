@@ -33,6 +33,9 @@ class MechanismCluster:
     confidence: MechanismConfidence = "unknown"
     evidence_ids: list[str] = field(default_factory=list)
 
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
 
 @dataclass(frozen=True)
 class MechanismGraph:
@@ -42,4 +45,3 @@ class MechanismGraph:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
-

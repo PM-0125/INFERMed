@@ -31,6 +31,7 @@ data/raw/
 data/private/
 data/duckdb/
 data/cache/
+data/reference/
 data/openfda/
 data/pubchem/
 data/pubchem_list/
@@ -74,3 +75,4 @@ frontend/public/icons.svg
 
 # Streamlit local secrets
 .streamlit/secrets.toml
+TESTCASES/

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent, KeyboardEvent, ReactNode } from 'react'
 import type { Group, Vector3 } from 'three'
 import './App.css'
-import { analyzeInteraction, askFollowUp } from './api'
+import { analyzeInteractionStream, askFollowUp } from './api'
 import type { AudienceMode, EvidenceBundle, EvidenceMetric, EvidenceRow, InteractionResult } from './types'
 
 /* ─── Inline markdown renderer ────────────────────────────────────────────── */
@@ -93,6 +93,14 @@ const SUGGESTIONS = [
 const MAX_FOLLOWUPS = 3
 
 type ThreadTurn = { role: 'user'|'assistant'; text: string; cards?: string[] }
+type ProgressTurn = { stage: string; message: string }
+type PatientContextDraft = {
+  age: string
+  renal_function: string
+  hepatic_function: string
+  qt_risk: string
+  current_inr: string
+}
 
 function compactForFollowUp(text: string, maxChars: number): string {
   const compact = text.replace(/\s+/g, ' ').trim()
@@ -118,6 +126,16 @@ function summarizeAssessmentForFollowUp(result: InteractionResult): string {
   )
 }
 
+function patientContextPayload(draft: PatientContextDraft): Record<string, unknown> | undefined {
+  const payload: Record<string, unknown> = {}
+  if (draft.age.trim()) payload.age = Number(draft.age)
+  if (draft.renal_function) payload.renal_function = draft.renal_function
+  if (draft.hepatic_function) payload.hepatic_function = draft.hepatic_function
+  if (draft.qt_risk) payload.qt_risk = draft.qt_risk
+  if (draft.current_inr.trim()) payload.current_inr = Number(draft.current_inr)
+  return Object.keys(payload).length ? payload : undefined
+}
+
 const PAPER_URL = 'https://link.springer.com/chapter/10.1007/978-3-032-23241-0_9'
 const STRUCTURE_ID = '6Z4B'
 const STRUCTURE_URL = `https://files.rcsb.org/download/${STRUCTURE_ID}.pdb`
@@ -126,12 +144,16 @@ const ARCHITECTURE_MERMAID = `
 flowchart LR
   OpenFDA((OpenFDA)):::clinical
   PubChem((PubChem)):::chem
-  BioDB((ChEMBL / UniProt / KEGG / Reactome)):::bio
-  LocalDB[(Local database<br/>TWOSIDES, DILIrank<br/>Dict, DIQT)]:::local
+  BioDB((ChEMBL / UniProt<br/>KEGG / Reactome)):::bio
+  ResearchAPI((Europe PMC<br/>Open Targets<br/>STRING / DrugCentral)):::bio
+  PgX((FDA PGx<br/>DailyMed / RxNorm)):::clinical
+  LocalDB[(Local database<br/>TWOSIDES, DILIrank<br/>DICT, DIQT)]:::local
 
   OpenFDA --> Retriever
   PubChem --> Retriever
   BioDB --> Retriever
+  ResearchAPI --> Retriever
+  PgX --> Retriever
   LocalDB --> Retriever
 
   Retriever[Retrieval + entity resolution]:::retrieval
@@ -153,6 +175,34 @@ flowchart LR
   classDef reasoning fill:#FFFFFF,stroke:#147A47,color:#0C2D45,stroke-width:2px
   classDef answer fill:#FFFFFF,stroke:#1565A8,color:#0C2D45,stroke-width:2px
   classDef evidence fill:#FFFFFF,stroke:#A8520A,color:#0C2D45,stroke-width:2px
+`
+
+const GRAPH_REASONING_MERMAID = `
+flowchart LR
+  Sources[(Normalized evidence<br/>cards + provenance)]:::context
+  Profile[Drug profile graph<br/>Identifiers, structures<br/>enzymes, transporters<br/>targets, pathways<br/>events, toxicities, labels]:::profile
+  Reasoning{Pair / N-drug<br/>reasoning layer}:::reasoning
+  Hypotheses[Known status + hypotheses<br/>PK overlap, PD overlap<br/>toxicity convergence<br/>uncertainty and gaps]:::hypothesis
+  Agent[Agentic LLM layer<br/>tool outputs only<br/>role-specific explanation]:::agent
+  Critic{Critic / safety gate<br/>dose support<br/>causality overclaim<br/>hypothesis scope}:::critic
+  UI[Evidence-first UI<br/>answer beside cards<br/>profile gaps + sources]:::ui
+
+  Sources --> Profile
+  Profile --> Reasoning
+  Reasoning --> Hypotheses
+  Hypotheses --> Agent
+  Sources --> Agent
+  Agent --> Critic
+  Critic --> UI
+  Sources --> UI
+
+  classDef context fill:#FAFCFD,stroke:#8DA5B4,color:#0C2D45,stroke-width:2px
+  classDef profile fill:#E0F5FC,stroke:#0798C5,color:#0C2D45,stroke-width:2px
+  classDef reasoning fill:#E6F5EE,stroke:#147A47,color:#0C2D45,stroke-width:2px
+  classDef hypothesis fill:#FEF3E4,stroke:#A8520A,color:#0C2D45,stroke-width:2px
+  classDef agent fill:#EBF4FB,stroke:#1565A8,color:#0C2D45,stroke-width:2px
+  classDef critic fill:#FDE7E7,stroke:#B42318,color:#0C2D45,stroke-width:2px
+  classDef ui fill:#FFFFFF,stroke:#0A8DAE,color:#0C2D45,stroke-width:2px
 `
 
 const RESEARCH_PILLARS = [
@@ -289,6 +339,63 @@ const DATA_SOURCE_CARDS: DataSourceCard[] = [
     links: [{ label: 'Reactome official page', href: 'https://reactome.org/' }],
   },
   {
+    id: 'fda-pgx',
+    name: 'FDA PGx tables',
+    type: 'Live public page lookup',
+    icon: 'protein',
+    contains: 'FDA pharmacogenomic biomarker and pharmacogenetic association tables linking medicines, biomarkers, and labeling context.',
+    contributes: 'Adds pharmacogenomic context when a queried medicine appears in FDA PGx reference pages. INFERMed treats this as label/context enrichment, not as a standalone DDI rule.',
+    links: [
+      { label: 'FDA biomarker table', href: 'https://www.fda.gov/medical-devices/precision-medicine/table-pharmacogenomic-biomarkers-drug-labeling' },
+      { label: 'FDA pharmacogenetic associations', href: 'https://www.fda.gov/drugs/science-and-research-drugs/table-pharmacogenetic-associations' },
+    ],
+  },
+  {
+    id: 'europe-pmc',
+    name: 'Europe PMC',
+    type: 'Live literature metadata',
+    icon: 'database',
+    contains: 'Biomedical literature metadata from Europe PMC, including article titles, identifiers, journals, years, and links to source records.',
+    contributes: 'Surfaces pair-specific literature discovery context beside the model answer, so researchers can inspect whether claims deserve deeper article review.',
+    links: [{ label: 'Europe PMC official page', href: 'https://europepmc.org/' }],
+  },
+  {
+    id: 'opentargets',
+    name: 'Open Targets',
+    type: 'Live target discovery',
+    icon: 'protein',
+    contains: 'Open Targets Platform entity search and evidence discovery across targets, diseases, drugs, and biological associations.',
+    contributes: 'Helps connect drug names and mechanism seeds to target-level research context without treating search hits as proof of a drug-drug interaction.',
+    links: [{ label: 'Open Targets Platform', href: 'https://platform.opentargets.org/' }],
+  },
+  {
+    id: 'stringdb',
+    name: 'STRING',
+    type: 'Live protein network context',
+    icon: 'pathway',
+    contains: 'Protein association networks and confidence scores assembled from experimental, computational, and curated evidence channels.',
+    contributes: 'Provides hypothesis context around protein seeds returned by UniProt, KEGG, Reactome, or local mechanism layers.',
+    links: [{ label: 'STRING official page', href: 'https://string-db.org/' }],
+  },
+  {
+    id: 'drugcentral',
+    name: 'DrugCentral',
+    type: 'Live drug-target context',
+    icon: 'database',
+    contains: 'Drug structures, identifiers, approval metadata, and target/activity rows exposed through the public DrugCentral DRS API.',
+    contributes: 'Adds mechanism-oriented drug-target context beside ChEMBL, UniProt, KEGG, Reactome, and STRING without treating target rows as clinical DDI proof.',
+    links: [{ label: 'DrugCentral official page', href: 'https://drugcentral.org/' }],
+  },
+  {
+    id: 'biogrid',
+    name: 'BioGRID',
+    type: 'Credentialed live API',
+    icon: 'reaction',
+    contains: 'Curated genetic and protein interaction records from BioGRID, available through an access-key protected REST service.',
+    contributes: 'Adds optional gene/protein interaction context when a BioGRID key is configured. It remains hypothesis support, not direct clinical DDI evidence.',
+    links: [{ label: 'BioGRID official page', href: 'https://thebiogrid.org/' }],
+  },
+  {
     id: 'local',
     name: 'Local database',
     type: 'Curated safety layer',
@@ -310,6 +417,19 @@ const DATA_SOURCE_CARDS: DataSourceCard[] = [
     contains: 'A fast SPARQL engine with hosted PubChem endpoints and support for large linked-data query workloads.',
     contributes: 'Acts as an optional acceleration layer for RDF retrieval; it improves performance but is not the source of biological truth by itself.',
     links: [{ label: 'QLever official page', href: 'https://qlever.dev/' }],
+  },
+  {
+    id: 'planned-local',
+    name: 'Local research snapshots',
+    type: 'Not bundled with Git',
+    icon: 'rdf',
+    contains: 'NCI-ALMANAC, SIDER, nSIDES/OFFSIDES, PubChem RDF indexes, and other large snapshots when their terms and deployment boundaries are satisfied.',
+    contributes: 'These sources expand research-grade local review, but INFERMed keeps bulk or licensed artifacts outside the public repository and prefers REST/API access where available.',
+    links: [
+      { label: 'NCI-ALMANAC', href: 'https://wiki.nci.nih.gov/display/NCIDTPdata/NCI-ALMANAC' },
+      { label: 'SIDER', href: 'https://sideeffects.embl.de/download/' },
+      { label: 'nSIDES', href: 'https://nsides.io/' },
+    ],
   },
 ]
 
@@ -497,7 +617,7 @@ function InfermedRelayBackdrop() {
   )
 }
 
-function SkeletonLoader() {
+function SkeletonLoader({ progress }: { progress: ProgressTurn[] }) {
   return (
     <div className="workspace-grid">
       <div className="answer-panel">
@@ -510,6 +630,15 @@ function SkeletonLoader() {
           <div key={w} className="skeleton-block" style={{ height:15, width:`${w}%`, marginBottom:10 }} />
         ))}
         <div className="skeleton-block" style={{ height:15, width:'55%' }} />
+        <div className="analysis-progress" aria-live="polite">
+          <span className="section-eyebrow">Analysis progress</span>
+          {(progress.length ? progress : [{ stage: 'starting', message: 'Preparing medication-set analysis.' }]).map((item, index) => (
+            <div className="analysis-progress-row" key={`${item.stage}-${index}`}>
+              <span>{index + 1}</span>
+              <p>{item.message}</p>
+            </div>
+          ))}
+        </div>
       </div>
       <div className="evidence-panel">
         <div className="skeleton-block" style={{ height:40, marginBottom:12 }} />
@@ -518,6 +647,45 @@ function SkeletonLoader() {
         </div>
         {[90,75,60,80].map(w => (
           <div key={w} className="skeleton-block" style={{ height:14, width:`${w}%`, marginBottom:10 }} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function NDrugReasoningPanel({ result }: { result: InteractionResult }) {
+  const reasoning = result.ndrugReasoning
+  const topPairs = reasoning?.top_pairs ?? []
+  const clusters = reasoning?.clusters ?? []
+  const hypotheses = reasoning?.hypotheses ?? []
+  if (!reasoning || (!topPairs.length && !clusters.length && !hypotheses.length)) return null
+  return (
+    <div className="reasoning-strip" aria-label="Pair and cluster reasoning">
+      <div className="reasoning-strip-head">
+        <span className="section-eyebrow">Structured reasoning</span>
+        <strong>{reasoning.pair_count ?? result.executedPairs?.length ?? 0} pair checks</strong>
+      </div>
+      <div className="reasoning-grid">
+        {topPairs.slice(0, 3).map((pair, index) => (
+          <div className="reasoning-card" key={`${pair.pair?.join('-')}-${index}`}>
+            <span>Pair risk</span>
+            <strong>{pair.pair?.join(' + ') || 'Pair'}</strong>
+            <p>{pair.risk_level || 'unknown'} · {pair.confidence || 'unknown'} confidence</p>
+          </div>
+        ))}
+        {clusters.slice(0, 3).map((cluster, index) => (
+          <div className="reasoning-card cluster" key={`${cluster.label}-${index}`}>
+            <span>{cluster.risk_type || 'Cluster'}</span>
+            <strong>{cluster.label || 'Mechanism cluster'}</strong>
+            <p>{cluster.confidence || 'unknown'} confidence</p>
+          </div>
+        ))}
+        {hypotheses.slice(0, 2).map((hypothesis, index) => (
+          <div className="reasoning-card hypothesis" key={`${hypothesis.statement}-${index}`}>
+            <span>Hypothesis</span>
+            <strong>{hypothesis.support_level || 'hypothesis-level'}</strong>
+            <p>{hypothesis.statement || 'Evidence gap requires cautious interpretation.'}</p>
+          </div>
         ))}
       </div>
     </div>
@@ -922,10 +1090,24 @@ function AboutPage({ onAnalyze }: { onAnalyze: () => void }) {
 
       <section className="research-panel architecture-panel">
         <div className="platform-panel-head">
-          <span className="section-eyebrow">System architecture</span>
-          <h3>Designed for medical review, not black-box output</h3>
+          <span className="section-eyebrow">Evidence pipeline</span>
+          <h3>Source retrieval stays separate from model language</h3>
         </div>
         <MermaidArchitecture chart={ARCHITECTURE_MERMAID} />
+      </section>
+
+      <section className="research-panel reasoning-architecture-panel">
+        <div className="platform-panel-head reasoning-architecture-head">
+          <div>
+            <span className="section-eyebrow">Graph reasoning architecture</span>
+            <h3>Built to reason about known and unknown combinations</h3>
+          </div>
+          <p>
+            INFERMed first builds drug profiles, then compares those profiles across pairs or future
+            N-drug sets before any LLM writes the final explanation.
+          </p>
+        </div>
+        <MermaidArchitecture chart={GRAPH_REASONING_MERMAID} />
       </section>
 
       <section className="research-panel data-source-panel">
@@ -1026,8 +1208,16 @@ export default function App() {
   const [error, setError]       = useState('')
   const [followUp, setFollowUp] = useState('')
   const [thread, setThread]     = useState<ThreadTurn[]>([])
+  const [progress, setProgress] = useState<ProgressTurn[]>([])
   const [darkMode, setDarkMode] = useState(false)
   const [page, setPage]         = useState<PageView>('analyze')
+  const [patientCtx, setPatientCtx] = useState<PatientContextDraft>({
+    age: '',
+    renal_function: '',
+    hepatic_function: '',
+    qt_risk: '',
+    current_inr: '',
+  })
 
   function toggleDark() {
     setDarkMode(d => {
@@ -1037,7 +1227,7 @@ export default function App() {
   }
 
   const canAnalyze = drugs.length >= 2 && !loading
-  const pairLabel  = useMemo(() => drugs.slice(0, 2).join(' + '), [drugs])
+  const pairLabel  = useMemo(() => drugs.join(' + '), [drugs])
   const currentMode = MODES.find(m => m.id === mode)!
   const followUpCount = thread.filter(item => item.role === 'user').length
   const followUpsRemaining = Math.max(0, MAX_FOLLOWUPS - followUpCount)
@@ -1065,13 +1255,29 @@ export default function App() {
   /* ── analyze ── */
   async function analyze() {
     if (!canAnalyze) return
-    setLoading(true); setError(''); setThread([])
+    setLoading(true); setError(''); setThread([]); setProgress([])
     try {
-      const r = await analyzeInteraction({ drugs: drugs.slice(0,2), mode, refreshEvidence: doRefresh })
+      const r = await analyzeInteractionStream(
+        { drugs, mode, refreshEvidence: doRefresh, patient_context: patientContextPayload(patientCtx) },
+        event => {
+          if (event.type !== 'progress' || !event.message) return
+          if (event.stage === 'answer_generation_waiting') return
+          const next = { stage: event.stage || 'progress', message: event.message || '' }
+          setProgress(rows => {
+            const existing = rows.findIndex(row => row.stage === next.stage)
+            if (existing >= 0) {
+              const updated = [...rows]
+              updated[existing] = next
+              return updated.slice(-8)
+            }
+            return [...rows.slice(-8), next]
+          })
+        },
+      )
       setResult(r); setTab('overview')
     } catch(e) {
       setError(e instanceof Error ? e.message : 'Analysis failed.')
-    } finally { setLoading(false) }
+    } finally { setLoading(false); setProgress([]) }
   }
 
   /* ── follow-up ── */
@@ -1098,8 +1304,10 @@ export default function App() {
     try {
       const r = await askFollowUp({
         question: q,
-        drugs: drugs.slice(0,2),
+        drugs,
         mode,
+        contextId: result.analysisId,
+        patient_context: patientContextPayload(patientCtx),
         history: requestHistory,
         priorAssessment: summarizeAssessmentForFollowUp(result),
         followUpCount: currentFollowUpCount,
@@ -1225,9 +1433,56 @@ export default function App() {
 
           {drugs.length > 2 && (
             <p className="n-drug-note" role="note">
-              Analysis uses first two drugs. Additional chips retained for N-drug design.
+              Adaptive medication-set analysis will evaluate {drugs.length * (drugs.length - 1) / 2} pair combinations and summarize shared mechanism clusters.
             </p>
           )}
+          <div className="patient-context-panel" aria-label="Optional patient context">
+            <span className="patient-context-label">Patient context</span>
+            <input
+              inputMode="numeric"
+              value={patientCtx.age}
+              onChange={e => setPatientCtx(v => ({ ...v, age: e.target.value.replace(/[^\d]/g, '').slice(0, 3) }))}
+              placeholder="Age"
+              aria-label="Age"
+            />
+            <select
+              value={patientCtx.renal_function}
+              onChange={e => setPatientCtx(v => ({ ...v, renal_function: e.target.value }))}
+              aria-label="Renal function"
+            >
+              <option value="">Renal unknown</option>
+              <option value="normal">Renal normal</option>
+              <option value="moderate_impairment">Moderate renal impairment</option>
+              <option value="severe_impairment">Severe renal impairment</option>
+            </select>
+            <select
+              value={patientCtx.hepatic_function}
+              onChange={e => setPatientCtx(v => ({ ...v, hepatic_function: e.target.value }))}
+              aria-label="Hepatic function"
+            >
+              <option value="">Hepatic unknown</option>
+              <option value="normal">Hepatic normal</option>
+              <option value="moderate_impairment">Moderate hepatic impairment</option>
+              <option value="severe_impairment">Severe hepatic impairment</option>
+            </select>
+            <select
+              value={patientCtx.qt_risk}
+              onChange={e => setPatientCtx(v => ({ ...v, qt_risk: e.target.value }))}
+              aria-label="QT risk"
+            >
+              <option value="">QT unknown</option>
+              <option value="low_risk">Low QT risk</option>
+              <option value="possible_qt_risk">Possible QT risk</option>
+              <option value="known_long_qt">Known long QT</option>
+            </select>
+            <input
+              inputMode="decimal"
+              value={patientCtx.current_inr}
+              onChange={e => setPatientCtx(v => ({ ...v, current_inr: e.target.value.replace(/[^\d.]/g, '').slice(0, 5) }))}
+              placeholder="INR"
+              aria-label="Current INR"
+            />
+          </div>
         </div>
       </section>
 
@@ -1235,7 +1490,7 @@ export default function App() {
       <div className={`workspace-wrap ${result ? 'has-result' : loading ? 'is-loading' : 'is-empty'}`}>
         <InfermedRelayBackdrop />
         {loading ? (
-          <SkeletonLoader />
+          <SkeletonLoader progress={progress} />
         ) : result ? (
           <div className="workspace-grid">
 
@@ -1276,6 +1531,8 @@ export default function App() {
                   </div>
                 ))}
               </div>
+
+              <NDrugReasoningPanel result={result} />
 
               {/* Narrative sections */}
               <div className="narrative">
@@ -1372,7 +1629,7 @@ export default function App() {
           <div className="empty-shell" aria-label="Ready for analysis">
             <div className="empty-hero">
               <p className="empty-lead">
-                Enter two medicines above to generate an AI assessment backed by OpenFDA FAERS signals, pharmacokinetic enzyme data, and curated PK/PD mechanisms.
+                Enter medicines above to generate an AI assessment backed by OpenFDA FAERS signals, pharmacokinetic enzyme data, and curated PK/PD mechanisms.
               </p>
             </div>
           </div>

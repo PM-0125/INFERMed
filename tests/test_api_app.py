@@ -13,19 +13,21 @@ def test_health_endpoint():
 def test_analyze_endpoint_uses_uncached_llm_response(monkeypatch):
     calls = {}
 
-    def fake_run_rag(*args, **kwargs):
-        calls["args"] = args
-        calls["kwargs"] = kwargs
+    def fake_retrieve_pair_context(*args, **kwargs):
+        calls.setdefault("contexts", []).append({"args": args, "kwargs": kwargs})
         return {
-            "context": {
-                "drugs": {"a": {"name": "warfarin"}, "b": {"name": "fluconazole"}},
-                "signals": {"tabular": {"prr": 2.2}, "faers": {}, "mechanistic": {}},
-                "pkpd": {"pk_detail": {"overlaps": {}}, "pd_detail": {}},
-            },
-            "answer": {"text": "## Bottom Line\nUse caution."},
+            "drugs": {"a": {"name": args[0]}, "b": {"name": args[1]}},
+            "signals": {"tabular": {"prr": 2.2}, "faers": {}, "mechanistic": {}},
+            "pkpd": {"pk_detail": {"overlaps": {}}, "pd_detail": {}},
         }
 
-    monkeypatch.setattr("src.api.app.run_rag", fake_run_rag)
+    def fake_generate_final_answer(context, mode, **kwargs):
+        calls["answer_context"] = context
+        calls["answer_mode"] = mode
+        return {"text": "## Bottom Line\nUse caution."}
+
+    monkeypatch.setattr("src.api.app._retrieve_pair_context", fake_retrieve_pair_context)
+    monkeypatch.setattr("src.api.app._generate_final_answer", fake_generate_final_answer)
     client = TestClient(app)
     response = client.post(
         "/api/interactions/analyze",
@@ -33,28 +35,25 @@ def test_analyze_endpoint_uses_uncached_llm_response(monkeypatch):
     )
 
     assert response.status_code == 200
-    assert calls["args"][:2] == ("warfarin", "fluconazole")
-    assert calls["kwargs"]["mode"] == "doctor"
-    assert calls["kwargs"]["use_cache_context"] is True
-    assert calls["kwargs"]["use_cache_response"] is False
-    assert calls["kwargs"]["model_name"] is None
+    assert calls["contexts"][0]["args"][:2] == ("warfarin", "fluconazole")
+    assert calls["contexts"][0]["kwargs"]["mode"] == "doctor"
+    assert calls["contexts"][0]["kwargs"]["force_refresh"] is False
+    assert calls["answer_mode"] == "doctor"
     assert response.json()["assessment"][0]["title"] == "Bottom Line"
     assert response.json()["analysisId"].startswith("ana_")
     assert response.json()["decision"]["analysis_id"] == response.json()["analysisId"]
 
 
 def test_medication_set_endpoint_returns_future_read_model(monkeypatch):
-    def fake_run_rag(*args, **kwargs):
+    def fake_retrieve_pair_context(*args, **kwargs):
         return {
-            "context": {
-                "drugs": {"a": {"name": args[0]}, "b": {"name": args[1]}},
-                "signals": {"tabular": {"prr": 2.5}, "faers": {}, "mechanistic": {}},
-                "pkpd": {"pk_detail": {"overlaps": {}}, "pd_detail": {}},
-            },
-            "answer": {"text": "## Bottom Line\nUse caution."},
+            "drugs": {"a": {"name": args[0]}, "b": {"name": args[1]}},
+            "signals": {"tabular": {"prr": 2.5}, "faers": {}, "mechanistic": {}},
+            "pkpd": {"pk_detail": {"overlaps": {}}, "pd_detail": {}},
         }
 
-    monkeypatch.setattr("src.api.app.run_rag", fake_run_rag)
+    monkeypatch.setattr("src.api.app._retrieve_pair_context", fake_retrieve_pair_context)
+    monkeypatch.setattr("src.api.app._generate_final_answer", lambda context, mode, **kwargs: {"text": "## Bottom Line\nUse caution."})
     client = TestClient(app)
     response = client.post(
         "/api/medication-sets/analyze",
@@ -68,9 +67,43 @@ def test_medication_set_endpoint_returns_future_read_model(monkeypatch):
     assert response.status_code == 200
     payload = response.json()
     assert payload["analysisId"].startswith("ana_")
+    assert payload["assessment"][0]["title"] == "Bottom Line"
+    assert payload["risk"]["label"]
+    assert payload["drugs"][0]["name"] == "warfarin"
+    assert "overview" in payload["evidence"]
     assert payload["normalizedMedications"][0]["normalized_name"] == "warfarin"
     assert payload["topRisks"][0]["analysis_id"] == payload["analysisId"]
     assert "compatibility" in payload
+
+
+def test_medication_set_stream_returns_progress_and_result(monkeypatch):
+    def fake_retrieve_pair_context(*args, **kwargs):
+        return {
+            "drugs": {"a": {"name": args[0]}, "b": {"name": args[1]}},
+            "signals": {"tabular": {"prr": 2.5}, "faers": {}, "mechanistic": {}},
+            "pkpd": {"pk_detail": {"overlaps": {}}, "pd_detail": {}},
+        }
+
+    monkeypatch.setattr("src.api.app._retrieve_pair_context", fake_retrieve_pair_context)
+    monkeypatch.setattr("src.api.app._generate_final_answer", lambda context, mode, **kwargs: {"text": "## Bottom Line\nUse caution."})
+    client = TestClient(app)
+    response = client.post(
+        "/api/medication-sets/analyze/stream",
+        json={
+            "medications": [{"text": "warfarin"}, {"text": "fluconazole"}, {"text": "ibuprofen"}],
+            "audience": "doctor",
+            "refresh_evidence": False,
+        },
+    )
+
+    assert response.status_code == 200
+    text = response.text
+    assert '"type": "progress"' in text
+    assert '"type": "result"' in text
+    assert '"assessment"' in text
+    assert '"risk"' in text
+    assert '"evidence"' in text
+    assert '"pair_count": 3' in text
 
 
 def test_followup_endpoint_uses_scoped_followup_prompt(monkeypatch):

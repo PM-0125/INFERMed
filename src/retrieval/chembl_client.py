@@ -9,19 +9,23 @@ ChEMBL provides:
 
 API Documentation: https://www.ebi.ac.uk/chembl/documentation/web-services
 """
-import os
 import requests
 import logging
 from typing import Dict, List, Optional, Any
 from functools import lru_cache
+
+from src.config.settings import get_settings
 
 LOG = logging.getLogger(__name__)
 
 # ChEMBL REST API base URL
 CHEMBL_API_BASE = "https://www.ebi.ac.uk/chembl/api/data"
 
-# Timeout for API requests
-CHEMBL_TIMEOUT = int(os.getenv("CHEMBL_TIMEOUT", "10"))
+def _chembl_timeout() -> int:
+    try:
+        return int(get_settings().chembl_timeout_s)
+    except Exception:
+        return 10
 
 
 @lru_cache(maxsize=1024)
@@ -37,7 +41,7 @@ def _get_compound_by_name(compound_name: str) -> Optional[Dict[str, Any]]:
             "format": "json",
             "limit": 1,
         }
-        r = requests.get(url, params=params, timeout=CHEMBL_TIMEOUT)
+        r = requests.get(url, params=params, timeout=_chembl_timeout())
         r.raise_for_status()
         data = r.json()
         molecules = data.get("molecules", [])
@@ -87,7 +91,7 @@ def get_enzyme_interactions(
             enzyme_filter = enzyme_name.lower().replace("cyp", "").replace("cytochrome p450", "").strip()
             params["target_pref_name__icontains"] = enzyme_filter
         
-        r = requests.get(url, params=params, timeout=CHEMBL_TIMEOUT)
+        r = requests.get(url, params=params, timeout=_chembl_timeout())
         r.raise_for_status()
         data = r.json()
         
@@ -170,7 +174,7 @@ def get_transporter_data(compound_name: str) -> List[Dict[str, str]]:
             "limit": 100,
         }
         
-        r = requests.get(url, params=params, timeout=CHEMBL_TIMEOUT)
+        r = requests.get(url, params=params, timeout=_chembl_timeout())
         r.raise_for_status()
         data = r.json()
         
@@ -232,7 +236,7 @@ def get_pathway_data(compound_name: str) -> List[str]:
             "limit": 50,
         }
         
-        r = requests.get(url, params=params, timeout=CHEMBL_TIMEOUT)
+        r = requests.get(url, params=params, timeout=_chembl_timeout())
         r.raise_for_status()
         data = r.json()
         
@@ -289,4 +293,3 @@ def enrich_mechanistic_data(
                 enriched["chembl_validation"]["mismatches"].append(enzyme)
     
     return enriched
-

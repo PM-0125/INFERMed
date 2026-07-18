@@ -35,6 +35,15 @@ def _monkeypatch_retrievals(monkeypatch,
                             faers_combo=None):
     monkeypatch.setenv("INFERMED_DATA_MODE", "full_research_future")
     monkeypatch.setenv("ENABLE_QLEVER", "true")
+    monkeypatch.setenv("ENABLE_OPENFDA_LABEL", "false")
+    monkeypatch.setenv("ENABLE_DAILYMED", "false")
+    monkeypatch.setenv("ENABLE_RXNORM", "false")
+    monkeypatch.setenv("ENABLE_FDA_PGX", "false")
+    monkeypatch.setenv("ENABLE_EUROPE_PMC", "false")
+    monkeypatch.setenv("ENABLE_OPEN_TARGETS", "false")
+    monkeypatch.setenv("ENABLE_STRINGDB", "false")
+    monkeypatch.setenv("ENABLE_DRUGCENTRAL", "false")
+    monkeypatch.setenv("ENABLE_BIOGRID", "false")
     monkeypatch.setattr(rp, "get_semantic_searcher", lambda: None, raising=True)
     monkeypatch.setattr(rp, "get_reranker", lambda: None, raising=True)
 
@@ -212,11 +221,20 @@ def test_public_safe_rest_enrichment_fills_qlever_gap(monkeypatch):
     monkeypatch.setenv("INFERMED_DATA_MODE", "public_safe")
     monkeypatch.setenv("ENABLE_QLEVER", "true")
     monkeypatch.setenv("ENABLE_OPENFDA", "false")
+    monkeypatch.setenv("ENABLE_OPENFDA_LABEL", "false")
+    monkeypatch.setenv("ENABLE_DAILYMED", "false")
+    monkeypatch.setenv("ENABLE_RXNORM", "false")
     monkeypatch.setenv("ENABLE_PUBCHEM_REST", "true")
     monkeypatch.setenv("ENABLE_KEGG", "false")
     monkeypatch.setenv("ENABLE_CHEMBL", "false")
     monkeypatch.setenv("ENABLE_UNIPROT", "false")
     monkeypatch.setenv("ENABLE_REACTOME", "false")
+    monkeypatch.setenv("ENABLE_FDA_PGX", "false")
+    monkeypatch.setenv("ENABLE_EUROPE_PMC", "false")
+    monkeypatch.setenv("ENABLE_OPEN_TARGETS", "false")
+    monkeypatch.setenv("ENABLE_STRINGDB", "false")
+    monkeypatch.setenv("ENABLE_DRUGCENTRAL", "false")
+    monkeypatch.setenv("ENABLE_BIOGRID", "false")
     monkeypatch.setattr(rp, "get_semantic_searcher", lambda: None, raising=True)
     monkeypatch.setattr(rp, "get_reranker", lambda: None, raising=True)
 
@@ -343,6 +361,70 @@ def test_public_safe_rest_enrichment_fills_qlever_gap(monkeypatch):
     assert "UniProt REST API" in ctx["sources"]["apis"]
     assert "Reactome REST API" in ctx["sources"]["apis"]
     assert "ChEMBL REST API" in ctx["sources"]["apis"]
+
+
+def test_clinical_reference_context_is_attached(monkeypatch):
+    _monkeypatch_retrievals(monkeypatch)
+    monkeypatch.setenv("ENABLE_OPENFDA_LABEL", "true")
+    monkeypatch.setenv("ENABLE_DAILYMED", "true")
+    monkeypatch.setenv("ENABLE_RXNORM", "true")
+
+    def fake_clinical_reference(a, b, settings, caveats):
+        return {
+            "rxnorm": {
+                "a": {"resolved": True, "rxcui": "1111", "name": a, "classes": [{"class_name": "Anticoagulants"}]},
+                "b": {"resolved": True, "rxcui": "2222", "name": b, "classes": []},
+            },
+            "openfda_label": {
+                "a": {"found": True, "effective_time": "20240101", "sections": {"drug_interactions": "Interaction section"}},
+                "b": {"found": False, "sections": {}},
+            },
+            "dailymed": {
+                "a": {"found": True, "records": [{"title": "A SPL", "set_id": "set-a"}]},
+                "b": {"found": False, "records": []},
+            },
+            "fda_ddi_reference": {
+                "a": {"matches": [{"row": {"Enzyme": "CYP2C9", "Substrate": a}}]},
+                "b": {"matches": []},
+            },
+        }
+
+    monkeypatch.setattr(rp, "_collect_public_clinical_reference", fake_clinical_reference, raising=True)
+
+    ctx = rp.retrieve_and_normalize("ADrug", "BDrug")
+
+    clinical = ctx["signals"]["clinical_reference"]
+    assert clinical["rxnorm"]["a"]["rxcui"] == "1111"
+    assert ctx["drugs"]["a"]["ids"]["rxcui"] == "1111"
+    assert ctx["meta"]["clinical_reference_contributed"] is True
+    assert "openFDA Drug Label API" in ctx["sources"]["apis"]
+    assert "DailyMed SPL API" in ctx["sources"]["apis"]
+    assert "RxNorm/RxClass API" in ctx["sources"]["apis"]
+    assert "FDA CYP/transporter reference" in ctx["sources"]["apis"]
+
+
+def test_research_enrichment_context_is_attached(monkeypatch):
+    _monkeypatch_retrievals(monkeypatch)
+
+    def fake_research_enrichment(a, b, mech, settings, caveats):
+        return {
+            "europe_pmc": {
+                "found": True,
+                "articles": [{"title": f"{a} {b} DDI review", "year": "2026", "pmid": "1"}],
+            },
+            "fda_pgx": {"found": False, "a": [], "b": []},
+            "open_targets": {},
+            "stringdb": {},
+            "biogrid": {},
+        }
+
+    monkeypatch.setattr(rp, "_collect_api_research_enrichment", fake_research_enrichment, raising=True)
+
+    ctx = rp.retrieve_and_normalize("ADrug", "BDrug")
+
+    research = ctx["signals"]["research_enrichment"]
+    assert research["europe_pmc"]["articles"][0]["title"] == "ADrug BDrug DDI review"
+    assert ctx["meta"]["research_enrichment_contributed"] is True
 
 
 def test_context_cache_key_is_unordered(monkeypatch, tmp_path):

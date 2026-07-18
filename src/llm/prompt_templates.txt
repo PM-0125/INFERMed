@@ -1,11 +1,14 @@
 # ===== INFERMED PROMPT TEMPLATES (Inspector-Aware, Strong Interpretation) =====
 # Placeholders available from the pipeline:
 #   {{DRUG_A}}, {{DRUG_B}}
+#   {{MEDICATION_SET_SUMMARY}}        # N-drug summary and pair ranking when more than two drugs are supplied
 #   {{PK_SUMMARY}}, {{PD_SUMMARY}}
 #   {{FAERS_SUMMARY}}                # e.g., "Top A: … | Top B: … | Combo: …"
+#   {{CLINICAL_REFERENCE}}            # compact label/RxNorm/DailyMed/FDA reference evidence
+#   {{RESEARCH_ENRICHMENT}}           # compact Europe PMC, FDA PGx, Open Targets, STRING, BioGRID context
 #   {{RISK_FLAGS}}                   # compact text (PRR, DILI/DICT/DIQT flags)
 #   {{EVIDENCE_TABLE}}               # compressed, human-readable dump (targets, enzymes, pathways)
-#   {{SOURCES}}                      # compact source inventory (TwoSides, DrugBank, PubChem RDF/QLever, OpenFDA, PubChem REST, UniProt, KEGG, Reactome, ChEMBL)
+#   {{SOURCES}}                      # compact source inventory (TwoSides, DrugBank, PubChem RDF/QLever, OpenFDA, labels, RxNorm, DailyMed, PubChem REST, UniProt, KEGG, Reactome, ChEMBL)
 #   {{CAVEATS}}                      # list of caveats surfaced in context
 #   {{HISTORY}}                      # prior Q&A turns, if any (optional)
 #   {{USER_QUESTION}}                # built by llm_interface
@@ -40,12 +43,15 @@ USER:
 {{USER_QUESTION}}
 
 CONTEXT:
+- Medication-set summary: {{MEDICATION_SET_SUMMARY}}
 - PK summary (from retrieved data): {{PK_SUMMARY}}
   * CRITICAL: The PK summary line starting with "DATA-DRIVEN PK OVERLAP:" tells you whether the retrieved data actually shows a PK interaction. You MUST explicitly restate this in your Assessment section.
 - Additional PK metadata (from PubChem; qualitative only): {{PK_META}}
   * Note: This provides qualitative PK properties (logP, molecular weight, H-bonding) that may inform PK reasoning, but does not change the DATA-DRIVEN PK OVERLAP status above.
 - PD summary (from retrieved data): {{PD_SUMMARY}}
 - Real-world signal summary (FAERS, associative only): {{FAERS_SUMMARY}}
+- Clinical label/reference context: {{CLINICAL_REFERENCE}}
+- Research/API enrichment context: {{RESEARCH_ENRICHMENT}}
 - Risk flags (PRR, DILI, DICT, DIQT): {{RISK_FLAGS}}
   * PRR: Pairwise Reporting Ratio (higher = stronger signal)
   * DILI: Drug-Induced Liver Injury score (higher = greater hepatotoxicity risk)
@@ -149,7 +155,7 @@ Evidence and uncertainty
    - Distinguish explicitly:
      * “Supported by retrieved data” vs. “General pharmacology knowledge (not directly observed in these datasets)”.
    - List gaps: “No quantitative PK data”, “Mechanism based mainly on PD overlap and external knowledge”, etc.
-   - Mention sources from CONTEXT by name when present (TwoSides, DILIrank, DICTRank, DIQT, DrugBank, PubChem RDF via QLever, FAERS via OpenFDA, PubChem REST, UniProt, KEGG, Reactome, ChEMBL).
+   - Mention sources from CONTEXT by name when present (TwoSides, DILIrank, DICTRank, DIQT, DrugBank, PubChem RDF via QLever, FAERS via OpenFDA, openFDA Drug Label, DailyMed, RxNorm/RxClass, FDA CYP/transporter reference, PubChem REST, UniProt, KEGG, Reactome, ChEMBL, FDA PGx, Europe PMC, Open Targets, STRING, DrugCentral, BioGRID).
 
 Close with:
 “This note reflects only the evidence provided and general pharmacology knowledge, and does not replace clinical judgment.”
@@ -167,8 +173,11 @@ USER:
 {{USER_QUESTION}}
 
 CONTEXT (simplified):
+- Medication-set summary: {{MEDICATION_SET_SUMMARY}}
 - How they may affect each other: {{PK_SUMMARY}} / {{PD_SUMMARY}}
 - Side effects seen in reports (association only): {{FAERS_SUMMARY}}
+- Clinical label/reference context: {{CLINICAL_REFERENCE}}
+- Research/API enrichment context: {{RESEARCH_ENRICHMENT}}
 - Risk flags: {{RISK_FLAGS}}
 - Sources: {{SOURCES}}
 - Prior discussion: {{HISTORY}}
@@ -232,9 +241,12 @@ USER:
 {{USER_QUESTION}}
 
 CONTEXT:
+- Medication-set summary: {{MEDICATION_SET_SUMMARY}}
 - PK: {{PK_SUMMARY}}
 - PD: {{PD_SUMMARY}}
 - FAERS (associative only): {{FAERS_SUMMARY}}
+- Clinical label/reference context: {{CLINICAL_REFERENCE}}
+- Research/API enrichment context: {{RESEARCH_ENRICHMENT}}
 - Risk flags: {{RISK_FLAGS}}
 - Mechanistic evidence snapshot (targets/enzymes/pathways, possibly with PDB-like IDs): {{EVIDENCE_TABLE}}
 - Sources: {{SOURCES}}
