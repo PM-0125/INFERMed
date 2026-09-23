@@ -22,5 +22,7 @@ class AnalyzeMedicationSetCommand:
         return asdict(self)
 
     def request_hash(self) -> str:
-        encoded = json.dumps(self.to_dict(), sort_keys=True, ensure_ascii=False).encode("utf-8")
+        encoded = json.dumps(self.to_dict(), sort_keys=True, ensure_ascii=False).encode(
+            "utf-8"
+        )
         return hashlib.sha256(encoded).hexdigest()

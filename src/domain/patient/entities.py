@@ -5,8 +5,17 @@ from typing import Any, Literal
 
 Sex = Literal["female", "male", "intersex", "unknown"]
 PregnancyStatus = Literal["pregnant", "not_pregnant", "possible", "unknown"]
-RenalFunctionCategory = Literal["normal", "mild_impairment", "moderate_impairment", "severe_impairment", "dialysis", "unknown"]
-HepaticFunctionCategory = Literal["normal", "mild_impairment", "moderate_impairment", "severe_impairment", "unknown"]
+RenalFunctionCategory = Literal[
+    "normal",
+    "mild_impairment",
+    "moderate_impairment",
+    "severe_impairment",
+    "dialysis",
+    "unknown",
+]
+HepaticFunctionCategory = Literal[
+    "normal", "mild_impairment", "moderate_impairment", "severe_impairment", "unknown"
+]
 QTRiskCategory = Literal["known_long_qt", "possible_qt_risk", "low_risk", "unknown"]
 
 

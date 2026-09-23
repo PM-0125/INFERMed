@@ -19,11 +19,12 @@ from src.llm.rag_pipeline import (
     get_context_cached,
     retrieve_and_normalize,
     run_rag,
-    clear_context_cache,     # to clear disk cache for a pair
-    record_feedback,         # for user feedback tracking
+    clear_context_cache,  # to clear disk cache for a pair
+    record_feedback,  # for user feedback tracking
 )
-from src.llm.llm_interface import generate_response  # used for follow-ups when context is already present
-
+from src.llm.llm_interface import (
+    generate_response,
+)  # used for follow-ups when context is already present
 
 # =========================
 # Logging setup (file + console)
@@ -37,12 +38,16 @@ logger.setLevel(logging.DEBUG)
 
 # Avoid duplicate handlers when Streamlit reruns
 if not logger.handlers:
-    file_handler = RotatingFileHandler(LOG_PATH, maxBytes=2_000_000, backupCount=5, encoding="utf-8")
+    file_handler = RotatingFileHandler(
+        LOG_PATH, maxBytes=2_000_000, backupCount=5, encoding="utf-8"
+    )
     file_handler.setLevel(logging.DEBUG)
-    file_handler.setFormatter(logging.Formatter(
-        fmt="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S"
-    ))
+    file_handler.setFormatter(
+        logging.Formatter(
+            fmt="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
+    )
     logger.addHandler(file_handler)
 
     console = logging.StreamHandler()
@@ -284,7 +289,7 @@ def _inject_custom_css():
     </style>
     """
     st.markdown(css, unsafe_allow_html=True)
-    
+
     # Add JavaScript to fix form accessibility issues - handles empty attributes too
     accessibility_js = """
     <script>
@@ -391,7 +396,14 @@ def _pair_key(a: str, b: str) -> Tuple[str, str]:
 
 def _normalize_mode(mode: str) -> str:
     raw = (mode or "").strip().lower()
-    if raw in {"pharma", "pv", "safety", "pharmacovigilance", "research", "pharmacovigilance / research"}:
+    if raw in {
+        "pharma",
+        "pv",
+        "safety",
+        "pharmacovigilance",
+        "research",
+        "pharmacovigilance / research",
+    }:
         return MODE_PV_RESEARCH
     if raw in {"patient", "pt"}:
         return MODE_PATIENT
@@ -418,7 +430,7 @@ def _fmt_metric(x, fmt="{:.2f}", default="N/A"):
 
 def _pairs_to_df(pairs, n=10):
     rows = []
-    for it in (pairs or []):
+    for it in pairs or []:
         try:
             term, cnt = it
             rows.append((str(term), int(cnt)))
@@ -452,10 +464,10 @@ def _render_header():
         layout="wide",
         initial_sidebar_state="expanded",
         menu_items={
-            'Get Help': 'https://github.com/your-repo/issues',
-            'Report a bug': 'https://github.com/your-repo/issues',
-            'About': "INFERMed: PK/PD-aware RAG DDI Explainer"
-        }
+            "Get Help": "https://github.com/your-repo/issues",
+            "Report a bug": "https://github.com/your-repo/issues",
+            "About": "INFERMed: PK/PD-aware RAG DDI Explainer",
+        },
     )
     _inject_custom_css()
 
@@ -481,7 +493,7 @@ def _render_header():
         """,
         unsafe_allow_html=True,
     )
-    
+
 
 def _sidebar():
     with st.sidebar:
@@ -493,17 +505,23 @@ def _sidebar():
             "Select your role",
             AUDIENCE_MODES,
             index=AUDIENCE_MODES.index(st.session_state.mode),
-            label_visibility="collapsed"
+            label_visibility="collapsed",
         )
 
         st.markdown("---")
         st.markdown("### Evidence")
-        st.session_state.use_ctx_cache = st.checkbox("Use evidence cache", value=bool(st.session_state.use_ctx_cache))
-        st.session_state.force_refresh = st.checkbox("Refresh evidence", value=bool(st.session_state.force_refresh))
+        st.session_state.use_ctx_cache = st.checkbox(
+            "Use evidence cache", value=bool(st.session_state.use_ctx_cache)
+        )
+        st.session_state.force_refresh = st.checkbox(
+            "Refresh evidence", value=bool(st.session_state.force_refresh)
+        )
 
         st.markdown("---")
         st.markdown('<div class="section-label">Runtime</div>', unsafe_allow_html=True)
-        st.caption("Provider, model, and decoding settings are controlled by local runtime configuration.")
+        st.caption(
+            "Provider, model, and decoding settings are controlled by local runtime configuration."
+        )
 
 
 def _render_pair_inputs():
@@ -527,8 +545,12 @@ def _render_pair_inputs():
             horizontal=True,
         )
     with cache_col:
-        st.session_state.use_ctx_cache = st.checkbox("Use evidence cache", value=bool(st.session_state.use_ctx_cache))
-        st.session_state.force_refresh = st.checkbox("Refresh evidence", value=bool(st.session_state.force_refresh))
+        st.session_state.use_ctx_cache = st.checkbox(
+            "Use evidence cache", value=bool(st.session_state.use_ctx_cache)
+        )
+        st.session_state.force_refresh = st.checkbox(
+            "Refresh evidence", value=bool(st.session_state.force_refresh)
+        )
 
     colA, colB = st.columns([1, 1])
     with colA:
@@ -539,7 +561,10 @@ def _render_pair_inputs():
     st.session_state.drugA = (st.session_state.drugA_input or "").strip()
     st.session_state.drugB = (st.session_state.drugB_input or "").strip()
 
-    st.markdown('<div class="section-label">Common interaction searches</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="section-label">Common interaction searches</div>',
+        unsafe_allow_html=True,
+    )
     sample_cols = st.columns(len(SAMPLE_PAIRS))
     for idx, (drug_a, drug_b) in enumerate(SAMPLE_PAIRS):
         with sample_cols[idx]:
@@ -553,7 +578,12 @@ def _render_pair_inputs():
 
     action_col, clear_col, refresh_col = st.columns([2, 1, 1])
     with action_col:
-        if st.button("Analyze Interaction", type="primary", width="stretch", key="btn_explain_pair"):
+        if st.button(
+            "Analyze Interaction",
+            type="primary",
+            width="stretch",
+            key="btn_explain_pair",
+        ):
             _handle_explain_pair()
     with clear_col:
         if st.button("Clear Conversation", width="stretch", key="btn_clear_chat"):
@@ -596,11 +626,18 @@ def _maybe_load_context(a: str, b: str) -> Dict[str, Any]:
         with st.spinner("Retrieving evidence from databases..."):
             if use_cache:
                 ctx, _ = get_context_cached(a, b, force_refresh=False)
-                log_event("maybe_load_context.get_context_cached", pair=pair, cached=True)
+                log_event(
+                    "maybe_load_context.get_context_cached", pair=pair, cached=True
+                )
             else:
                 if st.session_state.force_refresh:
                     ctx, _ = get_context_cached(a, b, force_refresh=True)
-                    log_event("maybe_load_context.get_context_cached", pair=pair, cached=False, force_refresh=True)
+                    log_event(
+                        "maybe_load_context.get_context_cached",
+                        pair=pair,
+                        cached=False,
+                        force_refresh=True,
+                    )
                 else:
                     ctx = retrieve_and_normalize(a, b)
                     log_event("maybe_load_context.retrieve_and_normalize", pair=pair)
@@ -682,12 +719,12 @@ def _render_topline(context: Dict[str, Any]):
 
     col1, col2 = st.columns([3, 1])
     with col1:
-        st.markdown(f'### {a_name} + {b_name}')
+        st.markdown(f"### {a_name} + {b_name}")
     with col2:
         risk_level, risk_label = _calculate_risk_level(context)
         st.markdown(
             f'<div class="risk-indicator risk-{risk_level}">{risk_label}</div>',
-            unsafe_allow_html=True
+            unsafe_allow_html=True,
         )
 
     col_a, col_b = st.columns(2)
@@ -736,15 +773,17 @@ def _render_topline(context: Dict[str, Any]):
         st.markdown("**Source Status:**")
         rows = []
         for item in source_status:
-            rows.append({
-                "Source": item.get("name", ""),
-                "Enabled": bool(item.get("enabled")),
-                "Available": bool(item.get("available")),
-                "Reason": item.get("reason", ""),
-            })
+            rows.append(
+                {
+                    "Source": item.get("name", ""),
+                    "Enabled": bool(item.get("enabled")),
+                    "Available": bool(item.get("available")),
+                    "Reason": item.get("reason", ""),
+                }
+            )
         st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
 
-    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
 
 def _render_evidence(context: Dict[str, Any]):
@@ -764,7 +803,9 @@ def _render_evidence(context: Dict[str, Any]):
     st.markdown('<div id="evidence"></div>', unsafe_allow_html=True)
     st.markdown("### Evidence Dashboard")
 
-    tabs = st.tabs(["PK/PD Analysis", "FAERS Signals", "Mechanisms & Pathways", "Risk Metrics"])
+    tabs = st.tabs(
+        ["PK/PD Analysis", "FAERS Signals", "Mechanisms & Pathways", "Risk Metrics"]
+    )
 
     with tabs[0]:
         st.markdown("#### Enzyme Interactions")
@@ -776,7 +817,13 @@ def _render_evidence(context: Dict[str, Any]):
                 for role_type, enzymes_list in roles.items():
                     if enzymes_list:
                         for enzyme in enzymes_list:
-                            enz_data.append({"Drug": drug_label, "Role": role_type.title(), "Enzyme": enzyme})
+                            enz_data.append(
+                                {
+                                    "Drug": drug_label,
+                                    "Role": role_type.title(),
+                                    "Enzyme": enzyme,
+                                }
+                            )
             if enz_data:
                 df_enz = pd.DataFrame(enz_data)
                 st.dataframe(df_enz, width="stretch", hide_index=True)
@@ -797,7 +844,10 @@ def _render_evidence(context: Dict[str, Any]):
                 if enzymes:
                     st.markdown(f"**{overlap_type}:**")
                     for enzyme in enzymes:
-                        st.markdown(f'- <span class="drug-badge">{enzyme}</span>', unsafe_allow_html=True)
+                        st.markdown(
+                            f'- <span class="drug-badge">{enzyme}</span>',
+                            unsafe_allow_html=True,
+                        )
         else:
             st.info("No PK overlap detected in the retrieved data.")
 
@@ -811,11 +861,17 @@ def _render_evidence(context: Dict[str, Any]):
             if pd_overlaps["Overlapping Targets"]:
                 st.markdown("**Overlapping Targets:**")
                 for target in pd_overlaps["Overlapping Targets"][:10]:
-                    st.markdown(f'- <span class="drug-badge">{target}</span>', unsafe_allow_html=True)
+                    st.markdown(
+                        f'- <span class="drug-badge">{target}</span>',
+                        unsafe_allow_html=True,
+                    )
             if pd_overlaps["Overlapping Pathways"]:
                 st.markdown("**Overlapping Pathways:**")
                 for pathway in pd_overlaps["Overlapping Pathways"][:10]:
-                    st.markdown(f'- <span class="drug-badge">{pathway}</span>', unsafe_allow_html=True)
+                    st.markdown(
+                        f'- <span class="drug-badge">{pathway}</span>',
+                        unsafe_allow_html=True,
+                    )
             if pd_overlaps["PD Score"]:
                 st.metric("PD Interaction Score", f"{pd_overlaps['PD Score']:.2f}")
         else:
@@ -824,7 +880,11 @@ def _render_evidence(context: Dict[str, Any]):
     with tabs[1]:
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.metric("PRR (Pair)", _fmt_metric(tabular.get("prr")), help="Proportional Reporting Ratio")
+            st.metric(
+                "PRR (Pair)",
+                _fmt_metric(tabular.get("prr")),
+                help="Proportional Reporting Ratio",
+            )
         with col2:
             st.metric("DILI (A)", _fmt_metric(tabular.get("dili_a")))
         with col3:
@@ -839,17 +899,37 @@ def _render_evidence(context: Dict[str, Any]):
         with left:
             a_df = _pairs_to_df(faers.get("top_reactions_a"), 10)
             if a_df is not None:
-                fig_a = px.bar(a_df, x="Count", y="Reaction", orientation='h', title=f"Top Reactions: {a_name}")
-                fig_a.update_layout(showlegend=False, height=330, margin=dict(l=10, r=10, t=48, b=10))
-                st.plotly_chart(fig_a, width="stretch", key=f"faers_a_{a_name}_{b_name}")
+                fig_a = px.bar(
+                    a_df,
+                    x="Count",
+                    y="Reaction",
+                    orientation="h",
+                    title=f"Top Reactions: {a_name}",
+                )
+                fig_a.update_layout(
+                    showlegend=False, height=330, margin=dict(l=10, r=10, t=48, b=10)
+                )
+                st.plotly_chart(
+                    fig_a, width="stretch", key=f"faers_a_{a_name}_{b_name}"
+                )
             else:
                 st.info(f"No FAERS data available for {a_name}.")
 
             b_df = _pairs_to_df(faers.get("top_reactions_b"), 10)
             if b_df is not None:
-                fig_b = px.bar(b_df, x="Count", y="Reaction", orientation='h', title=f"Top Reactions: {b_name}")
-                fig_b.update_layout(showlegend=False, height=330, margin=dict(l=10, r=10, t=48, b=10))
-                st.plotly_chart(fig_b, width="stretch", key=f"faers_b_{a_name}_{b_name}")
+                fig_b = px.bar(
+                    b_df,
+                    x="Count",
+                    y="Reaction",
+                    orientation="h",
+                    title=f"Top Reactions: {b_name}",
+                )
+                fig_b.update_layout(
+                    showlegend=False, height=330, margin=dict(l=10, r=10, t=48, b=10)
+                )
+                st.plotly_chart(
+                    fig_b, width="stretch", key=f"faers_b_{a_name}_{b_name}"
+                )
             else:
                 st.info(f"No FAERS data available for {b_name}.")
 
@@ -871,9 +951,17 @@ def _render_evidence(context: Dict[str, Any]):
         ):
             if ids:
                 for source, value in ids.items():
-                    id_rows.append({"Drug": label, "Identifier": source, "Value": value})
+                    id_rows.append(
+                        {"Drug": label, "Identifier": source, "Value": value}
+                    )
             else:
-                id_rows.append({"Drug": label, "Identifier": "available IDs", "Value": "Not available"})
+                id_rows.append(
+                    {
+                        "Drug": label,
+                        "Identifier": "available IDs",
+                        "Value": "Not available",
+                    }
+                )
         st.dataframe(pd.DataFrame(id_rows), width="stretch", hide_index=True)
 
         st.markdown("---")
@@ -884,10 +972,16 @@ def _render_evidence(context: Dict[str, Any]):
             ("Targets", b_name, mech.get("targets_b", [])[:15]),
             ("Pathways", a_name, mech.get("pathways_a", [])[:10]),
             ("Pathways", b_name, mech.get("pathways_b", [])[:10]),
-            ("Common Pathways", f"{a_name} + {b_name}", mech.get("common_pathways", [])[:15]),
+            (
+                "Common Pathways",
+                f"{a_name} + {b_name}",
+                mech.get("common_pathways", [])[:15],
+            ),
         ):
             for value in values or []:
-                mech_rows.append({"Evidence Type": section, "Drug/Pair": label, "Value": str(value)})
+                mech_rows.append(
+                    {"Evidence Type": section, "Drug/Pair": label, "Value": str(value)}
+                )
         if mech_rows:
             st.dataframe(pd.DataFrame(mech_rows), width="stretch", hide_index=True)
         else:
@@ -914,9 +1008,10 @@ def _render_evidence(context: Dict[str, Any]):
         risk_level, risk_label = _calculate_risk_level(context)
         st.markdown(
             f'<div class="risk-indicator risk-{risk_level}" style="font-size: 1.2rem; padding: 1rem;">'
-            f'{risk_label}</div>',
-            unsafe_allow_html=True
+            f"{risk_label}</div>",
+            unsafe_allow_html=True,
         )
+
 
 def _render_feedback_section(context: Dict[str, Any], drugA: str, drugB: str):
     """Render user feedback section with three safety categories."""
@@ -927,21 +1022,23 @@ def _render_feedback_section(context: Dict[str, Any], drugA: str, drugB: str):
     pair_key = _pair_key(drugA, drugB)
     pair_str = f"{pair_key[0]}|{pair_key[1]}|{mode}"
     feedback_key = f"feedback_{pair_str}"
-    
+
     # Check if feedback already submitted for this pair
     if st.session_state.feedback_submitted.get(pair_str, False):
         st.markdown("---")
         st.success("Thank you. Your feedback has been recorded.")
         return
-    
+
     st.markdown("---")
     st.markdown("### Assessment Feedback")
     st.caption("Feedback is collected for clinician and research review modes.")
-    
+
     col1, col2, col3 = st.columns(3)
-    
+
     with col1:
-        if st.button("Good and Safe", width="stretch", key=f"{feedback_key}_good", type="primary"):
+        if st.button(
+            "Good and Safe", width="stretch", key=f"{feedback_key}_good", type="primary"
+        ):
             try:
                 record_feedback(
                     drugA,
@@ -952,14 +1049,18 @@ def _render_feedback_section(context: Dict[str, Any], drugA: str, drugB: str):
                     mode=mode,
                 )
                 st.session_state.feedback_submitted[pair_str] = True
-                log_event("feedback.submitted", pair=(drugA, drugB), rating="good", score=0.9)
+                log_event(
+                    "feedback.submitted", pair=(drugA, drugB), rating="good", score=0.9
+                )
                 st.rerun()
             except Exception as e:
                 logger.error(f"Failed to record feedback: {e}")
                 st.error("Failed to record feedback. Please try again.")
-    
+
     with col2:
-        if st.button("Moderately Safe", width="stretch", key=f"{feedback_key}_moderate"):
+        if st.button(
+            "Moderately Safe", width="stretch", key=f"{feedback_key}_moderate"
+        ):
             try:
                 record_feedback(
                     drugA,
@@ -970,14 +1071,21 @@ def _render_feedback_section(context: Dict[str, Any], drugA: str, drugB: str):
                     mode=mode,
                 )
                 st.session_state.feedback_submitted[pair_str] = True
-                log_event("feedback.submitted", pair=(drugA, drugB), rating="moderate", score=0.5)
+                log_event(
+                    "feedback.submitted",
+                    pair=(drugA, drugB),
+                    rating="moderate",
+                    score=0.5,
+                )
                 st.rerun()
             except Exception as e:
                 logger.error(f"Failed to record feedback: {e}")
                 st.error("Failed to record feedback. Please try again.")
-    
+
     with col3:
-        if st.button("Unsafe", width="stretch", key=f"{feedback_key}_unsafe", type="secondary"):
+        if st.button(
+            "Unsafe", width="stretch", key=f"{feedback_key}_unsafe", type="secondary"
+        ):
             try:
                 record_feedback(
                     drugA,
@@ -988,12 +1096,17 @@ def _render_feedback_section(context: Dict[str, Any], drugA: str, drugB: str):
                     mode=mode,
                 )
                 st.session_state.feedback_submitted[pair_str] = True
-                log_event("feedback.submitted", pair=(drugA, drugB), rating="unsafe", score=0.1)
+                log_event(
+                    "feedback.submitted",
+                    pair=(drugA, drugB),
+                    rating="unsafe",
+                    score=0.1,
+                )
                 st.rerun()
             except Exception as e:
                 logger.error(f"Failed to record feedback: {e}")
                 st.error("Failed to record feedback. Please try again.")
-    
+
     st.caption("Feedback stores a compact evidence snapshot for review.")
 
 
@@ -1065,10 +1178,14 @@ def _handle_explain_pair():
 
         with st.spinner("Generating comprehensive analysis..."):
             out = run_rag(
-                a, b,
+                a,
+                b,
                 mode=mode,
                 history=[],
-                use_cache_context=(st.session_state.use_ctx_cache and not st.session_state.force_refresh),
+                use_cache_context=(
+                    st.session_state.use_ctx_cache
+                    and not st.session_state.force_refresh
+                ),
                 use_cache_response=False,
                 stream=True,
             )
@@ -1091,7 +1208,9 @@ def _handle_explain_pair():
         log_event("explain_pair.done", pair=(a, b), answer_len=len(text))
     except Exception:
         logger.exception("Error in _handle_explain_pair")
-        st.error("An error occurred while generating the initial explanation. See logs for details.")
+        st.error(
+            "An error occurred while generating the initial explanation. See logs for details."
+        )
 
 
 def _handle_followup(user_msg: str):
@@ -1101,33 +1220,46 @@ def _handle_followup(user_msg: str):
         return
 
     try:
-        context = st.session_state.context_by_pair.get((a, b)) or _maybe_load_context(a, b)
+        context = st.session_state.context_by_pair.get((a, b)) or _maybe_load_context(
+            a, b
+        )
         mode = st.session_state.mode
 
-        history = [{"role": m["role"], "text": m["text"]} for m in st.session_state.chat if m["role"] in ("user", "assistant")]
+        history = [
+            {"role": m["role"], "text": m["text"]}
+            for m in st.session_state.chat
+            if m["role"] in ("user", "assistant")
+        ]
 
         with st.spinner("Analyzing your question..."):
             out = generate_response(
-                context, mode, history=history, stream=True,
+                context,
+                mode,
+                history=history,
+                stream=True,
             )
 
         text = out["text"]
         _append_chat("assistant", text)
 
-        log_event("followup.done", pair=(a, b), q_len=len(user_msg), answer_len=len(text))
+        log_event(
+            "followup.done", pair=(a, b), q_len=len(user_msg), answer_len=len(text)
+        )
     except Exception:
         logger.exception("Error in _handle_followup")
-        st.error("An error occurred while generating the follow-up. See logs for details.")
+        st.error(
+            "An error occurred while generating the follow-up. See logs for details."
+        )
 
 
 def _render_footer():
     st.markdown(
         f'<div class="app-footer">'
-        f'<p><strong>INFERMed</strong> - Research software for drug interaction analysis</p>'
+        f"<p><strong>INFERMed</strong> - Research software for drug interaction analysis</p>"
         f'<p style="font-size: 0.875rem;">This tool is for informational purposes only. '
-        f'Always consult licensed clinicians for medical decisions.</p>'
-        f'</div>',
-        unsafe_allow_html=True
+        f"Always consult licensed clinicians for medical decisions.</p>"
+        f"</div>",
+        unsafe_allow_html=True,
     )
 
 

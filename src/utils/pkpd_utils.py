@@ -28,18 +28,26 @@ __all__ = [
 
 # Extendable synonym table for common CYPs & key Phase II/transporters (lowercased, whitespace/hyphen-normalized)
 _CYP_SYNONYMS: Dict[str, Set[str]] = {
-    "cyp3a4":  {"cyp3a4", "cytochrome p450 3a4", "cyp 3a4", "p450 3a4"},
-    "cyp3a5":  {"cyp3a5", "cytochrome p450 3a5", "cyp 3a5", "p450 3a5"},
-    "cyp2c9":  {"cyp2c9", "cytochrome p450 2c9", "cyp 2c9", "p450 2c9"},
-    "cyp2d6":  {"cyp2d6", "cytochrome p450 2d6", "cyp 2d6", "p450 2d6"},
-    "cyp1a2":  {"cyp1a2", "cytochrome p450 1a2", "cyp 1a2", "p450 1a2"},
-    "cyp2c19": {"cyp2c19","cytochrome p450 2c19","cyp 2c19","p450 2c19"},
+    "cyp3a4": {"cyp3a4", "cytochrome p450 3a4", "cyp 3a4", "p450 3a4"},
+    "cyp3a5": {"cyp3a5", "cytochrome p450 3a5", "cyp 3a5", "p450 3a5"},
+    "cyp2c9": {"cyp2c9", "cytochrome p450 2c9", "cyp 2c9", "p450 2c9"},
+    "cyp2d6": {"cyp2d6", "cytochrome p450 2d6", "cyp 2d6", "p450 2d6"},
+    "cyp1a2": {"cyp1a2", "cytochrome p450 1a2", "cyp 1a2", "p450 1a2"},
+    "cyp2c19": {"cyp2c19", "cytochrome p450 2c19", "cyp 2c19", "p450 2c19"},
     # UGT (phase II)
-    "ugt1a1":  {"ugt1a1","ugt 1a1","uridine diphospho glucuronosyltransferase 1a1"},
+    "ugt1a1": {"ugt1a1", "ugt 1a1", "uridine diphospho glucuronosyltransferase 1a1"},
     # Transporters
-    "abcb1":   {"abcb1","p gp","p-gp","pgp","p glycoprotein","p-glycoprotein","mdr1"},
-    "slco1b1": {"slco1b1","oatp1b1","oatp 1b1"},
-    "abcg2":   {"abcg2","bcrp","breast cancer resistance protein"},
+    "abcb1": {
+        "abcb1",
+        "p gp",
+        "p-gp",
+        "pgp",
+        "p glycoprotein",
+        "p-glycoprotein",
+        "mdr1",
+    },
+    "slco1b1": {"slco1b1", "oatp1b1", "oatp 1b1"},
+    "abcg2": {"abcg2", "bcrp", "breast cancer resistance protein"},
 }
 # Flatten alias→canonical map
 _CANON_BY_ALIAS: Dict[str, str] = {
@@ -48,12 +56,14 @@ _CANON_BY_ALIAS: Dict[str, str] = {
 
 _WHITESPACE = re.compile(r"\s+")
 
+
 def _norm_text(s: str) -> str:
     """Lowercase, trim, collapse whitespace, Unicode NFKC normalize."""
     s = unicodedata.normalize("NFKC", s or "")
     s = s.lower().strip()
     s = _WHITESPACE.sub(" ", s)
     return s
+
 
 def canonicalize_enzyme(name: str) -> str:
     """
@@ -62,6 +72,7 @@ def canonicalize_enzyme(name: str) -> str:
     """
     a = _norm_text(name)
     return _CANON_BY_ALIAS.get(a, a)
+
 
 def _stringify_item(v: Any) -> str:
     """
@@ -72,6 +83,7 @@ def _stringify_item(v: Any) -> str:
     if isinstance(v, dict):
         return str(v.get("label") or v.get("uri") or "")
     return str(v)
+
 
 def canonicalize_list(values: Iterable[Any], *, topk: int | None = None) -> List[str]:
     """
@@ -93,9 +105,11 @@ def canonicalize_list(values: Iterable[Any], *, topk: int | None = None) -> List
             break
     return out
 
+
 # --------------------------------------------------------------------------------------
 # PK roles & overlaps
 # --------------------------------------------------------------------------------------
+
 
 def extract_pk_roles(mech: Dict[str, Any]) -> Dict[str, Dict[str, Set[str]]]:
     """
@@ -111,11 +125,21 @@ def extract_pk_roles(mech: Dict[str, Any]) -> Dict[str, Dict[str, Set[str]]]:
     for side in ("a", "b"):
         side_map = ez.get(side, {}) or {}
         roles[side] = {
-            "substrate": {canonicalize_enzyme(_stringify_item(x)) for x in side_map.get("substrate", [])},
-            "inhibitor": {canonicalize_enzyme(_stringify_item(x)) for x in side_map.get("inhibitor", [])},
-            "inducer":   {canonicalize_enzyme(_stringify_item(x)) for x in side_map.get("inducer",   [])},
+            "substrate": {
+                canonicalize_enzyme(_stringify_item(x))
+                for x in side_map.get("substrate", [])
+            },
+            "inhibitor": {
+                canonicalize_enzyme(_stringify_item(x))
+                for x in side_map.get("inhibitor", [])
+            },
+            "inducer": {
+                canonicalize_enzyme(_stringify_item(x))
+                for x in side_map.get("inducer", [])
+            },
         }
     return roles
+
 
 def detect_pk_overlaps(roles: Dict[str, Dict[str, Set[str]]]) -> Dict[str, Set[str]]:
     """
@@ -126,16 +150,24 @@ def detect_pk_overlaps(roles: Dict[str, Dict[str, Set[str]]]) -> Dict[str, Set[s
     """
     a = roles.get("a", {})
     b = roles.get("b", {})
-    inhib = (a.get("substrate", set()) & b.get("inhibitor", set())) | (b.get("substrate", set()) & a.get("inhibitor", set()))
-    induc = (a.get("substrate", set()) & b.get("inducer", set()))   | (b.get("substrate", set()) & a.get("inducer", set()))
+    inhib = (a.get("substrate", set()) & b.get("inhibitor", set())) | (
+        b.get("substrate", set()) & a.get("inhibitor", set())
+    )
+    induc = (a.get("substrate", set()) & b.get("inducer", set())) | (
+        b.get("substrate", set()) & a.get("inducer", set())
+    )
     shared = a.get("substrate", set()) & b.get("substrate", set())
     return {"inhibition": inhib, "induction": induc, "shared_substrate": shared}
+
 
 # --------------------------------------------------------------------------------------
 # PD overlap
 # --------------------------------------------------------------------------------------
 
-def pd_overlap(mech: Dict[str, Any], *, target_topk: int = 32, path_topk: int = 24) -> Dict[str, Any]:
+
+def pd_overlap(
+    mech: Dict[str, Any], *, target_topk: int = 32, path_topk: int = 24
+) -> Dict[str, Any]:
     """
     Compute simple PD overlap from targets/pathways.
     Returns:
@@ -152,12 +184,20 @@ def pd_overlap(mech: Dict[str, Any], *, target_topk: int = 32, path_topk: int = 
     common_targets = sorted(ta & tb)
     common_paths = sorted(pa & pb)
     # Heuristic score: equal weight targets and pathways, saturate at 10 each.
-    score = min(1.0, 0.5 * (len(common_targets) / 10.0) + 0.5 * (len(common_paths) / 10.0))
-    return {"overlap_targets": common_targets, "overlap_pathways": common_paths, "pd_score": round(score, 3)}
+    score = min(
+        1.0, 0.5 * (len(common_targets) / 10.0) + 0.5 * (len(common_paths) / 10.0)
+    )
+    return {
+        "overlap_targets": common_targets,
+        "overlap_pathways": common_paths,
+        "pd_score": round(score, 3),
+    }
+
 
 # --------------------------------------------------------------------------------------
 # Synthesis (compact summaries for LLM)
 # --------------------------------------------------------------------------------------
+
 
 @lru_cache(maxsize=1)
 def _load_canonical_pkpd() -> Dict[str, Any]:
@@ -201,7 +241,9 @@ def _get_canonical_ugt_transporter(drug_name: str) -> Optional[Dict[str, Any]]:
     return ugt_transporter.get(norm_name)
 
 
-def _enhance_roles_with_canonical(drug_name: str, roles: Dict[str, Set[str]]) -> Dict[str, Set[str]]:
+def _enhance_roles_with_canonical(
+    drug_name: str, roles: Dict[str, Set[str]]
+) -> Dict[str, Set[str]]:
     """Enhance enzyme/transporter roles with canonical data."""
     canonical = _get_canonical_ugt_transporter(drug_name)
     if not canonical:
@@ -235,8 +277,14 @@ def summarize_pkpd_risk(drugA: str, drugB: str, mech: Dict[str, Any]) -> Dict[st
     roles = extract_pk_roles(mech)
 
     # Enhance roles with canonical UGT/transporter data
-    roles["a"] = _enhance_roles_with_canonical(drugA, roles.get("a", {"substrate": set(), "inhibitor": set(), "inducer": set()}))
-    roles["b"] = _enhance_roles_with_canonical(drugB, roles.get("b", {"substrate": set(), "inhibitor": set(), "inducer": set()}))
+    roles["a"] = _enhance_roles_with_canonical(
+        drugA,
+        roles.get("a", {"substrate": set(), "inhibitor": set(), "inducer": set()}),
+    )
+    roles["b"] = _enhance_roles_with_canonical(
+        drugB,
+        roles.get("b", {"substrate": set(), "inhibitor": set(), "inducer": set()}),
+    )
 
     overlaps = detect_pk_overlaps(roles)
     pd = pd_overlap(mech)
@@ -248,17 +296,24 @@ def summarize_pkpd_risk(drugA: str, drugB: str, mech: Dict[str, Any]) -> Dict[st
     if settings.enable_kegg:
         try:
             from src.retrieval import kegg_client as kg
+
             kegg_metabolism_a = kg.get_metabolism_pathway(drugA)
             kegg_metabolism_b = kg.get_metabolism_pathway(drugB)
 
             # Add KEGG enzyme information to PK analysis
             if kegg_metabolism_a and kegg_metabolism_a.get("enzymes"):
-                kegg_enzymes_a = [e.get("enzyme_name", "") for e in kegg_metabolism_a["enzymes"] if e.get("enzyme_name")]
+                kegg_enzymes_a = [
+                    e.get("enzyme_name", "")
+                    for e in kegg_metabolism_a["enzymes"]
+                    if e.get("enzyme_name")
+                ]
                 # Try to match KEGG enzymes to CYP names
                 for kegg_enzyme in kegg_enzymes_a:
                     kegg_lower = kegg_enzyme.lower()
                     if "cytochrome p450" in kegg_lower or "cyp" in kegg_lower:
-                        cyp_match = re.search(r"cyp\s*(\d+[a-z]?\d*)", kegg_lower, re.IGNORECASE)
+                        cyp_match = re.search(
+                            r"cyp\s*(\d+[a-z]?\d*)", kegg_lower, re.IGNORECASE
+                        )
                         if cyp_match:
                             cyp_canon = f"cyp{cyp_match.group(1).lower()}"
                             # Add to roles if not already present (roles uses sets, not lists)
@@ -267,11 +322,17 @@ def summarize_pkpd_risk(drugA: str, drugB: str, mech: Dict[str, Any]) -> Dict[st
                             roles["a"]["substrate"].add(cyp_canon)
 
             if kegg_metabolism_b and kegg_metabolism_b.get("enzymes"):
-                kegg_enzymes_b = [e.get("enzyme_name", "") for e in kegg_metabolism_b["enzymes"] if e.get("enzyme_name")]
+                kegg_enzymes_b = [
+                    e.get("enzyme_name", "")
+                    for e in kegg_metabolism_b["enzymes"]
+                    if e.get("enzyme_name")
+                ]
                 for kegg_enzyme in kegg_enzymes_b:
                     kegg_lower = kegg_enzyme.lower()
                     if "cytochrome p450" in kegg_lower or "cyp" in kegg_lower:
-                        cyp_match = re.search(r"cyp\s*(\d+[a-z]?\d*)", kegg_lower, re.IGNORECASE)
+                        cyp_match = re.search(
+                            r"cyp\s*(\d+[a-z]?\d*)", kegg_lower, re.IGNORECASE
+                        )
                         if cyp_match:
                             cyp_canon = f"cyp{cyp_match.group(1).lower()}"
                             # Add to roles if not already present (roles uses sets, not lists)
@@ -280,6 +341,7 @@ def summarize_pkpd_risk(drugA: str, drugB: str, mech: Dict[str, Any]) -> Dict[st
                             roles["b"]["substrate"].add(cyp_canon)
         except Exception as e:
             import logging
+
             logging.getLogger(__name__).debug("KEGG integration failed: %s", e)
     # Recalculate overlaps with enhanced data
     overlaps = detect_pk_overlaps(roles)
@@ -295,7 +357,9 @@ def summarize_pkpd_risk(drugA: str, drugB: str, mech: Dict[str, Any]) -> Dict[st
         evidence_level = canonical_interaction.get("evidence_level", "")
 
         # Build canonical PK flag
-        direction_symbol = "↑" if direction == "increase" else "↓" if direction == "decrease" else ""
+        direction_symbol = (
+            "↑" if direction == "increase" else "↓" if direction == "decrease" else ""
+        )
         severity_label = severity.replace("_", " ").title() if severity else ""
 
         canonical_flag = f"CANONICAL PK INTERACTION ({evidence_level.replace('_', ' ').title()}): {mechanism}"
@@ -308,11 +372,21 @@ def summarize_pkpd_risk(drugA: str, drugB: str, mech: Dict[str, Any]) -> Dict[st
     else:
         # Fallback to detected overlaps if no canonical data
         if overlaps["inhibition"]:
-            pk_flags.append("Potential ↑ exposure via inhibition at " + ", ".join(sorted(overlaps["inhibition"])))
+            pk_flags.append(
+                "Potential ↑ exposure via inhibition at "
+                + ", ".join(sorted(overlaps["inhibition"]))
+            )
         if overlaps["induction"]:
-            pk_flags.append("Potential ↓ exposure via induction at " + ", ".join(sorted(overlaps["induction"])))
+            pk_flags.append(
+                "Potential ↓ exposure via induction at "
+                + ", ".join(sorted(overlaps["induction"]))
+            )
         if overlaps["shared_substrate"]:
-            pk_flags.append("Both are substrates of " + ", ".join(sorted(overlaps["shared_substrate"])) + " (competition possible)")
+            pk_flags.append(
+                "Both are substrates of "
+                + ", ".join(sorted(overlaps["shared_substrate"]))
+                + " (competition possible)"
+            )
 
     # Enhanced PD analysis with Reactome and KEGG pathways
     enhanced_pathways = []
@@ -344,13 +418,16 @@ def summarize_pkpd_risk(drugA: str, drugB: str, mech: Dict[str, Any]) -> Dict[st
 
             if uniprot_ids_a or uniprot_ids_b:
                 all_uniprot_ids = list(set(uniprot_ids_a + uniprot_ids_b))
-                reactome_pathways = rc.get_common_pathways_for_proteins(all_uniprot_ids[:10])  # Limit to avoid too many queries
+                reactome_pathways = rc.get_common_pathways_for_proteins(
+                    all_uniprot_ids[:10]
+                )  # Limit to avoid too many queries
                 for pathway in reactome_pathways[:5]:  # Top 5
                     pathway_name = pathway.get("pathway_name", "")
                     if pathway_name:
                         enhanced_pathways.append(pathway_name)
         except Exception as e:
             import logging
+
             logging.getLogger(__name__).debug("Reactome integration failed: %s", e)
 
     # Get KEGG common pathways
@@ -365,7 +442,10 @@ def summarize_pkpd_risk(drugA: str, drugB: str, mech: Dict[str, Any]) -> Dict[st
                     enhanced_pathways.append(f"KEGG: {pathway_name}")
         except Exception as e:
             import logging
-            logging.getLogger(__name__).debug("KEGG common pathway integration failed: %s", e)
+
+            logging.getLogger(__name__).debug(
+                "KEGG common pathway integration failed: %s", e
+            )
 
     pd_flags: List[str] = []
     if pd["overlap_targets"]:
@@ -381,24 +461,29 @@ def summarize_pkpd_risk(drugA: str, drugB: str, mech: Dict[str, Any]) -> Dict[st
         pk_detail["canonical_interaction"] = canonical_interaction
 
     return {
-        "pk_summary": "; ".join(pk_flags) if pk_flags else "No strong PK overlap detected",
+        "pk_summary": (
+            "; ".join(pk_flags) if pk_flags else "No strong PK overlap detected"
+        ),
         "pd_summary": "; ".join(pd_flags) if pd_flags else "No obvious PD overlap",
         "pk_detail": pk_detail,
         "pd_detail": pd,
     }
 
+
 # --------------------------------------------------------------------------------------
 # FAERS compact formatting
 # --------------------------------------------------------------------------------------
+
 
 def topk_faers(faers: Dict[str, Any], k: int = 5) -> Dict[str, str]:
     """
     Convert FAERS tuples to short 'term (n=count)' strings with consistent
     'No evidence from FAERS.' when empty. Safely handles malformed rows.
     """
+
     def coerce_pairs(items: Any) -> List[Tuple[str, int]]:
         out: List[Tuple[str, int]] = []
-        for it in (items or []):
+        for it in items or []:
             try:
                 t, c = it
                 out.append((str(t), int(c)))
@@ -418,9 +503,11 @@ def topk_faers(faers: Dict[str, Any], k: int = 5) -> Dict[str, str]:
         "combo": fmt(faers.get("combo_reactions")),
     }
 
+
 # --------------------------------------------------------------------------------------
 # Glue helper: safely combine QLever + DuckDB PD targets
 # --------------------------------------------------------------------------------------
+
 
 def synthesize_mechanistic(
     qlever_mech: Dict[str, Any] | None,
@@ -438,12 +525,23 @@ def synthesize_mechanistic(
 
     # --- Enzymes: normalize per role per side (stringify to be safe) ---
     raw_ez = q.get("enzymes", {}) or {"a": {}, "b": {}}
+
     def canon_roles(side_map: Dict[str, Any]) -> Dict[str, List[str]]:
         return {
-            "substrate": [canonicalize_enzyme(_stringify_item(x)) for x in (side_map.get("substrate") or [])],
-            "inhibitor": [canonicalize_enzyme(_stringify_item(x)) for x in (side_map.get("inhibitor") or [])],
-            "inducer":   [canonicalize_enzyme(_stringify_item(x)) for x in (side_map.get("inducer")   or [])],
+            "substrate": [
+                canonicalize_enzyme(_stringify_item(x))
+                for x in (side_map.get("substrate") or [])
+            ],
+            "inhibitor": [
+                canonicalize_enzyme(_stringify_item(x))
+                for x in (side_map.get("inhibitor") or [])
+            ],
+            "inducer": [
+                canonicalize_enzyme(_stringify_item(x))
+                for x in (side_map.get("inducer") or [])
+            ],
         }
+
     enzymes = {
         "a": canon_roles(raw_ez.get("a", {}) or {}),
         "b": canon_roles(raw_ez.get("b", {}) or {}),
@@ -454,7 +552,7 @@ def synthesize_mechanistic(
     t_b = q.get("targets_b")
     p_a = q.get("pathways_a")
     p_b = q.get("pathways_b")
-    cp  = q.get("common_pathways")
+    cp = q.get("common_pathways")
     d_a = q.get("diseases_a")  # NEW: diseases from DISEASE index
     d_b = q.get("diseases_b")  # NEW: diseases from DISEASE index
 

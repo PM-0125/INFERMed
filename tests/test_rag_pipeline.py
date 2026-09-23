@@ -26,13 +26,15 @@ def clean_cache(tmp_path, monkeypatch):
     shutil.rmtree(cache_dir, ignore_errors=True)
 
 
-def _monkeypatch_retrievals(monkeypatch,
-                            duck_targets_a=None,
-                            duck_targets_b=None,
-                            qlever_enriched=None,
-                            faers_a=None,
-                            faers_b=None,
-                            faers_combo=None):
+def _monkeypatch_retrievals(
+    monkeypatch,
+    duck_targets_a=None,
+    duck_targets_b=None,
+    qlever_enriched=None,
+    faers_a=None,
+    faers_b=None,
+    faers_combo=None,
+):
     monkeypatch.setenv("INFERMED_DATA_MODE", "full_research_future")
     monkeypatch.setenv("ENABLE_QLEVER", "true")
     monkeypatch.setenv("ENABLE_OPENFDA_LABEL", "false")
@@ -49,29 +51,56 @@ def _monkeypatch_retrievals(monkeypatch,
 
     # ---- DuckDB stubs ----
     class FakeDuckDBClient:
-        def __init__(self, *a, **k): pass
-        def get_interaction_score(self, a, b): return 2.5
-        def get_dili_risk(self, d): return "low" if d.lower().startswith("a") else "medium"
-        def get_dict_rank(self, d): return "mild"
-        def get_diqt_score(self, d): return 0.1
+        def __init__(self, *a, **k):
+            pass
+
+        def get_interaction_score(self, a, b):
+            return 2.5
+
+        def get_dili_risk(self, d):
+            return "low" if d.lower().startswith("a") else "medium"
+
+        def get_dict_rank(self, d):
+            return "mild"
+
+        def get_diqt_score(self, d):
+            return 0.1
+
         def get_side_effects(self, d, drug_b=None, top_k=20, min_prr=1.0):
             if drug_b is not None:
                 # Pair query
                 return ["Bleeding", "Bruising"]
             return ["Headache", "Nausea", "Rash"]
+
         def get_drug_targets(self, d):
             if isinstance(d, list):
                 # Batch mode
-                return {drug: (duck_targets_a if drug.lower().startswith("a") else duck_targets_b) or ["HMGCR"] for drug in d}
+                return {
+                    drug: (
+                        duck_targets_a
+                        if drug.lower().startswith("a")
+                        else duck_targets_b
+                    )
+                    or ["HMGCR"]
+                    for drug in d
+                }
             if d.lower().startswith("a"):
                 return duck_targets_a or ["HMGCR", "PCSK9"]
             return duck_targets_b or ["EGFR", "BRAF"]
-        def get_dilirank_score(self, d): return 0.3 if d.lower().startswith("a") else 0.5
-        def get_dictrank_score(self, d): return 0.2
-        def get_synonyms(self, d): return [d]
+
+        def get_dilirank_score(self, d):
+            return 0.3 if d.lower().startswith("a") else 0.5
+
+        def get_dictrank_score(self, d):
+            return 0.2
+
+        def get_synonyms(self, d):
+            return [d]
 
     class FakeDQModule(types.SimpleNamespace):
-        def init_duckdb_connection(self, *a, **k): return None
+        def init_duckdb_connection(self, *a, **k):
+            return None
+
         DuckDBClient = FakeDuckDBClient
 
     fake_dq = FakeDQModule()
@@ -79,9 +108,15 @@ def _monkeypatch_retrievals(monkeypatch,
 
     # ---- OpenFDA stubs ----
     class FakeOpenFDA:
-        def __init__(self, cache_dir=None): pass
-        def get_top_reactions(self, d, top_k=10): 
-            return (faers_a if d.lower().startswith("a") else faers_b) or [("Headache", 10), ("Rash", 5)]
+        def __init__(self, cache_dir=None):
+            pass
+
+        def get_top_reactions(self, d, top_k=10):
+            return (faers_a if d.lower().startswith("a") else faers_b) or [
+                ("Headache", 10),
+                ("Rash", 5),
+            ]
+
         def get_combination_reactions(self, a, b, top_k=10):
             return faers_combo or [("Bleeding", 2)]
 
@@ -115,8 +150,10 @@ def _monkeypatch_retrievals(monkeypatch,
         def get_mechanistic(self, A, B):
             # basic fallback
             return {
-                "enzymes": {"a": {"substrate": [], "inhibitor": [], "inducer": []},
-                            "b": {"substrate": [], "inhibitor": [], "inducer": []}},
+                "enzymes": {
+                    "a": {"substrate": [], "inhibitor": [], "inducer": []},
+                    "b": {"substrate": [], "inhibitor": [], "inducer": []},
+                },
                 "targets_a": [],
                 "targets_b": [],
                 "pathways_a": [],
@@ -132,18 +169,46 @@ def _monkeypatch_retrievals(monkeypatch,
     fake_ql = FakeQL()
     monkeypatch.setattr(rp, "ql", fake_ql, raising=True)
 
-    from src.retrieval import chembl_client, kegg_client, pubchem_client, reactome_client, uniprot_client
+    from src.retrieval import (
+        chembl_client,
+        kegg_client,
+        pubchem_client,
+        reactome_client,
+        uniprot_client,
+    )
 
-    monkeypatch.setattr(pubchem_client, "get_compound_cid_by_name", lambda drug: None, raising=False)
-    monkeypatch.setattr(pubchem_client, "get_compound_pk_data", lambda cid: {}, raising=True)
-    monkeypatch.setattr(pubchem_client, "get_compound_pk_data_by_name", lambda drug: {}, raising=True)
+    monkeypatch.setattr(
+        pubchem_client, "get_compound_cid_by_name", lambda drug: None, raising=False
+    )
+    monkeypatch.setattr(
+        pubchem_client, "get_compound_pk_data", lambda cid: {}, raising=True
+    )
+    monkeypatch.setattr(
+        pubchem_client, "get_compound_pk_data_by_name", lambda drug: {}, raising=True
+    )
     monkeypatch.setattr(kegg_client, "get_drug_pathways", lambda drug: [], raising=True)
-    monkeypatch.setattr(kegg_client, "get_common_pathways", lambda a, b: [], raising=True)
+    monkeypatch.setattr(
+        kegg_client, "get_common_pathways", lambda a, b: [], raising=True
+    )
     monkeypatch.setattr(kegg_client, "get_drug_enzymes", lambda drug: [], raising=True)
-    monkeypatch.setattr(kegg_client, "get_metabolism_pathway", lambda drug: {"pathways": [], "enzymes": []}, raising=True)
-    monkeypatch.setattr(reactome_client, "get_common_pathways_for_proteins", lambda ids: [], raising=True)
-    monkeypatch.setattr(reactome_client, "get_drug_target_pathways", lambda drug, ids: [], raising=True)
-    monkeypatch.setattr(uniprot_client, "enrich_protein_list", lambda seeds: [], raising=True)
+    monkeypatch.setattr(
+        kegg_client,
+        "get_metabolism_pathway",
+        lambda drug: {"pathways": [], "enzymes": []},
+        raising=True,
+    )
+    monkeypatch.setattr(
+        reactome_client,
+        "get_common_pathways_for_proteins",
+        lambda ids: [],
+        raising=True,
+    )
+    monkeypatch.setattr(
+        reactome_client, "get_drug_target_pathways", lambda drug, ids: [], raising=True
+    )
+    monkeypatch.setattr(
+        uniprot_client, "enrich_protein_list", lambda seeds: [], raising=True
+    )
     monkeypatch.setattr(
         chembl_client,
         "enrich_mechanistic_data",
@@ -159,13 +224,16 @@ def _monkeypatch_retrievals(monkeypatch,
 def test_retrieve_and_normalize_enriched(monkeypatch):
     _monkeypatch_retrievals(monkeypatch)
 
-    ctx = rp.retrieve_and_normalize("ADrug", "BDrug",
-                                    parquet_dir="/dev/null",
-                                    openfda_cache="/dev/null",
-                                    topk_side_effects=2,
-                                    topk_faers=1,
-                                    topk_targets=2,
-                                    topk_pathways=1)
+    ctx = rp.retrieve_and_normalize(
+        "ADrug",
+        "BDrug",
+        parquet_dir="/dev/null",
+        openfda_cache="/dev/null",
+        topk_side_effects=2,
+        topk_faers=1,
+        topk_targets=2,
+        topk_pathways=1,
+    )
     # basic shape
     assert set(ctx.keys()) >= {"drugs", "signals", "sources", "caveats", "pkpd", "meta"}
     mech = ctx["signals"]["mechanistic"]
@@ -198,7 +266,9 @@ def test_retrieve_and_normalize_qlever_stub_fallback(monkeypatch):
     # Since QLever failed, PD targets should come from DuckDB fallback (normalized)
     assert mech["targets_a"] == ["hmgcr", "pcsk9"]
     # caveats should indicate QLever fallback somewhere
-    assert any("fallback" in c.lower() or "unavailable" in c.lower() for c in ctx["caveats"])
+    assert any(
+        "fallback" in c.lower() or "unavailable" in c.lower() for c in ctx["caveats"]
+    )
 
 
 def test_qlever_disabled_does_not_call_query_module(monkeypatch):
@@ -239,18 +309,37 @@ def test_public_safe_rest_enrichment_fills_qlever_gap(monkeypatch):
     monkeypatch.setattr(rp, "get_reranker", lambda: None, raising=True)
 
     class FakeDuckDBClient:
-        def __init__(self, *a, **k): pass
-        def get_available_sources(self): return {}
-        def get_interaction_score(self, a, b): return None
-        def get_side_effects(self, *a, **k): return []
-        def get_dilirank_score(self, d): return None
-        def get_dictrank_score(self, d): return None
-        def get_diqt_score(self, d): return None
-        def get_drug_targets(self, d): return []
-        def get_synonyms(self, d): return []
+        def __init__(self, *a, **k):
+            pass
+
+        def get_available_sources(self):
+            return {}
+
+        def get_interaction_score(self, a, b):
+            return None
+
+        def get_side_effects(self, *a, **k):
+            return []
+
+        def get_dilirank_score(self, d):
+            return None
+
+        def get_dictrank_score(self, d):
+            return None
+
+        def get_diqt_score(self, d):
+            return None
+
+        def get_drug_targets(self, d):
+            return []
+
+        def get_synonyms(self, d):
+            return []
 
     class FakeDQModule(types.SimpleNamespace):
-        def init_duckdb_connection(self, *a, **k): return None
+        def init_duckdb_connection(self, *a, **k):
+            return None
+
         DuckDBClient = FakeDuckDBClient
 
     monkeypatch.setattr(rp, "dq", FakeDQModule(), raising=True)
@@ -261,20 +350,40 @@ def test_public_safe_rest_enrichment_fills_qlever_gap(monkeypatch):
 
     monkeypatch.setattr(rp, "ql", BoomQL(), raising=True)
 
-    from src.retrieval import chembl_client, kegg_client, pubchem_client, reactome_client, uniprot_client
+    from src.retrieval import (
+        chembl_client,
+        kegg_client,
+        pubchem_client,
+        reactome_client,
+        uniprot_client,
+    )
 
-    monkeypatch.setattr(pubchem_client, "get_compound_cid_by_name", lambda drug: {"ADrug": "111", "BDrug": "222"}.get(drug), raising=True)
-    monkeypatch.setattr(pubchem_client, "get_compound_pk_data", lambda cid: {"molecular_weight": 300.0, "log_p": 2.1}, raising=True)
+    monkeypatch.setattr(
+        pubchem_client,
+        "get_compound_cid_by_name",
+        lambda drug: {"ADrug": "111", "BDrug": "222"}.get(drug),
+        raising=True,
+    )
+    monkeypatch.setattr(
+        pubchem_client,
+        "get_compound_pk_data",
+        lambda cid: {"molecular_weight": 300.0, "log_p": 2.1},
+        raising=True,
+    )
     monkeypatch.setattr(
         kegg_client,
         "get_drug_pathways",
-        lambda drug: [{"pathway_id": f"hsa-{drug}", "pathway_name": f"{drug} metabolism"}],
+        lambda drug: [
+            {"pathway_id": f"hsa-{drug}", "pathway_name": f"{drug} metabolism"}
+        ],
         raising=True,
     )
     monkeypatch.setattr(
         kegg_client,
         "get_common_pathways",
-        lambda a, b: [{"pathway_id": "hsa-common", "pathway_name": "Shared metabolism"}],
+        lambda a, b: [
+            {"pathway_id": "hsa-common", "pathway_name": "Shared metabolism"}
+        ],
         raising=True,
     )
     monkeypatch.setattr(
@@ -286,7 +395,12 @@ def test_public_safe_rest_enrichment_fills_qlever_gap(monkeypatch):
     monkeypatch.setattr(
         kegg_client,
         "get_metabolism_pathway",
-        lambda drug: {"pathways": [], "enzymes": [{"enzyme_id": "1.14.14.1", "enzyme_name": "Cytochrome P450 3A4"}]},
+        lambda drug: {
+            "pathways": [],
+            "enzymes": [
+                {"enzyme_id": "1.14.14.1", "enzyme_name": "Cytochrome P450 3A4"}
+            ],
+        },
         raising=True,
     )
     monkeypatch.setattr(
@@ -295,32 +409,49 @@ def test_public_safe_rest_enrichment_fills_qlever_gap(monkeypatch):
         lambda drug, enzymes: {
             "enzymes": enzymes,
             "enzyme_strength": {"strong": ["cyp3a4"], "moderate": [], "weak": []},
-            "chembl_validation": {"found": True, "matches": [], "mismatches": ["cyp3a4"]},
+            "chembl_validation": {
+                "found": True,
+                "matches": [],
+                "mismatches": ["cyp3a4"],
+            },
         },
         raising=True,
     )
     monkeypatch.setattr(
         uniprot_client,
         "enrich_protein_list",
-        lambda seeds: [
-            {
-                "original_id": seeds[0],
-                "uniprot_id": "P08684",
-                "name": "Cytochrome P450 3A4",
-                "gene_names": ["CYP3A4"],
-            }
-        ] if seeds else [],
+        lambda seeds: (
+            [
+                {
+                    "original_id": seeds[0],
+                    "uniprot_id": "P08684",
+                    "name": "Cytochrome P450 3A4",
+                    "gene_names": ["CYP3A4"],
+                }
+            ]
+            if seeds
+            else []
+        ),
         raising=True,
     )
     monkeypatch.setattr(
         reactome_client,
         "get_drug_target_pathways",
-        lambda drug, ids: [{"pathway_id": f"R-HSA-{drug}", "pathway_name": f"{drug} Reactome pathway"}],
+        lambda drug, ids: [
+            {"pathway_id": f"R-HSA-{drug}", "pathway_name": f"{drug} Reactome pathway"}
+        ],
         raising=True,
     )
-    monkeypatch.setattr(reactome_client, "get_common_pathways_for_proteins", lambda ids: [], raising=True)
+    monkeypatch.setattr(
+        reactome_client,
+        "get_common_pathways_for_proteins",
+        lambda ids: [],
+        raising=True,
+    )
 
-    ctx = rp.retrieve_and_normalize("ADrug", "BDrug", parquet_dir="/dev/null", openfda_cache="/dev/null")
+    ctx = rp.retrieve_and_normalize(
+        "ADrug", "BDrug", parquet_dir="/dev/null", openfda_cache="/dev/null"
+    )
     mech = ctx["signals"]["mechanistic"]
 
     assert ctx["drugs"]["a"]["ids"]["pubchem_cid"] == "111"
@@ -372,15 +503,27 @@ def test_clinical_reference_context_is_attached(monkeypatch):
     def fake_clinical_reference(a, b, settings, caveats):
         return {
             "rxnorm": {
-                "a": {"resolved": True, "rxcui": "1111", "name": a, "classes": [{"class_name": "Anticoagulants"}]},
+                "a": {
+                    "resolved": True,
+                    "rxcui": "1111",
+                    "name": a,
+                    "classes": [{"class_name": "Anticoagulants"}],
+                },
                 "b": {"resolved": True, "rxcui": "2222", "name": b, "classes": []},
             },
             "openfda_label": {
-                "a": {"found": True, "effective_time": "20240101", "sections": {"drug_interactions": "Interaction section"}},
+                "a": {
+                    "found": True,
+                    "effective_time": "20240101",
+                    "sections": {"drug_interactions": "Interaction section"},
+                },
                 "b": {"found": False, "sections": {}},
             },
             "dailymed": {
-                "a": {"found": True, "records": [{"title": "A SPL", "set_id": "set-a"}]},
+                "a": {
+                    "found": True,
+                    "records": [{"title": "A SPL", "set_id": "set-a"}],
+                },
                 "b": {"found": False, "records": []},
             },
             "fda_ddi_reference": {
@@ -389,7 +532,9 @@ def test_clinical_reference_context_is_attached(monkeypatch):
             },
         }
 
-    monkeypatch.setattr(rp, "_collect_public_clinical_reference", fake_clinical_reference, raising=True)
+    monkeypatch.setattr(
+        rp, "_collect_public_clinical_reference", fake_clinical_reference, raising=True
+    )
 
     ctx = rp.retrieve_and_normalize("ADrug", "BDrug")
 
@@ -410,7 +555,9 @@ def test_research_enrichment_context_is_attached(monkeypatch):
         return {
             "europe_pmc": {
                 "found": True,
-                "articles": [{"title": f"{a} {b} DDI review", "year": "2026", "pmid": "1"}],
+                "articles": [
+                    {"title": f"{a} {b} DDI review", "year": "2026", "pmid": "1"}
+                ],
             },
             "fda_pgx": {"found": False, "a": [], "b": []},
             "open_targets": {},
@@ -418,7 +565,9 @@ def test_research_enrichment_context_is_attached(monkeypatch):
             "biogrid": {},
         }
 
-    monkeypatch.setattr(rp, "_collect_api_research_enrichment", fake_research_enrichment, raising=True)
+    monkeypatch.setattr(
+        rp, "_collect_api_research_enrichment", fake_research_enrichment, raising=True
+    )
 
     ctx = rp.retrieve_and_normalize("ADrug", "BDrug")
 
@@ -435,24 +584,34 @@ def test_context_cache_key_is_unordered(monkeypatch, tmp_path):
     assert k1 == k2
     assert k1 == "a_b"
     # Should load from cache on second call
-    assert c1['meta']['evidence_cache_status'] == 'rebuilt'
-    assert c2['meta']['evidence_cache_status'] == 'cached'
-    assert c1['meta']['evidence_assembled_at'] == c2['meta']['evidence_assembled_at']
-    assert {k: v for k, v in c1.items() if k != 'meta'} == {k: v for k, v in c2.items() if k != 'meta'}
+    assert c1["meta"]["evidence_cache_status"] == "rebuilt"
+    assert c2["meta"]["evidence_cache_status"] == "cached"
+    assert c1["meta"]["evidence_assembled_at"] == c2["meta"]["evidence_assembled_at"]
+    assert {k: v for k, v in c1.items() if k != "meta"} == {
+        k: v for k, v in c2.items() if k != "meta"
+    }
 
 
 def test_run_rag_uses_llm_and_history(monkeypatch):
     _monkeypatch_retrievals(monkeypatch)
 
     # stub the LLM call inside rag_pipeline namespace
-    def fake_generate_response(context, mode, seed=None, temperature=0.2, history=None, **kw):
+    def fake_generate_response(
+        context, mode, seed=None, temperature=0.2, history=None, **kw
+    ):
         assert history == [{"role": "user", "text": "prev"}]  # passthrough check
         assert kw.get("stream") is False
         return {"text": f"OK-{mode}", "usage": {}, "meta": {"model": "fake"}}
 
     monkeypatch.setattr(rp, "generate_response", fake_generate_response, raising=True)
 
-    out = rp.run_rag("A", "B", mode="Doctor", history=[{"role": "user", "text": "prev"}], stream=False)
+    out = rp.run_rag(
+        "A",
+        "B",
+        mode="Doctor",
+        history=[{"role": "user", "text": "prev"}],
+        stream=False,
+    )
     assert out["answer"]["text"] == "OK-Doctor"
     assert "signals" in out["context"]  # context was built
 
@@ -463,7 +622,9 @@ def test_run_rag_does_not_force_ollama_model_override(monkeypatch):
 
     seen = {}
 
-    def fake_generate_response(context, mode, seed=None, temperature=0.2, history=None, **kw):
+    def fake_generate_response(
+        context, mode, seed=None, temperature=0.2, history=None, **kw
+    ):
         seen.update(kw)
         return {"text": "OK", "usage": {}, "meta": {"model": "fake"}}
 

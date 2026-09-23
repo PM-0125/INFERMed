@@ -3,7 +3,14 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
-ResearchSignalType = Literal["literature", "protein_network", "experimental_combo", "side_effect", "target_disease", "evidence_gap"]
+ResearchSignalType = Literal[
+    "literature",
+    "protein_network",
+    "experimental_combo",
+    "side_effect",
+    "target_disease",
+    "evidence_gap",
+]
 
 
 @dataclass(frozen=True)

@@ -5,7 +5,14 @@ import json
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
-NormalizationConfidence = Literal["exact_text", "normalized_text", "alias_match", "combination_product", "ambiguous", "unresolved"]
+NormalizationConfidence = Literal[
+    "exact_text",
+    "normalized_text",
+    "alias_match",
+    "combination_product",
+    "ambiguous",
+    "unresolved",
+]
 
 
 @dataclass(frozen=True)

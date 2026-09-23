@@ -70,9 +70,7 @@ def build_interaction_reasoning_record(
         and set(_lower_list(drugs)).issubset(set(_lower_list(card.drug_scope)))
     ]
     pair_signal_cards = [
-        card
-        for card in evidence_cards
-        if _is_pair_signal_card(card, drugs)
+        card for card in evidence_cards if _is_pair_signal_card(card, drugs)
     ]
 
     if direct_cards:
@@ -108,11 +106,15 @@ def build_interaction_reasoning_record(
                 support_level="supported",
                 drug_scope=drugs,
                 evidence_ids=evidence_ids,
-                limitations=["Associative signal; not proof of incidence or causality."],
+                limitations=[
+                    "Associative signal; not proof of incidence or causality."
+                ],
             )
         )
 
-    pk_nodes = profile_graph.shared_nodes("enzyme") + profile_graph.shared_nodes("transporter")
+    pk_nodes = profile_graph.shared_nodes("enzyme") + profile_graph.shared_nodes(
+        "transporter"
+    )
     if pk_nodes:
         evidence_ids = _unique(item for node in pk_nodes for item in node.evidence_ids)
         labels = ", ".join(node.label for node in pk_nodes[:6])
@@ -137,11 +139,15 @@ def build_interaction_reasoning_record(
                 "plausible",
                 drugs,
                 evidence_ids,
-                ["Shared PK proteins indicate plausibility, not direction or magnitude by themselves."],
+                [
+                    "Shared PK proteins indicate plausibility, not direction or magnitude by themselves."
+                ],
             )
         )
 
-    pd_nodes = profile_graph.shared_nodes("target") + profile_graph.shared_nodes("pathway")
+    pd_nodes = profile_graph.shared_nodes("target") + profile_graph.shared_nodes(
+        "pathway"
+    )
     if pd_nodes:
         evidence_ids = _unique(item for node in pd_nodes for item in node.evidence_ids)
         labels = ", ".join(node.label for node in pd_nodes[:6])
@@ -166,13 +172,19 @@ def build_interaction_reasoning_record(
                 "plausible",
                 drugs,
                 evidence_ids,
-                ["Target/pathway overlap does not prove clinical interaction without stronger evidence."],
+                [
+                    "Target/pathway overlap does not prove clinical interaction without stronger evidence."
+                ],
             )
         )
 
-    toxicity_nodes = profile_graph.shared_nodes("adverse_event") + profile_graph.shared_nodes("toxicity_marker")
+    toxicity_nodes = profile_graph.shared_nodes(
+        "adverse_event"
+    ) + profile_graph.shared_nodes("toxicity_marker")
     if toxicity_nodes:
-        evidence_ids = _unique(item for node in toxicity_nodes for item in node.evidence_ids)
+        evidence_ids = _unique(
+            item for node in toxicity_nodes for item in node.evidence_ids
+        )
         labels = ", ".join(node.label for node in toxicity_nodes[:6])
         signals.append(
             ReasoningSignal(
@@ -182,7 +194,9 @@ def build_interaction_reasoning_record(
                 drug_scope=drugs,
                 evidence_ids=evidence_ids,
                 payload={"nodes": [node.to_dict() for node in toxicity_nodes[:12]]},
-                limitations=["Convergent adverse-event profiles are hypothesis-generating unless pair evidence exists."],
+                limitations=[
+                    "Convergent adverse-event profiles are hypothesis-generating unless pair evidence exists."
+                ],
             )
         )
 
@@ -209,7 +223,8 @@ class _ProfileGraphBuilder:
         self._nodes: dict[str, dict[str, Any]] = {}
         self._edges: dict[tuple[str, str, str], dict[str, Any]] = {}
         self._counts: dict[str, dict[str, int]] = {
-            drug: {category: 0 for category in _REQUIRED_PROFILE_ELEMENTS} for drug in self.drugs
+            drug: {category: 0 for category in _REQUIRED_PROFILE_ELEMENTS}
+            for drug in self.drugs
         }
         self._limitations: list[str] = []
 
@@ -354,8 +369,10 @@ def _add_identity_profile(
     context: dict[str, Any],
     evidence_cards: list[EvidenceCard],
 ) -> None:
-    evidence_ids = _card_ids(evidence_cards, drug=drug, source_contains=("rxnorm", "pubchem", "drugcentral"))
-    drug_info = ((context.get("drugs") or {}).get(side) or {})
+    evidence_ids = _card_ids(
+        evidence_cards, drug=drug, source_contains=("rxnorm", "pubchem", "drugcentral")
+    )
+    drug_info = (context.get("drugs") or {}).get(side) or {}
     for key, label in (
         ("pubchem_cid", "PubChem CID"),
         ("cid", "PubChem CID"),
@@ -374,7 +391,10 @@ def _add_identity_profile(
                 payload={"identifier_type": label, "value": value},
             )
 
-    rxnorm = (((context.get("signals") or {}).get("clinical_reference") or {}).get("rxnorm") or {}).get(side) or {}
+    rxnorm = (
+        ((context.get("signals") or {}).get("clinical_reference") or {}).get("rxnorm")
+        or {}
+    ).get(side) or {}
     if rxnorm.get("rxcui"):
         builder.add_profile_item(
             drug=drug,
@@ -382,7 +402,9 @@ def _add_identity_profile(
             node_type="identifier",
             label=f"RxCUI: {rxnorm['rxcui']}",
             edge_type="has_identifier",
-            evidence_ids=_card_ids(evidence_cards, drug=drug, source_contains=("rxnorm",)),
+            evidence_ids=_card_ids(
+                evidence_cards, drug=drug, source_contains=("rxnorm",)
+            ),
             payload=rxnorm,
         )
 
@@ -394,11 +416,17 @@ def _add_drugcentral_profile(
     context: dict[str, Any],
     evidence_cards: list[EvidenceCard],
 ) -> None:
-    enrichment = ((context.get("signals") or {}).get("research_enrichment") or {})
-    drugcentral = ((enrichment.get("drugcentral") or {}).get(side) or {})
-    evidence_ids = _card_ids(evidence_cards, drug=drug, source_contains=("drugcentral",))
+    enrichment = (context.get("signals") or {}).get("research_enrichment") or {}
+    drugcentral = (enrichment.get("drugcentral") or {}).get(side) or {}
+    evidence_ids = _card_ids(
+        evidence_cards, drug=drug, source_contains=("drugcentral",)
+    )
     structure = drugcentral.get("structure") or {}
-    for key, label in (("id", "DrugCentral ID"), ("cas", "CAS"), ("inchikey", "InChIKey")):
+    for key, label in (
+        ("id", "DrugCentral ID"),
+        ("cas", "CAS"),
+        ("inchikey", "InChIKey"),
+    ):
         value = structure.get(key)
         if value:
             builder.add_profile_item(
@@ -411,7 +439,12 @@ def _add_drugcentral_profile(
                 payload={"identifier_type": label, "value": value},
             )
     if structure:
-        formula = structure.get("formula") or structure.get("smiles") or structure.get("name") or drug
+        formula = (
+            structure.get("formula")
+            or structure.get("smiles")
+            or structure.get("name")
+            or drug
+        )
         builder.add_profile_item(
             drug=drug,
             category="identifiers",
@@ -423,7 +456,12 @@ def _add_drugcentral_profile(
         )
 
     for row in _list_dicts(drugcentral.get("targets"))[:16]:
-        label = row.get("gene") or row.get("target_name") or row.get("target") or row.get("name")
+        label = (
+            row.get("gene")
+            or row.get("target_name")
+            or row.get("target")
+            or row.get("name")
+        )
         if not label:
             continue
         node_type, category, edge_type = _protein_node_type(str(label))
@@ -445,10 +483,14 @@ def _add_mechanistic_profile(
     context: dict[str, Any],
     evidence_cards: list[EvidenceCard],
 ) -> None:
-    mechanistic = ((context.get("signals") or {}).get("mechanistic") or {})
-    evidence_ids = _card_ids(evidence_cards, drug=drug, claim_contains=("mechanism", "pk", "pd"))
+    mechanistic = (context.get("signals") or {}).get("mechanistic") or {}
+    evidence_ids = _card_ids(
+        evidence_cards, drug=drug, claim_contains=("mechanism", "pk", "pd")
+    )
 
-    for value in _terms_for_side(mechanistic, side, ("enzyme", "enzymes", "enzyme_ids", "enzyme_labels")):
+    for value in _terms_for_side(
+        mechanistic, side, ("enzyme", "enzymes", "enzyme_ids", "enzyme_labels")
+    ):
         node_type, category, edge_type = _protein_node_type(value)
         builder.add_profile_item(
             drug=drug,
@@ -459,7 +501,11 @@ def _add_mechanistic_profile(
             evidence_ids=evidence_ids,
         )
 
-    for value in _terms_for_side(mechanistic, side, ("target", "targets", "target_ids", "target_labels", "proteins")):
+    for value in _terms_for_side(
+        mechanistic,
+        side,
+        ("target", "targets", "target_ids", "target_labels", "proteins"),
+    ):
         builder.add_profile_item(
             drug=drug,
             category="targets",
@@ -469,7 +515,9 @@ def _add_mechanistic_profile(
             evidence_ids=evidence_ids,
         )
 
-    for value in _terms_for_side(mechanistic, side, ("pathway", "pathways", "pathway_ids", "pathway_labels")):
+    for value in _terms_for_side(
+        mechanistic, side, ("pathway", "pathways", "pathway_ids", "pathway_labels")
+    ):
         builder.add_profile_item(
             drug=drug,
             category="pathways",
@@ -490,7 +538,11 @@ def _add_adverse_event_profile(
     signals = context.get("signals") or {}
     faers = signals.get("faers") or {}
     tabular = signals.get("tabular") or {}
-    evidence_ids = _card_ids(evidence_cards, drug=drug, source_contains=("faers", "twosides", "offsides", "sider"))
+    evidence_ids = _card_ids(
+        evidence_cards,
+        drug=drug,
+        source_contains=("faers", "twosides", "offsides", "sider"),
+    )
     for label, count in _reaction_pairs(faers.get(f"top_reactions_{side}"))[:10]:
         builder.add_profile_item(
             drug=drug,
@@ -501,7 +553,11 @@ def _add_adverse_event_profile(
             evidence_ids=evidence_ids,
             payload={"count": count, "source": "OpenFDA FAERS"},
         )
-    for key in (f"side_effects_{side}", f"side_effects_{drug.lower()}", f"{side}_side_effects"):
+    for key in (
+        f"side_effects_{side}",
+        f"side_effects_{drug.lower()}",
+        f"{side}_side_effects",
+    ):
         for label, score in _reaction_pairs(tabular.get(key))[:10]:
             builder.add_profile_item(
                 drug=drug,
@@ -521,8 +577,10 @@ def _add_toxicity_profile(
     context: dict[str, Any],
     evidence_cards: list[EvidenceCard],
 ) -> None:
-    tabular = ((context.get("signals") or {}).get("tabular") or {})
-    evidence_ids = _card_ids(evidence_cards, drug=drug, source_contains=("dili", "diqt", "dict", "internal"))
+    tabular = (context.get("signals") or {}).get("tabular") or {}
+    evidence_ids = _card_ids(
+        evidence_cards, drug=drug, source_contains=("dili", "diqt", "dict", "internal")
+    )
     for key, label in (
         (f"dili_{side}", "DILI"),
         (f"dili_score_{side}", "DILI"),
@@ -552,10 +610,15 @@ def _add_label_profile(
     evidence_cards: list[EvidenceCard],
 ) -> None:
     label = (
-        (((context.get("signals") or {}).get("clinical_reference") or {}).get("openfda_label") or {}).get(side) or {}
-    )
+        ((context.get("signals") or {}).get("clinical_reference") or {}).get(
+            "openfda_label"
+        )
+        or {}
+    ).get(side) or {}
     sections = label.get("sections") or {}
-    evidence_ids = _card_ids(evidence_cards, drug=drug, source_contains=("label", "daily", "fda"))
+    evidence_ids = _card_ids(
+        evidence_cards, drug=drug, source_contains=("label", "daily", "fda")
+    )
     for section_name in list(sections)[:8]:
         builder.add_profile_item(
             drug=drug,
@@ -636,11 +699,22 @@ def _protein_node_type(label: str) -> tuple[str, str, str]:
     return "target", "targets", "has_target"
 
 
-def _terms_for_side(mechanistic: dict[str, Any], side: str, bases: tuple[str, ...]) -> list[str]:
+def _terms_for_side(
+    mechanistic: dict[str, Any], side: str, bases: tuple[str, ...]
+) -> list[str]:
     values: list[str] = []
     for base in bases:
-        for key in (f"{base}_{side}", f"{base}s_{side}", f"{side}_{base}", f"{side}_{base}s"):
-            values.extend(str(item) for item in _flatten_values(mechanistic.get(key)) if _display(item))
+        for key in (
+            f"{base}_{side}",
+            f"{base}s_{side}",
+            f"{side}_{base}",
+            f"{side}_{base}s",
+        ):
+            values.extend(
+                str(item)
+                for item in _flatten_values(mechanistic.get(key))
+                if _display(item)
+            )
     return _unique(values)
 
 
@@ -656,7 +730,12 @@ def _reaction_pairs(value: Any) -> list[tuple[str, Any]]:
         source_rows = [value]
     for item in source_rows:
         if isinstance(item, dict):
-            label = item.get("reaction") or item.get("side_effect") or item.get("label") or item.get("name")
+            label = (
+                item.get("reaction")
+                or item.get("side_effect")
+                or item.get("label")
+                or item.get("name")
+            )
             score = item.get("count") or item.get("prr") or item.get("score")
         elif isinstance(item, (list, tuple)) and item:
             label = item[0]
@@ -670,11 +749,17 @@ def _reaction_pairs(value: Any) -> list[tuple[str, Any]]:
 
 
 def _known_status(signals: list[ReasoningSignal]) -> KnownStatus:
-    if any(signal.category == "known_pair" and signal.support_level == "established" for signal in signals):
+    if any(
+        signal.category == "known_pair" and signal.support_level == "established"
+        for signal in signals
+    ):
         return "known_direct"
     if any(signal.category == "adverse_event_signal" for signal in signals):
         return "known_signal_supported"
-    if any(signal.category in {"pk_overlap", "pd_overlap", "toxicity_convergence"} for signal in signals):
+    if any(
+        signal.category in {"pk_overlap", "pd_overlap", "toxicity_convergence"}
+        for signal in signals
+    ):
         return "unknown_mechanistically_plausible"
     return "unknown_insufficient_evidence"
 
@@ -700,7 +785,8 @@ def _hypothesis(
     limitations: list[str],
 ) -> InteractionHypothesis:
     return InteractionHypothesis(
-        hypothesis_id="hyp_" + stable_hash(
+        hypothesis_id="hyp_"
+        + stable_hash(
             {
                 "analysis_id": analysis_id,
                 "mechanism_type": mechanism_type,
@@ -716,11 +802,17 @@ def _hypothesis(
     )
 
 
-def _next_evidence(missing: dict[str, list[str]], known_status: KnownStatus) -> list[str]:
+def _next_evidence(
+    missing: dict[str, list[str]], known_status: KnownStatus
+) -> list[str]:
     needed: list[str] = []
     if known_status.startswith("unknown"):
-        needed.append("Direct pair evidence from label, clinical study, or curated DDI source")
-    categories = sorted({category for values in missing.values() for category in values})
+        needed.append(
+            "Direct pair evidence from label, clinical study, or curated DDI source"
+        )
+    categories = sorted(
+        {category for values in missing.values() for category in values}
+    )
     labels = {
         "identifiers": "stronger identity resolution",
         "enzymes_or_transporters": "enzyme/transporter profile",
@@ -743,13 +835,22 @@ def _uncertainty_factors(
     if missing:
         factors.append("One or more drug profiles are incomplete.")
     if not signals:
-        factors.append("No direct, signal, or mechanistic reasoning signal was produced.")
-    if any(signal.category in {"adverse_event_signal", "toxicity_convergence"} for signal in signals):
-        factors.append("Adverse-event signals are associative unless supported by stronger clinical evidence.")
+        factors.append(
+            "No direct, signal, or mechanistic reasoning signal was produced."
+        )
+    if any(
+        signal.category in {"adverse_event_signal", "toxicity_convergence"}
+        for signal in signals
+    ):
+        factors.append(
+            "Adverse-event signals are associative unless supported by stronger clinical evidence."
+        )
     return _unique(factors)[:12]
 
 
-def _source_limitations(evidence_cards: list[EvidenceCard], context: dict[str, Any]) -> list[str]:
+def _source_limitations(
+    evidence_cards: list[EvidenceCard], context: dict[str, Any]
+) -> list[str]:
     rows = []
     for card in evidence_cards:
         rows.extend(card.limitations)

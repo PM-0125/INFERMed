@@ -19,6 +19,7 @@ def reset_settings_cache(monkeypatch):
     except Exception:
         yield
 
+
 @pytest.fixture(scope="session")
 def parquet_dir():
     p = os.getenv("DUCKDB_DIR", "").strip()
@@ -28,11 +29,13 @@ def parquet_dir():
         pytest.skip(f"DUCKDB_DIR not a directory: {p}")
     return p
 
+
 @pytest.fixture(scope="session")
 def tmp_cache_dir():
     d = tempfile.mkdtemp(prefix="infermed_cache_")
     yield d
     shutil.rmtree(d, ignore_errors=True)
+
 
 @pytest.fixture(scope="session")
 def known_drugs():

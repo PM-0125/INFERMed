@@ -29,8 +29,7 @@ class SQLiteEventStore:
 
     def _init_db(self) -> None:
         with self._connect() as conn:
-            conn.execute(
-                """
+            conn.execute("""
                 CREATE TABLE IF NOT EXISTS analysis_run (
                     analysis_id TEXT PRIMARY KEY,
                     request_hash TEXT NOT NULL,
@@ -40,10 +39,8 @@ class SQLiteEventStore:
                     updated_at TEXT NOT NULL,
                     status TEXT NOT NULL
                 )
-                """
-            )
-            conn.execute(
-                """
+                """)
+            conn.execute("""
                 CREATE TABLE IF NOT EXISTS domain_event (
                     event_id TEXT PRIMARY KEY,
                     analysis_id TEXT NOT NULL,
@@ -59,10 +56,8 @@ class SQLiteEventStore:
                     error_summary TEXT,
                     created_at TEXT NOT NULL
                 )
-                """
-            )
-            conn.execute(
-                """
+                """)
+            conn.execute("""
                 CREATE TABLE IF NOT EXISTS evidence_card (
                     evidence_id TEXT PRIMARY KEY,
                     analysis_id TEXT NOT NULL,
@@ -75,10 +70,8 @@ class SQLiteEventStore:
                     payload_json TEXT NOT NULL,
                     created_at TEXT NOT NULL
                 )
-                """
-            )
-            conn.execute(
-                """
+                """)
+            conn.execute("""
                 CREATE TABLE IF NOT EXISTS explanation_record (
                     explanation_id TEXT PRIMARY KEY,
                     analysis_id TEXT NOT NULL,
@@ -89,10 +82,8 @@ class SQLiteEventStore:
                     verification_json TEXT NOT NULL,
                     created_at TEXT NOT NULL
                 )
-                """
-            )
-            conn.execute(
-                """
+                """)
+            conn.execute("""
                 CREATE TABLE IF NOT EXISTS analysis_snapshot (
                     analysis_id TEXT PRIMARY KEY,
                     context_json TEXT NOT NULL,
@@ -101,10 +92,13 @@ class SQLiteEventStore:
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 )
-                """
+                """)
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_domain_event_analysis ON domain_event(analysis_id)"
             )
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_domain_event_analysis ON domain_event(analysis_id)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_evidence_card_analysis ON evidence_card(analysis_id)")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_evidence_card_analysis ON evidence_card(analysis_id)"
+            )
 
     def create_analysis_run(
         self,
@@ -126,7 +120,15 @@ class SQLiteEventStore:
                     updated_at = excluded.updated_at,
                     status = excluded.status
                 """,
-                (analysis_id, request_hash, normalized_drug_set_key, data_mode, now, now, status),
+                (
+                    analysis_id,
+                    request_hash,
+                    normalized_drug_set_key,
+                    data_mode,
+                    now,
+                    now,
+                    status,
+                ),
             )
 
     def update_analysis_status(self, analysis_id: str, status: str) -> None:
@@ -137,7 +139,9 @@ class SQLiteEventStore:
             )
 
     def append_event(self, event: DomainEvent) -> None:
-        payload_json = json.dumps(event.payload, sort_keys=True, ensure_ascii=False, default=str)
+        payload_json = json.dumps(
+            event.payload, sort_keys=True, ensure_ascii=False, default=str
+        )
         with self._connect() as conn:
             conn.execute(
                 """
@@ -185,8 +189,12 @@ class SQLiteEventStore:
                     card.claim_type,
                     card.claim_text,
                     card.evidence_grade,
-                    json.dumps(card.provenance, sort_keys=True, ensure_ascii=False, default=str),
-                    json.dumps(card.payload, sort_keys=True, ensure_ascii=False, default=str),
+                    json.dumps(
+                        card.provenance, sort_keys=True, ensure_ascii=False, default=str
+                    ),
+                    json.dumps(
+                        card.payload, sort_keys=True, ensure_ascii=False, default=str
+                    ),
                     utc_now(),
                 ),
             )
@@ -219,7 +227,9 @@ class SQLiteEventStore:
                     prompt_hash,
                     output_hash,
                     answer_text,
-                    json.dumps(verification, sort_keys=True, ensure_ascii=False, default=str),
+                    json.dumps(
+                        verification, sort_keys=True, ensure_ascii=False, default=str
+                    ),
                     utc_now(),
                 ),
             )
@@ -250,9 +260,18 @@ class SQLiteEventStore:
                 """,
                 (
                     analysis_id,
-                    json.dumps(context, sort_keys=True, ensure_ascii=False, default=str),
-                    json.dumps(decision, sort_keys=True, ensure_ascii=False, default=str),
-                    json.dumps(response_read_model, sort_keys=True, ensure_ascii=False, default=str),
+                    json.dumps(
+                        context, sort_keys=True, ensure_ascii=False, default=str
+                    ),
+                    json.dumps(
+                        decision, sort_keys=True, ensure_ascii=False, default=str
+                    ),
+                    json.dumps(
+                        response_read_model,
+                        sort_keys=True,
+                        ensure_ascii=False,
+                        default=str,
+                    ),
                     now,
                     now,
                 ),

@@ -1,0 +1,9 @@
+[tool.black]
+line-length = 88
+required-version = "26.5.1"
+include = '\.pyi?$'
+force-exclude = '''
+/(\.git|\.venv|\.claude|\.agents|models|TESTCASES|data|node_modules|dist)/
+| /scripts/deferred/
+| /scripts/build_offline_mode_samples\.py$
+'''

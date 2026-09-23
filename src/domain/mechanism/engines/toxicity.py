@@ -12,16 +12,28 @@ _TOXICITY_TERMS = {
 }
 
 
-def detect_toxicity_clusters(cards: list[EvidenceCard], drugs: list[str]) -> MechanismGraph:
+def detect_toxicity_clusters(
+    cards: list[EvidenceCard], drugs: list[str]
+) -> MechanismGraph:
     text_by_type = {
-        risk_type: " ".join(card.claim_text.lower() for card in cards if any(term in card.claim_text.lower() for term in terms))
+        risk_type: " ".join(
+            card.claim_text.lower()
+            for card in cards
+            if any(term in card.claim_text.lower() for term in terms)
+        )
         for risk_type, terms in _TOXICITY_TERMS.items()
     }
     clusters: list[MechanismCluster] = []
     for risk_type, text in text_by_type.items():
         if not text:
             continue
-        evidence_ids = [card.evidence_id for card in cards if any(term in card.claim_text.lower() for term in _TOXICITY_TERMS[risk_type])]
+        evidence_ids = [
+            card.evidence_id
+            for card in cards
+            if any(
+                term in card.claim_text.lower() for term in _TOXICITY_TERMS[risk_type]
+            )
+        ]
         clusters.append(
             MechanismCluster(
                 cluster_id=f"cluster:toxicity:{risk_type.lower()}",

@@ -9,7 +9,11 @@ from src.api.transformers import (
 def _context():
     return {
         "drugs": {
-            "a": {"name": "warfarin", "ids": {"pubchem_cid": 54678486}, "synonyms": ["Coumadin"]},
+            "a": {
+                "name": "warfarin",
+                "ids": {"pubchem_cid": 54678486},
+                "synonyms": ["Coumadin"],
+            },
             "b": {"name": "fluconazole", "ids": {"pubchem_cid": 3365}},
         },
         "signals": {
@@ -30,17 +34,35 @@ def _context():
                 "combo_reactions": [["international normalised ratio increased", 3]],
             },
             "mechanistic": {
-                "enzymes": {"a": {"substrate": ["cyp2c9"]}, "b": {"inhibitor": ["cyp2c9"]}},
+                "enzymes": {
+                    "a": {"substrate": ["cyp2c9"]},
+                    "b": {"inhibitor": ["cyp2c9"]},
+                },
                 "targets_a": ["target-a"],
                 "targets_b": ["target-b"],
                 "common_pathways": ["coagulation"],
                 "uniprot_ids_a": ["P11712"],
-                "kegg_pathways_a": [{"pathway_id": "hsa00982", "pathway_name": "Drug metabolism - cytochrome P450"}],
-                "reactome_pathways_b": [{"pathway_id": "R-HSA-1234", "pathway_name": "Hemostasis"}],
+                "kegg_pathways_a": [
+                    {
+                        "pathway_id": "hsa00982",
+                        "pathway_name": "Drug metabolism - cytochrome P450",
+                    }
+                ],
+                "reactome_pathways_b": [
+                    {"pathway_id": "R-HSA-1234", "pathway_name": "Hemostasis"}
+                ],
                 "chembl_enrichment": {
                     "a": {
-                        "chembl_validation": {"found": True, "matches": ["cyp2c9"], "mismatches": []},
-                        "enzyme_strength": {"strong": ["cyp2c9"], "moderate": [], "weak": []},
+                        "chembl_validation": {
+                            "found": True,
+                            "matches": ["cyp2c9"],
+                            "mismatches": [],
+                        },
+                        "enzyme_strength": {
+                            "strong": ["cyp2c9"],
+                            "moderate": [],
+                            "weak": [],
+                        },
                     }
                 },
             },
@@ -48,17 +70,36 @@ def _context():
         "pkpd": {
             "pk_summary": "Potential increased exposure via inhibition at cyp2c9",
             "pd_summary": "Common pathways: coagulation",
-            "pk_detail": {"overlaps": {"inhibition": ["cyp2c9"], "induction": [], "shared_substrate": []}},
+            "pk_detail": {
+                "overlaps": {
+                    "inhibition": ["cyp2c9"],
+                    "induction": [],
+                    "shared_substrate": [],
+                }
+            },
             "pd_detail": {"overlap_targets": [], "overlap_pathways": ["coagulation"]},
         },
-        "sources": {"duckdb": ["TwoSides"], "openfda": ["FAERS via OpenFDA (cached)"], "qlever": []},
-        "source_status": [{"name": "OpenFDA cache/API", "enabled": True, "available": True, "reason": "ok"}],
+        "sources": {
+            "duckdb": ["TwoSides"],
+            "openfda": ["FAERS via OpenFDA (cached)"],
+            "qlever": [],
+        },
+        "source_status": [
+            {
+                "name": "OpenFDA cache/API",
+                "enabled": True,
+                "available": True,
+                "reason": "ok",
+            }
+        ],
         "meta": {"data_mode": "public_safe", "created_at": "2026-05-16T08:00:00Z"},
     }
 
 
 def test_parse_assessment_sections_markdown():
-    sections = parse_assessment_sections("## Bottom Line\nUse caution.\n\n## Evidence Limitations\nFAERS is associative.")
+    sections = parse_assessment_sections(
+        "## Bottom Line\nUse caution.\n\n## Evidence Limitations\nFAERS is associative."
+    )
     assert sections == [
         {"title": "Bottom Line", "body": "Use caution."},
         {"title": "Evidence Limitations", "body": "FAERS is associative."},
@@ -66,7 +107,9 @@ def test_parse_assessment_sections_markdown():
 
 
 def test_parse_assessment_sections_fallback():
-    assert parse_assessment_sections("Plain answer") == [{"title": "Assessment", "body": "Plain answer"}]
+    assert parse_assessment_sections("Plain answer") == [
+        {"title": "Assessment", "body": "Plain answer"}
+    ]
 
 
 def test_calculate_risk_unknown_when_no_evidence():

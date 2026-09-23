@@ -11,7 +11,9 @@ EventStatus = Literal["requested", "succeeded", "failed", "skipped"]
 
 
 def stable_hash(value: Any) -> str:
-    encoded = json.dumps(value, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")
+    encoded = json.dumps(value, sort_keys=True, ensure_ascii=False, default=str).encode(
+        "utf-8"
+    )
     return hashlib.sha256(encoded).hexdigest()
 
 
@@ -64,4 +66,3 @@ class DomainEvent:
             source_tool_name=source_tool_name,
             error_summary=error_summary,
         )
-

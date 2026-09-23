@@ -1,4 +1,4 @@
-import type { AnalysisProgressEvent, AnalyzeRequest, FollowUpRequest, FollowUpResponse, InteractionResult } from './types'
+import type { AnalysisProgressEvent, AnalyzeRequest, EvidenceMetric, FollowUpRequest, FollowUpResponse, InteractionResult } from './types'
 
 const API_URL = import.meta.env.VITE_INFERMED_API_URL?.replace(/\/$/, '')
 
@@ -75,7 +75,7 @@ export async function analyzeInteractionStream(
 }
 
 function normalizeInteractionResult(raw: InteractionResult): InteractionResult {
-  const compatibility = (raw as any)?.compatibility
+  const compatibility = (raw as InteractionResult & { compatibility?: InteractionResult })?.compatibility
   const display = compatibility && !raw?.assessment ? compatibility : raw
   const evidence = display?.evidence ?? ({} as InteractionResult['evidence'])
   return {
@@ -124,14 +124,15 @@ function normalizeAssessment(value: unknown): InteractionResult['assessment'] {
   return rows.length ? rows : [{ title: 'Assessment', body: 'No assessment text was returned.' }]
 }
 
-function normalizeEvidenceCard(card: unknown): { metrics: Array<{ label: string; value: string; tone?: any }>; rows: Array<{ title: string; description: string; meta?: string }> } {
+function normalizeEvidenceCard(card: unknown): { metrics: EvidenceMetric[]; rows: Array<{ title: string; description: string; meta?: string }> } {
+  const record = card as { metrics?: unknown; rows?: unknown } | null | undefined
   return {
-    metrics: asArray((card as any)?.metrics).map(metric => ({
+    metrics: asArray(record?.metrics).map(metric => ({
       label: asString(metric?.label, 'Metric'),
       value: asString(metric?.value, 'Unknown'),
-      tone: metric?.tone,
+      tone: metric?.tone as EvidenceMetric['tone'],
     })),
-    rows: normalizeRows((card as any)?.rows),
+    rows: normalizeRows(record?.rows),
   }
 }
 
@@ -158,7 +159,7 @@ function normalizeReasoning(value: InteractionResult['ndrugReasoning']): Interac
   }
 }
 
-function asArray<T = any>(value: unknown): T[] {
+function asArray<T = Record<string, unknown>>(value: unknown): T[] {
   return Array.isArray(value) ? value as T[] : []
 }
 

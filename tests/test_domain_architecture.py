@@ -35,7 +35,9 @@ def test_event_store_persists_analysis_events_and_evidence(tmp_path):
             "answer": {"text": "## Bottom Line\nMonitor closely."},
         }
 
-    use_case = AnalyzeMedicationSetUseCase(rag_runner=fake_rag_runner, event_store=store)
+    use_case = AnalyzeMedicationSetUseCase(
+        rag_runner=fake_rag_runner, event_store=store
+    )
     result = use_case.execute(
         AnalyzeMedicationSetCommand(
             medications=["warfarin", "fluconazole"],
@@ -125,7 +127,9 @@ def test_profile_graph_and_reasoning_model_unknown_mechanistic_case():
                     "pd_detail": {"overlap_targets": ["PTGS1"]},
                 },
             },
-            "answer": {"text": "This is a plausible hypothesis because evidence is limited."},
+            "answer": {
+                "text": "This is a plausible hypothesis because evidence is limited."
+            },
         }
 
     result = AnalyzeMedicationSetUseCase(rag_runner=fake_rag_runner).execute(
@@ -133,8 +137,12 @@ def test_profile_graph_and_reasoning_model_unknown_mechanistic_case():
     )
 
     assert result.reasoning_record.known_status == "unknown_mechanistically_plausible"
-    assert any(signal.category == "pk_overlap" for signal in result.reasoning_record.signals)
-    assert any(signal.category == "pd_overlap" for signal in result.reasoning_record.signals)
+    assert any(
+        signal.category == "pk_overlap" for signal in result.reasoning_record.signals
+    )
+    assert any(
+        signal.category == "pd_overlap" for signal in result.reasoning_record.signals
+    )
     assert result.profile_graph.shared_nodes("enzyme")
     assert result.profile_graph.shared_nodes("target")
 

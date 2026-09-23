@@ -31,4 +31,3 @@ class EventBus:
             self._sink.append_event(event)
         except Exception as exc:  # pragma: no cover - defensive logging path
             LOG.warning("Failed to persist domain event %s: %s", event.event_type, exc)
-

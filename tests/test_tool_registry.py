@@ -19,4 +19,3 @@ def test_tool_registry_allows_drugbank_in_local_dev():
     allowed = {tool.name for tool in registry.allowed_tools("local_dev")}
 
     assert "query_drugbank_local" in allowed
-

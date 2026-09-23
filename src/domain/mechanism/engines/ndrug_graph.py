@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from src.domain.evidence.entities import EvidenceCard
 from src.domain.mechanism.engines.toxicity import detect_toxicity_clusters
-from src.domain.mechanism.entities import MechanismCluster, MechanismEdge, MechanismGraph, MechanismNode
+from src.domain.mechanism.entities import (
+    MechanismCluster,
+    MechanismEdge,
+    MechanismGraph,
+    MechanismNode,
+)
 
 
 def build_ndrug_mechanism_graph(
@@ -16,7 +21,9 @@ def build_ndrug_mechanism_graph(
     clusters: dict[str, MechanismCluster] = {}
 
     for drug in drugs:
-        nodes[f"drug:{drug}"] = MechanismNode(id=f"drug:{drug}", label=drug, type="drug")
+        nodes[f"drug:{drug}"] = MechanismNode(
+            id=f"drug:{drug}", label=drug, type="drug"
+        )
 
     for graph in pair_graphs:
         for node in graph.nodes:
@@ -31,7 +38,11 @@ def build_ndrug_mechanism_graph(
         clusters.setdefault(cluster.cluster_id, cluster)
 
     if len(drugs) > 2:
-        summary_ids = [card.evidence_id for card in evidence_cards if card.claim_type == "medication_set_summary"]
+        summary_ids = [
+            card.evidence_id
+            for card in evidence_cards
+            if card.claim_type == "medication_set_summary"
+        ]
         clusters.setdefault(
             "cluster:medication_set",
             MechanismCluster(
@@ -45,4 +56,8 @@ def build_ndrug_mechanism_graph(
             ),
         )
 
-    return MechanismGraph(nodes=list(nodes.values()), edges=list(edges.values()), clusters=list(clusters.values()))
+    return MechanismGraph(
+        nodes=list(nodes.values()),
+        edges=list(edges.values()),
+        clusters=list(clusters.values()),
+    )

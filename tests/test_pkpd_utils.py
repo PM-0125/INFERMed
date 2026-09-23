@@ -14,6 +14,7 @@ from src.utils.pkpd_utils import (
 
 # ---------------------- normalization ----------------------
 
+
 def test_canonicalize_enzyme_synonyms():
     assert canonicalize_enzyme("CYP3A4") == "cyp3a4"
     assert canonicalize_enzyme("Cytochrome P450 3A4") == "cyp3a4"
@@ -41,6 +42,7 @@ def test_canonicalize_list_accepts_dict_items():
 
 # ---------------------- PK roles & overlaps ----------------------
 
+
 def test_extract_roles_and_overlap_detection():
     mech = {
         "enzymes": {
@@ -61,11 +63,12 @@ def test_extract_roles_and_overlap_detection():
     mech["enzymes"]["a"]["substrate"].append("CYP3A4")
     roles2 = extract_pk_roles(mech)
     overlaps2 = detect_pk_overlaps(roles2)
-    assert "cyp3a4" in overlaps2["induction"]      # B_sub & A_ind
+    assert "cyp3a4" in overlaps2["induction"]  # B_sub & A_ind
     assert "cyp3a4" in overlaps2["shared_substrate"]  # both substrates
 
 
 # ---------------------- PD overlap ----------------------
+
 
 def test_pd_overlap_scores_and_lists_with_dict_targets():
     mech = {
@@ -83,6 +86,7 @@ def test_pd_overlap_scores_and_lists_with_dict_targets():
 
 
 # ---------------------- summaries ----------------------
+
 
 def test_summarize_pkpd_risk_messages():
     mech = {
@@ -130,11 +134,17 @@ def test_summarize_pkpd_handles_uniprot_only_on_second_drug(monkeypatch):
 
 # ---------------------- FAERS formatting ----------------------
 
+
 def test_topk_faers_basic_and_empty_and_malformed():
     faers = {
         "top_reactions_a": [("Headache", 10), ("Nausea", 5), ("Rash", 3)],
         "top_reactions_b": [],
-        "combo_reactions": [("Bleeding", 2), ("Dizziness", 1), ("MalformedRow", "x"), ("OK", 0)],
+        "combo_reactions": [
+            ("Bleeding", 2),
+            ("Dizziness", 1),
+            ("MalformedRow", "x"),
+            ("OK", 0),
+        ],
     }
     out = topk_faers(faers, k=2)
     assert out["a"] == "Headache (n=10), Nausea (n=5)"
@@ -147,21 +157,32 @@ def test_topk_faers_basic_and_empty_and_malformed():
 
 # ---------------------- mechanistic merge ----------------------
 
+
 def test_synthesize_mechanistic_with_fallback_targets_and_dicts():
     qlever_mech = {
-        "enzymes": {"a": {"substrate": ["CYP3A4"], "inhibitor": [], "inducer": []},
-                    "b": {"substrate": [], "inhibitor": [], "inducer": []}},
+        "enzymes": {
+            "a": {"substrate": ["CYP3A4"], "inhibitor": [], "inducer": []},
+            "b": {"substrate": [], "inhibitor": [], "inducer": []},
+        },
         "targets_a": [],  # empty -> should use fallback
-        "targets_b": [{"label": "EGFR"}, {"uri": "http://unlabeled"}],  # present -> should be kept & normalized
+        "targets_b": [
+            {"label": "EGFR"},
+            {"uri": "http://unlabeled"},
+        ],  # present -> should be kept & normalized
         "pathways_a": [],
         "pathways_b": [],
         "common_pathways": [],
     }
     fallback_a = ["HMGCR", "PCSK9"]
     fallback_b = ["X", "Y"]  # should be ignored because targets_b already present
-    mech = synthesize_mechanistic(qlever_mech, fallback_targets_a=fallback_a, fallback_targets_b=fallback_b)
+    mech = synthesize_mechanistic(
+        qlever_mech, fallback_targets_a=fallback_a, fallback_targets_b=fallback_b
+    )
 
-    assert mech["enzymes"]["a"]["substrate"] == ["cyp3a4"] or "cyp3a4" in mech["enzymes"]["a"]["substrate"]
+    assert (
+        mech["enzymes"]["a"]["substrate"] == ["cyp3a4"]
+        or "cyp3a4" in mech["enzymes"]["a"]["substrate"]
+    )
     assert mech["targets_a"] == ["hmgcr", "pcsk9"]  # fallback applied & normalized
     # dict-shaped targets normalized (label preferred, uri fallback)
     assert "egfr" in mech["targets_b"]

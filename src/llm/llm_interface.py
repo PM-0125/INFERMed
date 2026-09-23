@@ -17,6 +17,7 @@ LOG = logging.getLogger("infermed.llm")
 if os.getenv("INFERMED_LOAD_DOTENV", "").strip().lower() in {"1", "true", "yes", "on"}:
     try:
         from dotenv import load_dotenv
+
         env_path = os.path.join(os.path.dirname(__file__), "..", "..", ".env")
         load_dotenv(env_path, override=False)
     except ImportError:
@@ -121,6 +122,7 @@ DEFAULT_TEMPLATES: Dict[str, str] = {
     ),
 }
 
+
 def _load_templates(path: str) -> Dict[str, str]:
     if not os.path.exists(path):
         return {}
@@ -145,8 +147,14 @@ def _load_templates(path: str) -> Dict[str, str]:
         blocks[current] = "\n".join(buf).strip()
     return blocks
 
+
 _loaded = _load_templates(TEMPLATES_PATH)
-TEMPLATES = _loaded if _loaded else {k: v.split("\n", 1)[1].strip() for k, v in DEFAULT_TEMPLATES.items()}
+TEMPLATES = (
+    _loaded
+    if _loaded
+    else {k: v.split("\n", 1)[1].strip() for k, v in DEFAULT_TEMPLATES.items()}
+)
+
 
 # ========== Public API ==========
 def generate_response(
@@ -168,10 +176,20 @@ def generate_response(
         prompt = build_prompt(context or {}, mode, history=history)
 
     selected_model = model_name or settings.ollama_model or MODEL_NAME
-    num_predict = int(max_tokens) if (max_tokens is not None) else int(settings.ollama_num_predict)
+    num_predict = (
+        int(max_tokens)
+        if (max_tokens is not None)
+        else int(settings.ollama_num_predict)
+    )
 
     if settings.llm_provider == "mock":
-        return _mock_response(context or {}, mode, selected_model="mock", temperature=temperature, seed=seed)
+        return _mock_response(
+            context or {},
+            mode,
+            selected_model="mock",
+            temperature=temperature,
+            seed=seed,
+        )
 
     if settings.llm_provider == "nvidia":
         return _generate_nvidia_response(
@@ -180,16 +198,22 @@ def generate_response(
             model_name=model_name or settings.nvidia_model,
             temperature=settings.llm_temperature,
             top_p=settings.llm_top_p,
-            max_tokens=max_tokens if max_tokens is not None else settings.llm_max_tokens,
+            max_tokens=(
+                max_tokens if max_tokens is not None else settings.llm_max_tokens
+            ),
             stream=settings.llm_stream if stream is None else bool(stream),
             seed=seed,
         )
 
     return _generate_ollama_response(
-        prompt, mode, model=selected_model, num_predict=num_predict,
-        seed=seed, stream=stream, on_text=on_text,
+        prompt,
+        mode,
+        model=selected_model,
+        num_predict=num_predict,
+        seed=seed,
+        stream=stream,
+        on_text=on_text,
     )
-
 
 
 def generate_followup_response(
@@ -216,7 +240,11 @@ def generate_followup_response(
     settings = get_settings()
 
     selected_model = model_name or settings.ollama_model or MODEL_NAME
-    num_predict = int(max_tokens) if (max_tokens is not None) else int(settings.ollama_num_predict)
+    num_predict = (
+        int(max_tokens)
+        if (max_tokens is not None)
+        else int(settings.ollama_num_predict)
+    )
 
     if settings.llm_provider == "mock":
         return _mock_followup_response(
@@ -244,13 +272,18 @@ def generate_followup_response(
         )
 
     return _generate_ollama_response(
-        prompt, mode, model=selected_model, num_predict=num_predict,
-        seed=seed, stream=stream,
+        prompt,
+        mode,
+        model=selected_model,
+        num_predict=num_predict,
+        seed=seed,
+        stream=stream,
     )
 
 
-
-def _generate_ollama_response(prompt, mode, *, model, num_predict, seed=None, stream=None, on_text=None):
+def _generate_ollama_response(
+    prompt, mode, *, model, num_predict, seed=None, stream=None, on_text=None
+):
     """Consume Ollama NDJSON, retaining visible text and completion metrics only."""
     import requests
 
@@ -265,19 +298,33 @@ def _generate_ollama_response(prompt, mode, *, model, num_predict, seed=None, st
     }
     if seed is not None:
         options["seed"] = int(seed)
-    payload = {"model": model, "prompt": prompt, "options": options, "stream": use_stream}
+    payload = {
+        "model": model,
+        "prompt": prompt,
+        "options": options,
+        "stream": use_stream,
+    }
     payload["keep_alive"] = settings.ollama_keep_alive
     effort = settings.ollama_reasoning_effort
     if effort in {"low", "medium", "high"}:
         payload["think"] = effort
     started = time.monotonic()
     response = None
-    LOG.info("Ollama request: model=%s reasoning=%s context=%s output_tokens=%s stream=%s prompt_chars=%s",
-             model, effort, settings.ollama_num_ctx, num_predict, use_stream, len(prompt))
+    LOG.info(
+        "Ollama request: model=%s reasoning=%s context=%s output_tokens=%s stream=%s prompt_chars=%s",
+        model,
+        effort,
+        settings.ollama_num_ctx,
+        num_predict,
+        use_stream,
+        len(prompt),
+    )
     try:
         response = requests.post(
-            f"{settings.ollama_host.rstrip('/')}/api/generate", json=payload,
-            timeout=settings.ollama_timeout_s, stream=use_stream,
+            f"{settings.ollama_host.rstrip('/')}/api/generate",
+            json=payload,
+            timeout=settings.ollama_timeout_s,
+            stream=use_stream,
         )
         if response.status_code != 200:
             raise RuntimeError(f"Ollama HTTP {response.status_code}")
@@ -291,7 +338,10 @@ def _generate_ollama_response(prompt, mode, *, model, num_predict, seed=None, st
                     raise RuntimeError(str(event["error"]))
                 if event.get("response"):
                     if not parts:
-                        LOG.info("Ollama first visible text: elapsed_s=%.2f", time.monotonic() - started)
+                        LOG.info(
+                            "Ollama first visible text: elapsed_s=%.2f",
+                            time.monotonic() - started,
+                        )
                     parts.append(event["response"])
                     if on_text:
                         on_text(event["response"])
@@ -307,21 +357,46 @@ def _generate_ollama_response(prompt, mode, *, model, num_predict, seed=None, st
                 raise RuntimeError(str(data["error"]))
             text = (data.get("response") or "").strip()
         if data.get("done_reason") == "length":
-            raise RuntimeError("Ollama exhausted its token budget before completing the answer")
+            raise RuntimeError(
+                "Ollama exhausted its token budget before completing the answer"
+            )
         if not text:
             raise RuntimeError("Ollama returned no visible answer")
         elapsed = time.monotonic() - started
-        LOG.info("Ollama completed: elapsed_s=%.2f generated_tokens=%s", elapsed, data.get("eval_count"))
-        LOG.info("Ollama prefill: tokens=%s cached_tokens=%s duration_ns=%s load_ns=%s",
-                 data.get("prompt_eval_count"), data.get("prompt_eval_cached_count"),
-                 data.get("prompt_eval_duration"), data.get("load_duration"))
+        LOG.info(
+            "Ollama completed: elapsed_s=%.2f generated_tokens=%s",
+            elapsed,
+            data.get("eval_count"),
+        )
+        LOG.info(
+            "Ollama prefill: tokens=%s cached_tokens=%s duration_ns=%s load_ns=%s",
+            data.get("prompt_eval_count"),
+            data.get("prompt_eval_cached_count"),
+            data.get("prompt_eval_duration"),
+            data.get("load_duration"),
+        )
         return {
             "text": _append_disclaimer(_strip_template_safety(text), mode),
-            "usage": {key: data.get(key) for key in (
-                "eval_count", "prompt_eval_count", "prompt_eval_cached_count", "eval_duration", "prompt_eval_duration", "load_duration")},
-            "meta": {"provider": "ollama", "model": model, "reasoning_effort": effort,
-                     "temperature": settings.llm_temperature, "seed": seed,
-                     "elapsed_s": elapsed, "ts": int(time.time())},
+            "usage": {
+                key: data.get(key)
+                for key in (
+                    "eval_count",
+                    "prompt_eval_count",
+                    "prompt_eval_cached_count",
+                    "eval_duration",
+                    "prompt_eval_duration",
+                    "load_duration",
+                )
+            },
+            "meta": {
+                "provider": "ollama",
+                "model": model,
+                "reasoning_effort": effort,
+                "temperature": settings.llm_temperature,
+                "seed": seed,
+                "elapsed_s": elapsed,
+                "ts": int(time.time()),
+            },
         }
     except Exception as exc:
         LOG.warning("Ollama request failed: %s", exc)
@@ -343,8 +418,14 @@ def _mock_response(
     drug_a = (drugs.get("a", {}) or {}).get("name", "Drug A")
     drug_b = (drugs.get("b", {}) or {}).get("name", "Drug B")
     pkpd = context.get("pkpd", {}) or {}
-    pk_summary = pkpd.get("pk_summary") or "No PK mechanism was identified in the provided evidence."
-    pd_summary = pkpd.get("pd_summary") or "No PD mechanism was identified in the provided evidence."
+    pk_summary = (
+        pkpd.get("pk_summary")
+        or "No PK mechanism was identified in the provided evidence."
+    )
+    pd_summary = (
+        pkpd.get("pd_summary")
+        or "No PD mechanism was identified in the provided evidence."
+    )
     caveats = context.get("caveats") or ["No additional caveats supplied."]
     sources = _format_sources(context)
 
@@ -360,7 +441,9 @@ def _mock_response(
         f"Qualitative review and monitoring; no patient-specific dosing advice generated by the mock provider.\n\n"
         f"## Evidence Limitations\n"
         f"Evidence used: {sources}\n\n"
-        f"Uncertainty / missing evidence: " + "; ".join(str(c) for c in caveats[:5]) + "\n\n"
+        f"Uncertainty / missing evidence: "
+        + "; ".join(str(c) for c in caveats[:5])
+        + "\n\n"
         f"Research prototype only."
     )
     return {
@@ -424,9 +507,13 @@ def _generate_nvidia_response(
 ) -> Dict[str, Any]:
     settings = get_settings()
     primary_configured = bool(settings.nvidia_api_key and model_name)
-    gemma_configured = bool(settings.nvidia_gemma_api_key and settings.nvidia_gemma_model)
+    gemma_configured = bool(
+        settings.nvidia_gemma_api_key and settings.nvidia_gemma_model
+    )
     if not primary_configured and not gemma_configured:
-        return _fallback("NVIDIA provider selected but no configured NVIDIA model credentials were found.")
+        return _fallback(
+            "NVIDIA provider selected but no configured NVIDIA model credentials were found."
+        )
 
     gemma_attempted = False
     gemma_primary_error = ""
@@ -475,7 +562,11 @@ def _generate_nvidia_response(
             )
             return _fallback(combined)
 
-    if gemma_configured and not gemma_attempted and settings.nvidia_gemma_model != model_name:
+    if (
+        gemma_configured
+        and not gemma_attempted
+        and settings.nvidia_gemma_model != model_name
+    ):
         LOG.warning(
             "NVIDIA primary generation unavailable; switching to secondary model=%s",
             settings.nvidia_gemma_model,
@@ -570,11 +661,17 @@ def _request_nvidia_model(
                     response.status_code,
                     time.time() - start,
                 )
-                if _should_retry_nvidia_response(response.status_code, attempt, attempts):
+                if _should_retry_nvidia_response(
+                    response.status_code, attempt, attempts
+                ):
                     _close_response(response)
                     _sleep_before_nvidia_retry(attempt)
                     continue
-                return None, last_error, response.status_code in {408, 429, 500, 502, 503, 504}
+                return (
+                    None,
+                    last_error,
+                    response.status_code in {408, 429, 500, 502, 503, 504},
+                )
 
             usage = {}
             if stream:
@@ -602,23 +699,27 @@ def _request_nvidia_model(
                     _sleep_before_nvidia_retry(attempt)
                     continue
                 return None, last_error, True
-            return {
-                "text": _append_disclaimer(text, mode),
-                "usage": usage,
-                "meta": {
-                    "provider": "nvidia",
-                    "provider_variant": provider_variant,
-                    "model": model_name,
-                    "temperature": temperature,
-                    "top_p": top_p,
-                    "max_tokens": max_tokens,
-                    "stream": bool(stream),
-                    "seed": seed,
-                    "latency_seconds": round(time.time() - start, 3),
-                    "retry_attempts": attempt + 1,
-                    "ts": int(time.time()),
+            return (
+                {
+                    "text": _append_disclaimer(text, mode),
+                    "usage": usage,
+                    "meta": {
+                        "provider": "nvidia",
+                        "provider_variant": provider_variant,
+                        "model": model_name,
+                        "temperature": temperature,
+                        "top_p": top_p,
+                        "max_tokens": max_tokens,
+                        "stream": bool(stream),
+                        "seed": seed,
+                        "latency_seconds": round(time.time() - start, 3),
+                        "retry_attempts": attempt + 1,
+                        "ts": int(time.time()),
+                    },
                 },
-            }, "", False
+                "",
+                False,
+            )
         except request_exceptions.Timeout:
             last_error = (
                 "NVIDIA provider timed out before returning a completion. The endpoint and key may be configured, "
@@ -659,7 +760,9 @@ def _nvidia_retry_attempts() -> int:
         return 2
 
 
-def _should_retry_nvidia_response(status_code: int, attempt: int, attempts: int) -> bool:
+def _should_retry_nvidia_response(
+    status_code: int, attempt: int, attempts: int
+) -> bool:
     return status_code in {502, 503, 504} and attempt < attempts - 1
 
 
@@ -681,7 +784,9 @@ def _nvidia_chat_completions_url(base_url: str) -> str:
     if not cleaned:
         cleaned = default_base
 
-    if cleaned.endswith("/v1/chat/completions") or cleaned.endswith("/chat/completions"):
+    if cleaned.endswith("/v1/chat/completions") or cleaned.endswith(
+        "/chat/completions"
+    ):
         return cleaned
     if cleaned.endswith("/v1"):
         return cleaned + "/chat/completions"
@@ -731,7 +836,9 @@ def _extract_openai_message_text(message: Dict[str, Any]) -> str:
                     parts.append(item["content"])
             elif isinstance(item, str):
                 parts.append(item)
-        return "\n".join(part.strip() for part in parts if part and part.strip()).strip()
+        return "\n".join(
+            part.strip() for part in parts if part and part.strip()
+        ).strip()
     return ""
 
 
@@ -760,7 +867,7 @@ def _collect_openai_stream(response: Any) -> str:
         line = str(raw_line).strip()
         if not line.startswith("data:"):
             continue
-        payload = line[len("data:"):].strip()
+        payload = line[len("data:") :].strip()
         if payload == "[DONE]":
             break
         try:
@@ -807,23 +914,43 @@ def build_prompt(
         is_medication_set = len(medset_drugs) > 2
         if mode_lower in {"patient", "pt"}:
             if is_medication_set:
-                blocks["USER_QUESTION"] = f"Can I take this medication set together: {', '.join(medset_drugs)}?"
+                blocks["USER_QUESTION"] = (
+                    f"Can I take this medication set together: {', '.join(medset_drugs)}?"
+                )
             else:
-                blocks["USER_QUESTION"] = f"Can I take {blocks.get('DRUG_A', 'drug A')} and {blocks.get('DRUG_B', 'drug B')} together?"
+                blocks["USER_QUESTION"] = (
+                    f"Can I take {blocks.get('DRUG_A', 'drug A')} and {blocks.get('DRUG_B', 'drug B')} together?"
+                )
         elif (
-            mode_lower in {"pharma", "pv", "safety", "pharmacovigilance", "pharmaceuticals", "research"}
+            mode_lower
+            in {
+                "pharma",
+                "pv",
+                "safety",
+                "pharmacovigilance",
+                "pharmaceuticals",
+                "research",
+            }
             or "pharmacovigilance" in mode_lower
             or "research" in mode_lower
         ):
             if is_medication_set:
-                blocks["USER_QUESTION"] = f"Prepare a medication-set risk brief for: {', '.join(medset_drugs)}."
+                blocks["USER_QUESTION"] = (
+                    f"Prepare a medication-set risk brief for: {', '.join(medset_drugs)}."
+                )
             else:
-                blocks["USER_QUESTION"] = f"Prepare a risk brief for {blocks.get('DRUG_A', 'drug A')} + {blocks.get('DRUG_B', 'drug B')}."
+                blocks["USER_QUESTION"] = (
+                    f"Prepare a risk brief for {blocks.get('DRUG_A', 'drug A')} + {blocks.get('DRUG_B', 'drug B')}."
+                )
         else:
             if is_medication_set:
-                blocks["USER_QUESTION"] = f"Evaluate potential interactions across this medication set: {', '.join(medset_drugs)}."
+                blocks["USER_QUESTION"] = (
+                    f"Evaluate potential interactions across this medication set: {', '.join(medset_drugs)}."
+                )
             else:
-                blocks["USER_QUESTION"] = f"Evaluate potential interactions between {blocks.get('DRUG_A', 'drug A')} and {blocks.get('DRUG_B', 'drug B')} and provide a clinician-facing summary."
+                blocks["USER_QUESTION"] = (
+                    f"Evaluate potential interactions between {blocks.get('DRUG_A', 'drug A')} and {blocks.get('DRUG_B', 'drug B')} and provide a clinician-facing summary."
+                )
     else:
         blocks["USER_QUESTION"] = user_question
     blocks["RAW_CONTEXT_JSON"] = _compact_json(context, max_chars=3000)
@@ -835,16 +962,23 @@ def build_prompt(
 
     if user_question and user_question.strip():
         is_followup = (
-            not user_question.startswith("Evaluate potential") and
-            not user_question.startswith("Can I take") and
-            not user_question.startswith("Prepare a risk brief")
+            not user_question.startswith("Evaluate potential")
+            and not user_question.startswith("Can I take")
+            and not user_question.startswith("Prepare a risk brief")
         )
         if is_followup:
             question_lower = user_question.lower()
             conditions = []
-            if "high blood pressure" in question_lower or "hypertension" in question_lower:
+            if (
+                "high blood pressure" in question_lower
+                or "hypertension" in question_lower
+            ):
                 conditions.append("high blood pressure (hypertension)")
-            if "elderly" in question_lower or "older" in question_lower or "age" in question_lower:
+            if (
+                "elderly" in question_lower
+                or "older" in question_lower
+                or "age" in question_lower
+            ):
                 conditions.append("elderly age")
             if "diabetes" in question_lower:
                 conditions.append("diabetes")
@@ -984,13 +1118,20 @@ def build_followup_prompt(
         )
         word_limit = "120-180 words"
     elif (
-        mode_lower in {"pharma", "pv", "safety", "pharmacovigilance", "pharmaceuticals", "research", "pv_research"}
+        mode_lower
+        in {
+            "pharma",
+            "pv",
+            "safety",
+            "pharmacovigilance",
+            "pharmaceuticals",
+            "research",
+            "pv_research",
+        }
         or "pharmacovigilance" in mode_lower
         or "research" in mode_lower
     ):
-        audience_instruction = (
-            "Audience: pharmacovigilance/research. Be neutral, evidence-scoped, and explicit about signal limitations."
-        )
+        audience_instruction = "Audience: pharmacovigilance/research. Be neutral, evidence-scoped, and explicit about signal limitations."
         word_limit = "150-250 words"
     else:
         audience_instruction = (
@@ -1050,6 +1191,7 @@ MANDATORY RESPONSE RULES:
 
     return prompt.strip()
 
+
 # ========== Template helpers ==========
 def _select_template(mode: str) -> str:
     key_raw = (mode or "").strip().lower()
@@ -1058,7 +1200,15 @@ def _select_template(mode: str) -> str:
     elif key_raw in {"patient", "pt"}:
         key = "PATIENT"
     elif (
-        key_raw in {"pharma", "pv", "safety", "pharmacovigilance", "pharmaceuticals", "research"}
+        key_raw
+        in {
+            "pharma",
+            "pv",
+            "safety",
+            "pharmacovigilance",
+            "pharmaceuticals",
+            "research",
+        }
         or "pharmacovigilance" in key_raw
         or "research" in key_raw
     ):
@@ -1076,6 +1226,7 @@ def _select_template(mode: str) -> str:
         "CONTEXT:\n{{PK_SUMMARY}}\n{{PD_SUMMARY}}\n{{FAERS_SUMMARY}}\n"
     )
 
+
 def _fill(template: str, **kwargs: str) -> str:
     out = template
     for k, v in kwargs.items():
@@ -1091,6 +1242,7 @@ def _fill(template: str, **kwargs: str) -> str:
     out = re.sub(r"- Additional PK metadata.*?\(none\)\s*\n", "", out)
     return out
 
+
 # ========== History formatting ==========
 def _format_history(
     history: List[Dict[str, str]], budget_chars: int = 1200
@@ -1102,7 +1254,11 @@ def _format_history(
     total = 0
     for h in history:
         role = (h.get("role") or "").lower()
-        role = "User" if role.startswith("u") else ("Assistant" if role.startswith("a") else "User")
+        role = (
+            "User"
+            if role.startswith("u")
+            else ("Assistant" if role.startswith("a") else "User")
+        )
         text = (h.get("text") or "").strip()
         if not text:
             continue
@@ -1119,6 +1275,7 @@ def _format_history(
             break
     out.reverse()
     return "\n".join(out), truncated
+
 
 # ========== Small helpers ==========
 def _as_str_list(xs: Any) -> List[str]:
@@ -1143,6 +1300,7 @@ def _as_str_list(xs: Any) -> List[str]:
             out.append(s)
     return out
 
+
 def _extract_user_question(
     ctx: Dict[str, Any], history: Optional[List[Dict[str, str]]] = None
 ) -> str:
@@ -1155,6 +1313,7 @@ def _extract_user_question(
                 return t
     q = ((ctx.get("meta") or {}).get("question")) or ctx.get("query") or ""
     return str(q).strip()
+
 
 def _compact_json(obj: Any, max_chars: int = 3000) -> str:
     try:
@@ -1171,6 +1330,7 @@ def _compact_text(value: str, max_chars: int) -> str:
     if len(text) > max_chars:
         return text[: max_chars - 1].rstrip() + "..."
     return text
+
 
 # ========== Context summarization & truncation ==========
 def _summarize_context(ctx: Dict[str, Any], mode: str) -> Dict[str, str]:
@@ -1204,11 +1364,21 @@ def _summarize_context(ctx: Dict[str, Any], mode: str) -> Dict[str, str]:
     parts: List[Tuple[str, int, int, str]] = [
         ("MedicationSet", len(medication_set_txt), 1, medication_set_txt),
         ("PK", pk_len, pk_prio, pk_txt),
-        ("PK_META", len(pk_meta_txt), 2, pk_meta_txt),  # NEW: PK metadata (high priority, after PK)
+        (
+            "PK_META",
+            len(pk_meta_txt),
+            2,
+            pk_meta_txt,
+        ),  # NEW: PK metadata (high priority, after PK)
         ("PD", pd_len, pd_prio, pd_txt),
         ("FAERS", faers_len, 5, faers_txt),
         ("ClinicalReference", len(clinical_reference_txt), 4, clinical_reference_txt),
-        ("ResearchEnrichment", len(research_enrichment_txt), 6, research_enrichment_txt),
+        (
+            "ResearchEnrichment",
+            len(research_enrichment_txt),
+            6,
+            research_enrichment_txt,
+        ),
         ("Flags", len(flags_txt), 10, flags_txt),
         ("Table", len(table_txt), 20, table_txt),
         ("Sources", len(sources_txt), 50, sources_txt),
@@ -1225,7 +1395,7 @@ def _summarize_context(ctx: Dict[str, Any], mode: str) -> Dict[str, str]:
             used += ln
         else:
             if ln > 220:
-                kept[label] = (txt[:200].rstrip() + " …")
+                kept[label] = txt[:200].rstrip() + " …"
                 used += 203
             truncated_by_budget = True
 
@@ -1257,11 +1427,15 @@ def _summarize_context(ctx: Dict[str, Any], mode: str) -> Dict[str, str]:
         "DRUG_B": drug_b,
         "MEDICATION_SET_SUMMARY": g("MedicationSet", ""),
         "PK_SUMMARY": g("PK", "(no PK evidence)"),
-        "PK_META": g("PK_META", ""),  # NEW: PK metadata from PubChem (empty if not available)
+        "PK_META": g(
+            "PK_META", ""
+        ),  # NEW: PK metadata from PubChem (empty if not available)
         "PD_SUMMARY": g("PD", "(no PD evidence)"),
         "FAERS_SUMMARY": g("FAERS", "No evidence from FAERS."),
         "CLINICAL_REFERENCE": g("ClinicalReference", "(no label/reference evidence)"),
-        "RESEARCH_ENRICHMENT": g("ResearchEnrichment", "(no research enrichment evidence)"),
+        "RESEARCH_ENRICHMENT": g(
+            "ResearchEnrichment", "(no research enrichment evidence)"
+        ),
         "RISK_FLAGS": g("Flags", "(no tabular risk flags)"),
         "EVIDENCE_TABLE": g("Table", "(no evidence table)"),
         "SOURCES": g("Sources", "(no sources listed)"),
@@ -1269,13 +1443,16 @@ def _summarize_context(ctx: Dict[str, Any], mode: str) -> Dict[str, str]:
         "__TRUNCATED__": "1" if (truncated_by_budget or input_overflow) else "",
     }
 
+
 # ========== Formatting helpers ==========
 def _format_medication_set(ctx: Dict[str, Any]) -> str:
     medication_set = ctx.get("medication_set") or {}
     if not isinstance(medication_set, dict):
         return ""
     drugs = medication_set.get("drugs") or []
-    pairs = medication_set.get("top_pairs") or medication_set.get("evaluated_pairs") or []
+    pairs = (
+        medication_set.get("top_pairs") or medication_set.get("evaluated_pairs") or []
+    )
     if not drugs and not pairs:
         return ""
 
@@ -1293,17 +1470,24 @@ def _format_medication_set(ctx: Dict[str, Any]) -> str:
             confidence = row.get("confidence") or "low"
             pk = _compact_text(str(row.get("pk_summary") or ""), 140)
             pd = _compact_text(str(row.get("pd_summary") or ""), 120)
-            pair_bits.append(f"{pair_label}: risk={risk}, confidence={confidence}, PK={pk or 'none'}, PD={pd or 'none'}")
+            pair_bits.append(
+                f"{pair_label}: risk={risk}, confidence={confidence}, PK={pk or 'none'}, PD={pd or 'none'}"
+            )
         if pair_bits:
             parts.append("Pair ranking: " + " || ".join(pair_bits))
     patient_context = medication_set.get("patient_context") or {}
     if isinstance(patient_context, dict) and patient_context:
-        parts.append("Patient context supplied: " + _compact_text(json.dumps(patient_context, ensure_ascii=False, default=str), 500))
+        parts.append(
+            "Patient context supplied: "
+            + _compact_text(
+                json.dumps(patient_context, ensure_ascii=False, default=str), 500
+            )
+        )
     return " || ".join(parts)
 
 
 def _format_clinical_reference(ctx: Dict[str, Any]) -> str:
-    clinical = ((ctx.get("signals") or {}).get("clinical_reference") or {})
+    clinical = (ctx.get("signals") or {}).get("clinical_reference") or {}
     if not isinstance(clinical, dict):
         return ""
 
@@ -1331,12 +1515,21 @@ def _format_clinical_reference(ctx: Dict[str, Any]) -> str:
             continue
         sections = payload.get("sections") or {}
         section_parts = []
-        for key in ("boxed_warning", "contraindications", "drug_interactions", "warnings_and_cautions", "clinical_pharmacology"):
+        for key in (
+            "boxed_warning",
+            "contraindications",
+            "drug_interactions",
+            "warnings_and_cautions",
+            "clinical_pharmacology",
+        ):
             text = str(sections.get(key) or "").strip()
             if text:
                 section_parts.append(f"{key}: {_compact_text(text, 240)}")
         if section_parts:
-            parts.append(f"{label} openFDA label ({payload.get('effective_time') or 'date unknown'}): " + " | ".join(section_parts[:3]))
+            parts.append(
+                f"{label} openFDA label ({payload.get('effective_time') or 'date unknown'}): "
+                + " | ".join(section_parts[:3])
+            )
 
     dailymed = clinical.get("dailymed") or {}
     for side, label in (("a", "A"), ("b", "B")):
@@ -1361,15 +1554,19 @@ def _format_clinical_reference(ctx: Dict[str, Any]) -> str:
             if not isinstance(match, dict):
                 continue
             row = match.get("row") or {}
-            row_summaries.append("; ".join(f"{k}={v}" for k, v in list(row.items())[:3] if v))
+            row_summaries.append(
+                "; ".join(f"{k}={v}" for k, v in list(row.items())[:3] if v)
+            )
         if row_summaries:
-            parts.append(f"{label} FDA CYP/transporter table match: " + " / ".join(row_summaries))
+            parts.append(
+                f"{label} FDA CYP/transporter table match: " + " / ".join(row_summaries)
+            )
 
     return " || ".join(parts[:8])
 
 
 def _format_research_enrichment(ctx: Dict[str, Any]) -> str:
-    enrichment = ((ctx.get("signals") or {}).get("research_enrichment") or {})
+    enrichment = (ctx.get("signals") or {}).get("research_enrichment") or {}
     if not isinstance(enrichment, dict):
         return ""
 
@@ -1403,7 +1600,9 @@ def _format_research_enrichment(ctx: Dict[str, Any]) -> str:
         mapped = []
         for row in (stringdb.get("mapped") or [])[:5]:
             if isinstance(row, dict):
-                mapped.append(str(row.get("preferred_name") or row.get("query") or "").strip())
+                mapped.append(
+                    str(row.get("preferred_name") or row.get("query") or "").strip()
+                )
         interactions = []
         for row in (stringdb.get("interactions") or [])[:3]:
             if isinstance(row, dict):
@@ -1439,7 +1638,9 @@ def _format_research_enrichment(ctx: Dict[str, Any]) -> str:
             if targets:
                 drugcentral_bits.append(f"{label}: " + ", ".join(targets))
         if drugcentral_bits:
-            parts.append("DrugCentral target/activity context: " + " | ".join(drugcentral_bits))
+            parts.append(
+                "DrugCentral target/activity context: " + " | ".join(drugcentral_bits)
+            )
 
     open_targets = enrichment.get("open_targets") or {}
     if isinstance(open_targets, dict):
@@ -1484,7 +1685,7 @@ def _format_pk_meta(ctx: Dict[str, Any]) -> str:
     mech = (ctx.get("signals", {}) or {}).get("mechanistic", {}) or {}
     pk_data_a = mech.get("pk_data_a", {}) or {}
     pk_data_b = mech.get("pk_data_b", {}) or {}
-    
+
     def format_pk_props(pk_data: Dict[str, Any], label: str) -> List[str]:
         """Format PK properties for one drug."""
         props = []
@@ -1497,48 +1698,63 @@ def _format_pk_meta(ctx: Dict[str, Any]) -> str:
         if pk_data.get("molecular_weight") is not None:
             mw = pk_data["molecular_weight"]
             props.append(f"MW {mw:.0f}")
-        if pk_data.get("h_bond_donors") is not None and pk_data.get("h_bond_acceptors") is not None:
+        if (
+            pk_data.get("h_bond_donors") is not None
+            and pk_data.get("h_bond_acceptors") is not None
+        ):
             hbd = pk_data["h_bond_donors"]
             hba = pk_data["h_bond_acceptors"]
             if hbd > 3 or hba > 5:
                 props.append(f"H-bonds: {hbd}D/{hba}A")
         return props
-    
+
     parts_a = format_pk_props(pk_data_a, "A")
     parts_b = format_pk_props(pk_data_b, "B")
-    
+
     if not parts_a and not parts_b:
         return ""
-    
+
     result = []
     if parts_a:
         result.append(f"Drug A: {', '.join(parts_a)}")
     if parts_b:
         result.append(f"Drug B: {', '.join(parts_b)}")
-    
+
     return "; ".join(result) if result else ""
 
 
 def _format_pk(ctx: Dict[str, Any]) -> Tuple[str, int, int]:
-    pkpd = (ctx.get("pkpd") or {})
+    pkpd = ctx.get("pkpd") or {}
     if pkpd.get("pk_summary"):
         txt = str(pkpd["pk_summary"])
         # Add DATA-DRIVEN prefix if not already present
         if "DATA-DRIVEN PK OVERLAP:" not in txt:
             # Check if it's an overlap or no overlap message
-            if any(x in txt.lower() for x in ("inhibition", "induction", "overlap", "substrate")):
+            if any(
+                x in txt.lower()
+                for x in ("inhibition", "induction", "overlap", "substrate")
+            ):
                 # Try to extract the key line and prefix it
-                if "No strong PK overlap" in txt or "no strong pk overlap" in txt.lower():
-                    txt = txt.replace("No strong PK overlap", "DATA-DRIVEN PK OVERLAP: No strong PK overlap")
-                    txt = txt.replace("no strong pk overlap", "DATA-DRIVEN PK OVERLAP: no strong pk overlap")
+                if (
+                    "No strong PK overlap" in txt
+                    or "no strong pk overlap" in txt.lower()
+                ):
+                    txt = txt.replace(
+                        "No strong PK overlap",
+                        "DATA-DRIVEN PK OVERLAP: No strong PK overlap",
+                    )
+                    txt = txt.replace(
+                        "no strong pk overlap",
+                        "DATA-DRIVEN PK OVERLAP: no strong pk overlap",
+                    )
                 elif "PK overlap" in txt or "pk overlap" in txt.lower():
                     # Find the overlap line and prefix it
-                    lines = txt.split('.')
+                    lines = txt.split(".")
                     for i, line in enumerate(lines):
                         if "overlap" in line.lower() and "DATA-DRIVEN" not in line:
                             lines[i] = "DATA-DRIVEN PK OVERLAP: " + line.strip()
                             break
-                    txt = '. '.join(lines)
+                    txt = ". ".join(lines)
         prio = 0 if any(x in txt.lower() for x in ("inhibition", "induction")) else 3
         return txt, len(txt), prio
 
@@ -1551,21 +1767,27 @@ def _format_pk(ctx: Dict[str, Any]) -> Tuple[str, int, int]:
         clean = sorted(set(_as_str_list(items)))
         return f"{lbl}=" + (", ".join(clean) if clean else "none")
 
-    a_str = "; ".join(
-        [
-            part("A substrate", a.get("substrate", []) or []),
-            part("A inhibitor", a.get("inhibitor", []) or []),
-            part("A inducer", a.get("inducer", []) or []),
-        ]
-    ) or "No enzyme data for Drug A"
+    a_str = (
+        "; ".join(
+            [
+                part("A substrate", a.get("substrate", []) or []),
+                part("A inhibitor", a.get("inhibitor", []) or []),
+                part("A inducer", a.get("inducer", []) or []),
+            ]
+        )
+        or "No enzyme data for Drug A"
+    )
 
-    b_str = "; ".join(
-        [
-            part("B substrate", b.get("substrate", []) or []),
-            part("B inhibitor", b.get("inhibitor", []) or []),
-            part("B inducer", b.get("inducer", []) or []),
-        ]
-    ) or "No enzyme data for Drug B"
+    b_str = (
+        "; ".join(
+            [
+                part("B substrate", b.get("substrate", []) or []),
+                part("B inhibitor", b.get("inhibitor", []) or []),
+                part("B inducer", b.get("inducer", []) or []),
+            ]
+        )
+        or "No enzyme data for Drug B"
+    )
 
     a_sub = set(_as_str_list(a.get("substrate", [])))
     b_sub = set(_as_str_list(b.get("substrate", [])))
@@ -1594,27 +1816,37 @@ def _format_pk(ctx: Dict[str, Any]) -> Tuple[str, int, int]:
     txt = f"{a_str}. {b_str}. {key_line}"
     return txt, len(txt), prio
 
+
 def _format_pd(ctx: Dict[str, Any]) -> Tuple[str, int, int]:
-    pkpd = (ctx.get("pkpd") or {})
+    pkpd = ctx.get("pkpd") or {}
     mech = (ctx.get("signals", {}) or {}).get("mechanistic", {}) or {}
-    
+
     # Always include pathways from mechanistic data (KEGG/Reactome)
     pathways_a = _as_str_list(mech.get("pathways_a", []))
     pathways_b = _as_str_list(mech.get("pathways_b", []))
     common_pathways_mech = _as_str_list(mech.get("common_pathways", []))
-    
+
     # If pkpd summary exists, use it but enhance with mechanistic pathways if missing
     if pkpd.get("pd_summary"):
         txt = str(pkpd["pd_summary"])
         # If summary doesn't mention pathways but we have them, append them
-        if ("pathway" not in txt.lower() or "enhanced pathway" not in txt.lower()) and (pathways_a or pathways_b or common_pathways_mech):
+        if ("pathway" not in txt.lower() or "enhanced pathway" not in txt.lower()) and (
+            pathways_a or pathways_b or common_pathways_mech
+        ):
             pathway_parts = []
             if common_pathways_mech:
-                pathway_parts.append("Common pathways (KEGG/Reactome): " + ", ".join(sorted(set(common_pathways_mech))[:5]))
+                pathway_parts.append(
+                    "Common pathways (KEGG/Reactome): "
+                    + ", ".join(sorted(set(common_pathways_mech))[:5])
+                )
             if pathways_a:
-                pathway_parts.append(f"Drug A pathways: {', '.join(sorted(set(pathways_a))[:3])}")
+                pathway_parts.append(
+                    f"Drug A pathways: {', '.join(sorted(set(pathways_a))[:3])}"
+                )
             if pathways_b:
-                pathway_parts.append(f"Drug B pathways: {', '.join(sorted(set(pathways_b))[:3])}")
+                pathway_parts.append(
+                    f"Drug B pathways: {', '.join(sorted(set(pathways_b))[:3])}"
+                )
             if pathway_parts:
                 txt += "; " + "; ".join(pathway_parts)
         prio = 1 if ("overlapping" in txt.lower() or "pathways" in txt.lower()) else 4
@@ -1645,6 +1877,7 @@ def _format_pd(ctx: Dict[str, Any]) -> Tuple[str, int, int]:
     txt = "; ".join(parts)
     prio = 1 if (cp or overlap_targets or pathways_a or pathways_b) else 4
     return txt, len(txt), prio
+
 
 def _format_faers(ctx: Dict[str, Any], limit: int = 5) -> Tuple[str, int]:
     faers = (ctx.get("signals", {}) or {}).get("faers", {}) or {}
@@ -1678,6 +1911,7 @@ def _format_faers(ctx: Dict[str, Any], limit: int = 5) -> Tuple[str, int]:
     txt = " | ".join([a, b, combo])
     return txt, len(txt)
 
+
 def _format_flags(ctx: Dict[str, Any]) -> str:
     tab = (ctx.get("signals", {}) or {}).get("tabular", {}) or {}
 
@@ -1702,6 +1936,7 @@ def _format_flags(ctx: Dict[str, Any]) -> str:
             flags.append(f"NCI-ALMANAC(top_score)={top_score}")
     return ", ".join(flags)
 
+
 def _format_evidence_table(ctx: Dict[str, Any], mode: str) -> str:
     drugs = ctx.get("drugs", {}) or {}
 
@@ -1720,7 +1955,9 @@ def _format_evidence_table(ctx: Dict[str, Any], mode: str) -> str:
     tb = _as_str_list(mech.get("targets_b", []))[:8]
     pa = _as_str_list(mech.get("pathways_a", []))[:8]  # Increased from 6 to 8
     pb = _as_str_list(mech.get("pathways_b", []))[:8]  # Increased from 6 to 8
-    cp_mech = _as_str_list(mech.get("common_pathways", []))[:8]  # Include common pathways
+    cp_mech = _as_str_list(mech.get("common_pathways", []))[
+        :8
+    ]  # Include common pathways
 
     lines = [
         f"A IDs: {ids('a')} | B IDs: {ids('b')}",
@@ -1739,9 +1976,20 @@ def _format_evidence_table(ctx: Dict[str, Any], mode: str) -> str:
 
     chembl_summary = _format_chembl_enrichment(mech.get("chembl_enrichment"))
     enrichment_sources = []
-    if mech.get("uniprot_ids_a") or mech.get("uniprot_ids_b") or mech.get("uniprot_targets_a") or mech.get("uniprot_targets_b"):
+    if (
+        mech.get("uniprot_ids_a")
+        or mech.get("uniprot_ids_b")
+        or mech.get("uniprot_targets_a")
+        or mech.get("uniprot_targets_b")
+    ):
         enrichment_sources.append("UniProt")
-    if mech.get("kegg_pathways_a") or mech.get("kegg_pathways_b") or mech.get("kegg_common_pathways") or mech.get("kegg_enzymes_a") or mech.get("kegg_enzymes_b"):
+    if (
+        mech.get("kegg_pathways_a")
+        or mech.get("kegg_pathways_b")
+        or mech.get("kegg_common_pathways")
+        or mech.get("kegg_enzymes_a")
+        or mech.get("kegg_enzymes_b")
+    ):
         enrichment_sources.append("KEGG")
     if mech.get("reactome_pathways_a") or mech.get("reactome_pathways_b"):
         enrichment_sources.append("Reactome")
@@ -1793,7 +2041,7 @@ def _format_evidence_table(ctx: Dict[str, Any], mode: str) -> str:
     nci_summary = _format_nci_almanac(ctx)
     if nci_summary:
         lines.append(nci_summary)
-    
+
     return " | ".join(lines)
 
 
@@ -1832,8 +2080,15 @@ def _format_pathway_records(value: Any) -> List[str]:
     out: List[str] = []
     for item in rows:
         if isinstance(item, dict):
-            pathway_id = item.get("pathway_id") or item.get("id") or item.get("stId") or item.get("dbId")
-            name = item.get("pathway_name") or item.get("name") or item.get("displayName")
+            pathway_id = (
+                item.get("pathway_id")
+                or item.get("id")
+                or item.get("stId")
+                or item.get("dbId")
+            )
+            name = (
+                item.get("pathway_name") or item.get("name") or item.get("displayName")
+            )
             if pathway_id and name:
                 out.append(f"{pathway_id}: {name}")
             elif name:
@@ -1854,12 +2109,20 @@ def _format_protein_records(value: Any) -> List[str]:
     out: List[str] = []
     for item in rows:
         if isinstance(item, dict):
-            accession = item.get("uniprot_id") or item.get("primaryAccession") or item.get("accession")
-            name = item.get("name") or item.get("protein_name") or item.get("original_id")
+            accession = (
+                item.get("uniprot_id")
+                or item.get("primaryAccession")
+                or item.get("accession")
+            )
+            name = (
+                item.get("name") or item.get("protein_name") or item.get("original_id")
+            )
             genes = item.get("gene_names") or []
             if isinstance(genes, str):
                 genes = [genes]
-            gene_text = f" ({', '.join(str(g) for g in genes[:3] if g)})" if genes else ""
+            gene_text = (
+                f" ({', '.join(str(g) for g in genes[:3] if g)})" if genes else ""
+            )
             if accession and name:
                 out.append(f"{accession}: {name}{gene_text}")
             elif accession:
@@ -1944,9 +2207,11 @@ def _format_sources(ctx: Dict[str, Any]) -> str:
     extras = [key for key in src.keys() if key not in ordered]
     return "; ".join(fmt(key) for key in ordered + extras)
 
+
 def _format_caveats(ctx: Dict[str, Any]) -> str:
     cv = ctx.get("caveats", []) or []
     return "; ".join(cv) if cv else "(none)"
+
 
 # ========== Disclaimers & fallback ==========
 def _strip_template_safety(text: str) -> str:
@@ -1954,8 +2219,8 @@ def _strip_template_safety(text: str) -> str:
         return text
     patterns = [
         r'^\s*"This is research software; final decisions rest with licensed clinicians."\s*$',
-        r'^\s*This is research software; final decisions rest with licensed clinicians\.\s*$',
-        r'^\s*Disclaimer:\s*Research prototype\..*$',
+        r"^\s*This is research software; final decisions rest with licensed clinicians\.\s*$",
+        r"^\s*Disclaimer:\s*Research prototype\..*$",
     ]
     lines = text.splitlines()
     kept = []
@@ -1964,6 +2229,7 @@ def _strip_template_safety(text: str) -> str:
             continue
         kept.append(ln)
     return "\n".join(kept).rstrip()
+
 
 def _append_disclaimer(text: str, mode: str) -> str:
     m = (mode or "").lower()
@@ -1974,6 +2240,7 @@ def _append_disclaimer(text: str, mode: str) -> str:
     else:
         d = "\n\nDisclaimer: Informational, non-regulatory summary; defer to internal PV/labeling."
     return (text or "").rstrip() + d
+
 
 def _fallback(msg: str) -> Dict[str, Any]:
     text = f"Unable to generate a full explanation right now. {msg}"

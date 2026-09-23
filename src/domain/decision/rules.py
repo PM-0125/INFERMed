@@ -16,7 +16,9 @@ def recommended_action_for_risk(risk_level: str) -> ClinicalAction:
     return "insufficient_evidence"
 
 
-def missing_patient_factors_for_decision(patient_context: PatientContext | None = None) -> list[str]:
+def missing_patient_factors_for_decision(
+    patient_context: PatientContext | None = None,
+) -> list[str]:
     if patient_context is None:
         return ["renal function", "hepatic function", "baseline ECG/QTc", "current INR"]
     labels = {
@@ -36,7 +38,11 @@ def patient_amplifiers(patient_context: PatientContext | None = None) -> list[st
     out: list[str] = []
     if patient_context.age_years is not None and patient_context.age_years >= 75:
         out.append("advanced age")
-    if patient_context.renal_function in {"moderate_impairment", "severe_impairment", "dialysis"}:
+    if patient_context.renal_function in {
+        "moderate_impairment",
+        "severe_impairment",
+        "dialysis",
+    }:
         out.append("renal impairment")
     if patient_context.hepatic_function in {"moderate_impairment", "severe_impairment"}:
         out.append("hepatic impairment")

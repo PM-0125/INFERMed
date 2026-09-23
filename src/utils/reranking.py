@@ -25,6 +25,7 @@ def _load_cross_encoder():
         return None
     return CrossEncoder
 
+
 LOG = logging.getLogger(__name__)
 
 # Default model
@@ -35,19 +36,19 @@ class Reranker:
     """
     Re-ranker using cross-encoder models for query-document relevance.
     """
-    
+
     def __init__(self, model_name: str = DEFAULT_RERANKER_MODEL):
         self.model_name = model_name
         self.model = None
         self._initialized = False
-        
+
         self._initialize_model()
-    
+
     def _initialize_model(self):
         """Initialize the cross-encoder model."""
         if self.model is not None:
             return
-        
+
         try:
             cross_encoder = _load_cross_encoder()
             if cross_encoder is None:
@@ -60,21 +61,18 @@ class Reranker:
             LOG.error(f"Failed to initialize re-ranker model: {e}")
             self.model = None
             self._initialized = False
-    
+
     def rerank(
-        self,
-        query: str,
-        documents: List[str],
-        top_k: Optional[int] = None
+        self, query: str, documents: List[str], top_k: Optional[int] = None
     ) -> List[Tuple[str, float]]:
         """
         Re-rank documents by relevance to query.
-        
+
         Args:
             query: Query string
             documents: List of document strings to re-rank
             top_k: Optional number of top results to return
-            
+
         Returns:
             List of (document, relevance_score) tuples, sorted by score (descending)
         """
@@ -83,38 +81,38 @@ class Reranker:
             if top_k is not None:
                 return [(doc, 1.0) for doc in documents[:top_k]]
             return [(doc, 1.0) for doc in documents]
-        
+
         if not query or not query.strip():
             if top_k is not None:
                 return [(doc, 1.0) for doc in documents[:top_k]]
             return [(doc, 1.0) for doc in documents]
-        
+
         try:
             # Create query-document pairs
             pairs = [(query, doc) for doc in documents]
-            
+
             # Get relevance scores
             scores = self.model.predict(pairs)
-            
+
             # Combine documents with scores
             scored_docs = list(zip(documents, scores))
-            
+
             # Sort by score (descending)
             scored_docs.sort(key=lambda x: x[1], reverse=True)
-            
+
             # Apply top-k if specified
             if top_k is not None:
                 scored_docs = scored_docs[:top_k]
-            
+
             return scored_docs
-            
+
         except Exception as e:
             LOG.error(f"Re-ranking failed: {e}")
             # Fallback: return original order with default scores
             if top_k is not None:
                 return [(doc, 1.0) for doc in documents[:top_k]]
             return [(doc, 1.0) for doc in documents]
-    
+
     def rerank_with_scores(
         self,
         query: str,
@@ -122,11 +120,11 @@ class Reranker:
         top_k: Optional[int] = None,
         combine_with_original: bool = True,
         original_weight: float = 0.3,
-        rerank_weight: float = 0.7
+        rerank_weight: float = 0.7,
     ) -> List[Tuple[str, float]]:
         """
         Re-rank documents that already have scores, optionally combining with original scores.
-        
+
         Args:
             query: Query string
             scored_documents: List of (document, original_score) tuples
@@ -134,19 +132,19 @@ class Reranker:
             combine_with_original: If True, combine rerank scores with original scores
             original_weight: Weight for original scores (if combining)
             rerank_weight: Weight for rerank scores (if combining)
-            
+
         Returns:
             List of (document, combined_score) tuples, sorted by score
         """
         if not scored_documents:
             return []
-        
+
         documents = [doc for doc, _ in scored_documents]
         original_scores = {doc: score for doc, score in scored_documents}
-        
+
         # Re-rank
         reranked = self.rerank(query, documents, top_k=None)
-        
+
         # Combine scores if requested
         if combine_with_original:
             combined = []
@@ -154,15 +152,17 @@ class Reranker:
                 original_score = original_scores.get(doc, 0.0)
                 # Normalize scores to 0-1 range for combination
                 # Assuming rerank scores are already in reasonable range
-                combined_score = (original_score * original_weight) + (float(rerank_score) * rerank_weight)
+                combined_score = (original_score * original_weight) + (
+                    float(rerank_score) * rerank_weight
+                )
                 combined.append((doc, combined_score))
-            
+
             # Re-sort by combined score
             combined.sort(key=lambda x: x[1], reverse=True)
-            
+
             if top_k is not None:
                 combined = combined[:top_k]
-            
+
             return combined
         else:
             # Just use rerank scores
@@ -181,4 +181,3 @@ def get_reranker(model_name: str = DEFAULT_RERANKER_MODEL) -> Optional[Reranker]
     if _global_reranker is None:
         _global_reranker = Reranker(model_name)
     return _global_reranker
-

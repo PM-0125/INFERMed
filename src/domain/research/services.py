@@ -7,9 +7,11 @@ from src.domain.research.entities import ResearchSignal
 
 
 class ResearchHypothesisBuilder:
-    def build(self, *, context: dict[str, Any], profile_graph: DrugProfileGraph) -> list[ResearchSignal]:
+    def build(
+        self, *, context: dict[str, Any], profile_graph: DrugProfileGraph
+    ) -> list[ResearchSignal]:
         signals: list[ResearchSignal] = []
-        enrichment = ((context.get("signals") or {}).get("research_enrichment") or {})
+        enrichment = (context.get("signals") or {}).get("research_enrichment") or {}
         if enrichment.get("europe_pmc"):
             signals.append(
                 ResearchSignal(
@@ -18,7 +20,9 @@ class ResearchHypothesisBuilder:
                     support="context",
                     source_names=["Europe PMC"],
                     payload=enrichment.get("europe_pmc") or {},
-                    limitations=["Literature metadata is discovery context; article-level claims require review."],
+                    limitations=[
+                        "Literature metadata is discovery context; article-level claims require review."
+                    ],
                 )
             )
         if enrichment.get("string"):
@@ -40,7 +44,9 @@ class ResearchHypothesisBuilder:
                     support="hypothesis",
                     source_names=["NCI ALMANAC"],
                     payload=enrichment.get("nci_almanac") or {},
-                    limitations=["Cancer cell-line combination response is research context, not general clinical safety proof."],
+                    limitations=[
+                        "Cancer cell-line combination response is research context, not general clinical safety proof."
+                    ],
                 )
             )
         if profile_graph.missing_elements:
@@ -51,7 +57,9 @@ class ResearchHypothesisBuilder:
                     support="insufficient",
                     source_names=[],
                     payload={"missing_elements": profile_graph.missing_elements},
-                    limitations=["Missing profile sections must be treated as uncertainty, not negative evidence."],
+                    limitations=[
+                        "Missing profile sections must be treated as uncertainty, not negative evidence."
+                    ],
                 )
             )
         return signals

@@ -45,15 +45,27 @@ def test_html_keeps_research_metadata_but_marks_doctor_pdf_exclusions() -> None:
                     "confidence": "Low",
                     "interactionClass": "Evidence review",
                 },
-                "assessment": [{"title": "Bottom Line", "body": "- **Result:** Review evidence."}],
+                "assessment": [
+                    {"title": "Bottom Line", "body": "- **Result:** Review evidence."}
+                ],
                 "evidence": {
                     "overview": {
                         "metrics": [{"label": "Risk", "value": "Unknown"}],
-                        "rows": [{"title": "PK summary", "description": "No strong overlap."}],
+                        "rows": [
+                            {"title": "PK summary", "description": "No strong overlap."}
+                        ],
                     },
-                    "openfda": {"metrics": [], "rows": [], "caveat": "Associative signal only."},
+                    "openfda": {
+                        "metrics": [],
+                        "rows": [],
+                        "caveat": "Associative signal only.",
+                    },
                     "references": [
-                        {"title": "OpenFDA caveat", "description": "Not proof of causality.", "meta": "FAERS"}
+                        {
+                            "title": "OpenFDA caveat",
+                            "description": "Not proof of causality.",
+                            "meta": "FAERS",
+                        }
                     ],
                 },
             },
@@ -100,8 +112,14 @@ def test_offline_provider_provenance_is_visible() -> None:
                 "ground_truth_status": "requires review",
             },
             "display": {
-                "risk": {"label": "Unknown", "confidence": "Low", "interactionClass": "Evidence review"},
-                "assessment": [{"title": "Bottom Line", "body": "Evidence remains insufficient."}],
+                "risk": {
+                    "label": "Unknown",
+                    "confidence": "Low",
+                    "interactionClass": "Evidence review",
+                },
+                "assessment": [
+                    {"title": "Bottom Line", "body": "Evidence remains insufficient."}
+                ],
                 "evidence": {},
                 "response_provenance": {
                     "provider": "codex_offline_sandboxed",

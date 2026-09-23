@@ -16,11 +16,17 @@ from src.llm.llm_interface import _nvidia_chat_completions_url
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Check NVIDIA chat-completions connectivity without printing secrets.")
+    parser = argparse.ArgumentParser(
+        description="Check NVIDIA chat-completions connectivity without printing secrets."
+    )
     parser.add_argument("--timeout", type=float, default=120.0)
     parser.add_argument("--max-tokens", type=int, default=32)
-    parser.add_argument("--reasoning-effort", choices=["low", "medium", "high"], default="low")
-    parser.add_argument("--stream", action="store_true", help="Use NVIDIA/OpenAI SSE streaming.")
+    parser.add_argument(
+        "--reasoning-effort", choices=["low", "medium", "high"], default="low"
+    )
+    parser.add_argument(
+        "--stream", action="store_true", help="Use NVIDIA/OpenAI SSE streaming."
+    )
     args = parser.parse_args()
 
     settings = get_settings()
@@ -85,7 +91,7 @@ def main() -> int:
             line = str(raw_line).strip()
             if not line.startswith("data:"):
                 continue
-            chunk = line[len("data:"):].strip()
+            chunk = line[len("data:") :].strip()
             if chunk == "[DONE]":
                 break
             try:

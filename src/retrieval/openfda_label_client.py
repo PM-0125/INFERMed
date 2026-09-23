@@ -67,8 +67,8 @@ class OpenFDALabelClient:
             f'openfda.generic_name.exact:"{escaped}"',
             f'openfda.substance_name.exact:"{escaped}"',
             f'openfda.brand_name.exact:"{escaped}"',
-            f'openfda.generic_name:{drug_name}',
-            f'openfda.substance_name:{drug_name}',
+            f"openfda.generic_name:{drug_name}",
+            f"openfda.substance_name:{drug_name}",
         ]
         for query in queries:
             payload = self._request({"search": query, "limit": "1"})
@@ -84,7 +84,9 @@ class OpenFDALabelClient:
             params["api_key"] = self.api_key
         for attempt in range(3):
             try:
-                response = self._session.get(BASE_URL, params=params, timeout=self.timeout)
+                response = self._session.get(
+                    BASE_URL, params=params, timeout=self.timeout
+                )
                 if response.status_code == 200:
                     data = response.json()
                     return data if isinstance(data, dict) else None

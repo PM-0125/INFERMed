@@ -86,7 +86,7 @@ class DailyMedClient:
 
     @staticmethod
     def _normalize_records(payload: dict[str, Any]) -> list[dict[str, str]]:
-        rows = (((payload or {}).get("data") or []) if isinstance(payload, dict) else [])
+        rows = ((payload or {}).get("data") or []) if isinstance(payload, dict) else []
         out: list[dict[str, str]] = []
         for row in rows:
             if not isinstance(row, dict):
@@ -99,9 +99,17 @@ class DailyMedClient:
                 {
                     "set_id": setid,
                     "title": title,
-                    "spl_version": str(row.get("spl_version") or row.get("splVersion") or "").strip(),
-                    "published_date": str(row.get("published_date") or row.get("publishedDate") or "").strip(),
-                    "source_url": f"https://dailymed.nlm.nih.gov/dailymed/drugInfo.cfm?setid={setid}" if setid else "",
+                    "spl_version": str(
+                        row.get("spl_version") or row.get("splVersion") or ""
+                    ).strip(),
+                    "published_date": str(
+                        row.get("published_date") or row.get("publishedDate") or ""
+                    ).strip(),
+                    "source_url": (
+                        f"https://dailymed.nlm.nih.gov/dailymed/drugInfo.cfm?setid={setid}"
+                        if setid
+                        else ""
+                    ),
                 }
             )
         return out[:5]

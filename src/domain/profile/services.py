@@ -6,7 +6,17 @@ from src.application.interaction_modeling import build_drug_profile_graph
 from src.domain.evidence.entities import EvidenceCard
 from src.domain.profile.entities import DrugProfileGraph, ProfileEdge, ProfileNode
 
-_PROFILE_SECTIONS = ("identifier", "structure", "enzyme", "transporter", "target", "pathway", "adverse_event", "toxicity_marker", "label_section")
+_PROFILE_SECTIONS = (
+    "identifier",
+    "structure",
+    "enzyme",
+    "transporter",
+    "target",
+    "pathway",
+    "adverse_event",
+    "toxicity_marker",
+    "label_section",
+)
 
 
 class DrugProfileGraphBuilder:
@@ -28,7 +38,9 @@ class DrugProfileGraphBuilder:
         )
         return self._ensure_explicit_gaps(pair_graph, drug)
 
-    def merge(self, *, analysis_id: str, drugs: list[str], graphs: list[DrugProfileGraph]) -> DrugProfileGraph:
+    def merge(
+        self, *, analysis_id: str, drugs: list[str], graphs: list[DrugProfileGraph]
+    ) -> DrugProfileGraph:
         nodes: dict[str, ProfileNode] = {}
         edges: dict[tuple[str, str, str], ProfileEdge] = {}
         missing: dict[str, set[str]] = {drug: set() for drug in drugs}
@@ -46,12 +58,20 @@ class DrugProfileGraphBuilder:
             drugs=drugs,
             nodes=list(nodes.values()),
             edges=list(edges.values()),
-            missing_elements={drug: sorted(gaps) for drug, gaps in missing.items() if gaps},
+            missing_elements={
+                drug: sorted(gaps) for drug, gaps in missing.items() if gaps
+            },
             source_limitations=list(dict.fromkeys(limitations)),
         )
 
-    def _ensure_explicit_gaps(self, graph: DrugProfileGraph, drug: str) -> DrugProfileGraph:
-        observed = {node.type for node in graph.nodes if drug.lower() in {item.lower() for item in node.drug_scope}}
+    def _ensure_explicit_gaps(
+        self, graph: DrugProfileGraph, drug: str
+    ) -> DrugProfileGraph:
+        observed = {
+            node.type
+            for node in graph.nodes
+            if drug.lower() in {item.lower() for item in node.drug_scope}
+        }
         missing = set(graph.missing_elements.get(drug, []))
         for section in _PROFILE_SECTIONS:
             if section not in observed:

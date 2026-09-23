@@ -10,9 +10,10 @@ from src.domain.medication.entities import (
     concept_id_for,
 )
 
-
 _SPACE_RE = re.compile(r"\s+")
-_STRENGTH_RE = re.compile(r"\b\d+(?:\.\d+)?\s*(?:mg|mcg|g|ml|iu|units?)\b", re.IGNORECASE)
+_STRENGTH_RE = re.compile(
+    r"\b\d+(?:\.\d+)?\s*(?:mg|mcg|g|ml|iu|units?)\b", re.IGNORECASE
+)
 _SALT_RE = re.compile(
     r"\b(?:sodium|potassium|calcium|magnesium|hydrochloride|hcl|phosphate|sulfate|sulphate|mesylate|besylate|succinate|tartrate|maleate|fumarate)\b",
     re.IGNORECASE,
@@ -41,8 +42,15 @@ _ALIASES = {
 
 _AMBIGUOUS = {
     "asa": [
-        NormalizationCandidate("aspirin", ["aspirin"], "alias_match", provenance=["local_alias:asa"]),
-        NormalizationCandidate("aminosalicylic acid", ["aminosalicylic acid"], "ambiguous", provenance=["local_ambiguity:asa"]),
+        NormalizationCandidate(
+            "aspirin", ["aspirin"], "alias_match", provenance=["local_alias:asa"]
+        ),
+        NormalizationCandidate(
+            "aminosalicylic acid",
+            ["aminosalicylic acid"],
+            "ambiguous",
+            provenance=["local_ambiguity:asa"],
+        ),
     ],
 }
 
@@ -122,7 +130,11 @@ def normalize_medication(raw_text: str) -> MedicationConcept:
             )
         ]
 
-    payload = {"normalized_name": normalized, "ingredients": ingredients, "identifiers": identifiers}
+    payload = {
+        "normalized_name": normalized,
+        "ingredients": ingredients,
+        "identifiers": identifiers,
+    }
     return MedicationConcept(
         concept_id=concept_id_for(payload),
         raw_text=raw,
@@ -134,7 +146,9 @@ def normalize_medication(raw_text: str) -> MedicationConcept:
         aliases=aliases,
         candidates=candidates,
         provenance=provenance,
-        ambiguity_reason=_ambiguity_reason(candidates) if confidence == "ambiguous" else None,
+        ambiguity_reason=(
+            _ambiguity_reason(candidates) if confidence == "ambiguous" else None
+        ),
         confidence=confidence,
     )
 

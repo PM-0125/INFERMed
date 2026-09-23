@@ -40,7 +40,14 @@ def test_evaluate_testcases_mock_mode_checks_all_pairs(tmp_path: Path):
         )
 
     completed = subprocess.run(
-        [sys.executable, "scripts/evaluate_testcases.py", "--cases", str(case_file), "--limit", "1"],
+        [
+            sys.executable,
+            "scripts/evaluate_testcases.py",
+            "--cases",
+            str(case_file),
+            "--limit",
+            "1",
+        ],
         check=True,
         text=True,
         capture_output=True,

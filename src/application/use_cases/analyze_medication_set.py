@@ -8,7 +8,10 @@ from typing import Any, Callable
 from src.application.commands import AnalyzeMedicationSetCommand
 from src.application.event_bus import EventBus
 from src.application.events import DomainEvent, stable_hash
-from src.application.interaction_modeling import build_drug_profile_graph, build_interaction_reasoning_record
+from src.application.interaction_modeling import (
+    build_drug_profile_graph,
+    build_interaction_reasoning_record,
+)
 from src.application.tool_planner import EvidencePlan, ToolPlanner
 from src.config.settings import Settings, get_settings
 from src.domain.decision.entities import InteractionDecision
@@ -22,7 +25,12 @@ from src.domain.evidence.entities import EvidenceCard, evidence_id_for
 from src.domain.evidence.hierarchy import rank_evidence_cards, strongest_evidence_grade
 from src.domain.explanation.verifier import ExplanationVerifier
 from src.domain.mechanism.engines import detect_pd_mechanisms, detect_pk_mechanisms
-from src.domain.mechanism.entities import MechanismCluster, MechanismEdge, MechanismGraph, MechanismNode
+from src.domain.mechanism.entities import (
+    MechanismCluster,
+    MechanismEdge,
+    MechanismGraph,
+    MechanismNode,
+)
 from src.domain.medication.entities import MedicationConcept
 from src.domain.medication.services import medication_set_key, normalize_medication
 from src.domain.patient.services import normalize_patient_context
@@ -135,7 +143,11 @@ class AnalyzeMedicationSetUseCase:
         self.context_runner = context_runner
         self.answer_generator = answer_generator
         self.settings = settings or get_settings()
-        self.event_store = event_store if event_store is not None else _default_event_store(self.settings)
+        self.event_store = (
+            event_store
+            if event_store is not None
+            else _default_event_store(self.settings)
+        )
         self.event_bus = EventBus(self.event_store)
         self.tool_planner = tool_planner or ToolPlanner()
         self.safety_gate = safety_gate or ZeroTrustSafetyGate()
@@ -176,7 +188,11 @@ class AnalyzeMedicationSetUseCase:
         self._progress(
             "analysis_requested",
             f"Received {len(concepts)} medication inputs.",
-            {"analysis_id": analysis_id, "medication_count": len(concepts), "audience": command.audience},
+            {
+                "analysis_id": analysis_id,
+                "medication_count": len(concepts),
+                "audience": command.audience,
+            },
         )
 
         for concept in concepts:
@@ -201,7 +217,9 @@ class AnalyzeMedicationSetUseCase:
             {"medications": [concept.normalized_name for concept in concepts]},
         )
 
-        evidence_plan = self.tool_planner.create_plan(concepts, data_mode=self.settings.data_mode)
+        evidence_plan = self.tool_planner.create_plan(
+            concepts, data_mode=self.settings.data_mode
+        )
         self._publish(
             analysis_id,
             "EvidencePlanCreated",
@@ -212,7 +230,10 @@ class AnalyzeMedicationSetUseCase:
         self._progress(
             "evidence_plan_created",
             f"Planned {evidence_plan.pair_count} pair context fetches.",
-            {"pair_count": evidence_plan.pair_count, "tools": [tool.name for tool in evidence_plan.tools]},
+            {
+                "pair_count": evidence_plan.pair_count,
+                "tools": [tool.name for tool in evidence_plan.tools],
+            },
         )
 
         pair_results = self._fetch_pair_contexts(
@@ -228,14 +249,20 @@ class AnalyzeMedicationSetUseCase:
             medications=[concept.normalized_name for concept in concepts],
             pair_results=pair_results,
             data_mode=self.settings.data_mode,
-            patient_context=patient_context.to_dict() if command.patient_context is not None else None,
+            patient_context=(
+                patient_context.to_dict()
+                if command.patient_context is not None
+                else None
+            ),
         )
         self._progress(
             "medication_set_context_built",
             "Built medication-set evidence context and pair risk ranking.",
             {
                 "pair_count": len(pair_results),
-                "top_pairs": (aggregate_context.get("medication_set") or {}).get("top_pairs", [])[:5],
+                "top_pairs": (aggregate_context.get("medication_set") or {}).get(
+                    "top_pairs", []
+                )[:5],
             },
         )
 
@@ -245,7 +272,11 @@ class AnalyzeMedicationSetUseCase:
             fallback_answer=pair_results[0].answer or {},
         )
         rag_output = {"context": aggregate_context, "answer": answer}
-        self._progress('finalization_started', 'Checking the explanation and preparing evidence cards.', {})
+        self._progress(
+            "finalization_started",
+            "Checking the explanation and preparing evidence cards.",
+            {},
+        )
         context = aggregate_context
         answer_text = str(answer.get("text") or "").strip()
 
@@ -263,7 +294,13 @@ class AnalyzeMedicationSetUseCase:
             source_tool_name="current_pair_rag_pipeline",
         )
 
-        evidence_cards = rank_evidence_cards(_aggregate_evidence_cards(analysis_id, pair_results, [concept.normalized_name for concept in concepts]))
+        evidence_cards = rank_evidence_cards(
+            _aggregate_evidence_cards(
+                analysis_id,
+                pair_results,
+                [concept.normalized_name for concept in concepts],
+            )
+        )
         for card in evidence_cards:
             if self.event_store is not None:
                 self.event_store.append_evidence_card(card)
@@ -275,7 +312,11 @@ class AnalyzeMedicationSetUseCase:
             component="evidence",
         )
 
-        mechanism_graph = _mechanism_graph_from_pair_results(pair_results, evidence_cards, [concept.normalized_name for concept in concepts])
+        mechanism_graph = _mechanism_graph_from_pair_results(
+            pair_results,
+            evidence_cards,
+            [concept.normalized_name for concept in concepts],
+        )
         self._publish(
             analysis_id,
             "MechanismGraphBuilt",
@@ -324,16 +365,25 @@ class AnalyzeMedicationSetUseCase:
             },
             component="reasoning",
         )
-        ndrug_summary = MedicationSetReasoner().summarize(
-            drugs=[concept.normalized_name for concept in concepts],
-            pair_summaries=(context.get("medication_set") or {}).get("evaluated_pairs") or [],
-            mechanism_graph=mechanism_graph,
-            profile_graph=profile_graph,
-            reasoning_record=reasoning_record,
-        ).to_dict()
+        ndrug_summary = (
+            MedicationSetReasoner()
+            .summarize(
+                drugs=[concept.normalized_name for concept in concepts],
+                pair_summaries=(context.get("medication_set") or {}).get(
+                    "evaluated_pairs"
+                )
+                or [],
+                mechanism_graph=mechanism_graph,
+                profile_graph=profile_graph,
+                reasoning_record=reasoning_record,
+            )
+            .to_dict()
+        )
         research_signals = [
             signal.to_dict()
-            for signal in ResearchHypothesisBuilder().build(context=context, profile_graph=profile_graph)
+            for signal in ResearchHypothesisBuilder().build(
+                context=context, profile_graph=profile_graph
+            )
         ]
         ndrug_summary["research_signals"] = research_signals
         context["medication_set"]["reasoning_summary"] = ndrug_summary
@@ -382,13 +432,18 @@ class AnalyzeMedicationSetUseCase:
             component="safety",
         )
 
-        explanation_id = "exp_" + stable_hash({"analysis_id": analysis_id, "answer": answer_text})[:16]
+        explanation_id = (
+            "exp_"
+            + stable_hash({"analysis_id": analysis_id, "answer": answer_text})[:16]
+        )
         if self.event_store is not None:
             self.event_store.append_explanation_record(
                 explanation_id=explanation_id,
                 analysis_id=analysis_id,
                 answer_text=answer_text,
-                verification=_deterministic_verification(answer_text, decision, safety_report, evidence_cards),
+                verification=_deterministic_verification(
+                    answer_text, decision, safety_report, evidence_cards
+                ),
                 model_name=(answer.get("meta") or {}).get("model"),
                 output_hash=stable_hash(answer_text),
             )
@@ -423,7 +478,9 @@ class AnalyzeMedicationSetUseCase:
         if self.event_store is not None:
             self.event_store.update_analysis_status(analysis_id, "completed")
 
-        self._progress('finalization_completed', 'Final checks and evidence cards completed.', {})
+        self._progress(
+            "finalization_completed", "Final checks and evidence cards completed.", {}
+        )
         return MedicationSetAnalysis(
             analysis_id=analysis_id,
             request_id=request_id,
@@ -458,7 +515,9 @@ class AnalyzeMedicationSetUseCase:
         )
         self.event_bus.publish(event)
 
-    def _progress(self, stage: str, message: str, payload: dict[str, Any] | None = None) -> None:
+    def _progress(
+        self, stage: str, message: str, payload: dict[str, Any] | None = None
+    ) -> None:
         safe_payload = payload or {}
         log.info(
             "INFERMed progress: stage=%s message=%s payload_keys=%s",
@@ -535,7 +594,15 @@ class AnalyzeMedicationSetUseCase:
 
             cards = _evidence_cards_from_context(analysis_id, context, list(pair))
             decision = _decision_from_context(analysis_id, context, cards, list(pair))
-            results.append(PairContextResult(pair=pair, context=context, answer=answer, evidence_cards=cards, decision=decision))
+            results.append(
+                PairContextResult(
+                    pair=pair,
+                    context=context,
+                    answer=answer,
+                    evidence_cards=cards,
+                    decision=decision,
+                )
+            )
             self._progress(
                 "source_fetch_completed",
                 f"Normalized evidence for {pair[0]} + {pair[1]}.",
@@ -565,7 +632,9 @@ class AnalyzeMedicationSetUseCase:
             "Generating one evidence-grounded explanation for the medication set.",
             {"strategy": "single_final_model_call"},
         )
-        answer = self.answer_generator(context, command.audience, patient_context=command.patient_context)
+        answer = self.answer_generator(
+            context, command.audience, patient_context=command.patient_context
+        )
         self._progress(
             "answer_generation_completed",
             "Generated the medication-set explanation.",
@@ -589,13 +658,22 @@ def build_medication_set_context_from_pair_results(
     all N-drug information is exposed under `medication_set`.
     """
 
-    ranked = sorted(pair_results, key=lambda item: _risk_rank(item.decision.risk_level if item.decision else "insufficient_evidence"), reverse=True)
+    ranked = sorted(
+        pair_results,
+        key=lambda item: _risk_rank(
+            item.decision.risk_level if item.decision else "insufficient_evidence"
+        ),
+        reverse=True,
+    )
     primary = ranked[0]
     primary_context = primary.context
     all_caveats = _unique(
         caveat
         for result in pair_results
-        for caveat in ((result.context.get("caveats") or []) + _decision_limitations(result.decision))
+        for caveat in (
+            (result.context.get("caveats") or [])
+            + _decision_limitations(result.decision)
+        )
     )
     source_status = _merge_source_status([result.context for result in pair_results])
     sources = _merge_sources([result.context for result in pair_results])
@@ -640,7 +718,9 @@ def build_medication_set_context_from_pair_results(
     return aggregate
 
 
-def evidence_cards_from_context(analysis_id: str, context: dict[str, Any], pair: list[str]) -> list[EvidenceCard]:
+def evidence_cards_from_context(
+    analysis_id: str, context: dict[str, Any], pair: list[str]
+) -> list[EvidenceCard]:
     return _evidence_cards_from_context(analysis_id, context, pair)
 
 
@@ -711,15 +791,42 @@ def _mechanism_graph_from_pair_results(
         nodes_by_id[node.id] = node
 
     for result in pair_results:
-        graph = _mechanism_graph_from_context(result.context, result.evidence_cards or cards, list(result.pair))
+        graph = _mechanism_graph_from_context(
+            result.context, result.evidence_cards or cards, list(result.pair)
+        )
         suffix = _pair_slug(result.pair)
         for node in graph.nodes:
             node_id = node.id if node.type == "drug" else f"{node.id}:{suffix}"
-            nodes_by_id.setdefault(node_id, MechanismNode(id=node_id, label=node.label, type=node.type, payload={**node.payload, "pair": list(result.pair)}))
+            nodes_by_id.setdefault(
+                node_id,
+                MechanismNode(
+                    id=node_id,
+                    label=node.label,
+                    type=node.type,
+                    payload={**node.payload, "pair": list(result.pair)},
+                ),
+            )
         for edge in graph.edges:
-            source = edge.source if edge.source.startswith("drug:") else f"{edge.source}:{suffix}"
-            target = edge.target if edge.target.startswith("drug:") else f"{edge.target}:{suffix}"
-            edges_by_key.setdefault((source, target, edge.type), MechanismEdge(source=source, target=target, type=edge.type, confidence=edge.confidence, evidence_ids=edge.evidence_ids))
+            source = (
+                edge.source
+                if edge.source.startswith("drug:")
+                else f"{edge.source}:{suffix}"
+            )
+            target = (
+                edge.target
+                if edge.target.startswith("drug:")
+                else f"{edge.target}:{suffix}"
+            )
+            edges_by_key.setdefault(
+                (source, target, edge.type),
+                MechanismEdge(
+                    source=source,
+                    target=target,
+                    type=edge.type,
+                    confidence=edge.confidence,
+                    evidence_ids=edge.evidence_ids,
+                ),
+            )
         for cluster in graph.clusters:
             cluster_id = f"{cluster.cluster_id}:{suffix}"
             clusters_by_id.setdefault(
@@ -735,7 +842,11 @@ def _mechanism_graph_from_pair_results(
                 ),
             )
 
-    shared_cards = [card.evidence_id for card in cards if card.claim_type == "medication_set_summary"]
+    shared_cards = [
+        card.evidence_id
+        for card in cards
+        if card.claim_type == "medication_set_summary"
+    ]
     if len(medications) > 2:
         clusters_by_id["cluster:medication_set"] = MechanismCluster(
             cluster_id="cluster:medication_set",
@@ -746,7 +857,11 @@ def _mechanism_graph_from_pair_results(
             confidence="medium",
             evidence_ids=shared_cards,
         )
-    return MechanismGraph(nodes=list(nodes_by_id.values()), edges=list(edges_by_key.values()), clusters=list(clusters_by_id.values()))
+    return MechanismGraph(
+        nodes=list(nodes_by_id.values()),
+        edges=list(edges_by_key.values()),
+        clusters=list(clusters_by_id.values()),
+    )
 
 
 def _profile_graph_from_pair_results(
@@ -804,13 +919,21 @@ def _decision_from_medication_set_context(
     medications: list[str],
     pair_results: list[PairContextResult],
 ) -> InteractionDecision:
-    ranked = sorted(pair_results, key=lambda item: _risk_rank(item.decision.risk_level if item.decision else "insufficient_evidence"), reverse=True)
+    ranked = sorted(
+        pair_results,
+        key=lambda item: _risk_rank(
+            item.decision.risk_level if item.decision else "insufficient_evidence"
+        ),
+        reverse=True,
+    )
     top_decision = ranked[0].decision if ranked else None
     if len(medications) <= 2 and top_decision is not None:
         return top_decision
 
     risk_level = top_decision.risk_level if top_decision else "insufficient_evidence"
-    confidence = _medication_set_confidence([item.decision for item in pair_results if item.decision])
+    confidence = _medication_set_confidence(
+        [item.decision for item in pair_results if item.decision]
+    )
     mechanisms = []
     for result in ranked[:8]:
         if result.decision is None:
@@ -824,14 +947,16 @@ def _decision_from_medication_set_context(
                 "mechanisms": result.decision.mechanisms[:4],
             }
         )
-    limitations = _unique(
-        item
-        for card in cards
-        for item in card.limitations
-    )
+    limitations = _unique(item for card in cards for item in card.limitations)
     limitations.extend(context.get("caveats") or [])
-    patient_context_payload = (context.get("medication_set") or {}).get("patient_context") or None
-    patient_context = normalize_patient_context(patient_context_payload) if patient_context_payload else None
+    patient_context_payload = (context.get("medication_set") or {}).get(
+        "patient_context"
+    ) or None
+    patient_context = (
+        normalize_patient_context(patient_context_payload)
+        if patient_context_payload
+        else None
+    )
     return InteractionDecision(
         analysis_id=analysis_id,
         interaction_scope="medication_set",
@@ -842,7 +967,12 @@ def _decision_from_medication_set_context(
         mechanisms=mechanisms,
         patient_amplifiers=patient_amplifiers_for_decision(patient_context),
         recommended_action=_recommended_action(risk_level),
-        monitoring=_unique(item for result in pair_results if result.decision for item in result.decision.monitoring),
+        monitoring=_unique(
+            item
+            for result in pair_results
+            if result.decision
+            for item in result.decision.monitoring
+        ),
         missing_patient_factors=[
             *missing_patient_factors_for_decision(patient_context),
             "full medication list with dose/route",
@@ -854,8 +984,14 @@ def _decision_from_medication_set_context(
             "Pharmacogenomic variants affecting metabolism",
             "Dose, route, and timing of each medication",
         ],
-        source_limitations=list(dict.fromkeys(str(item) for item in limitations if str(item).strip()))[:16],
-        abstention_reason=None if risk_level != "insufficient_evidence" else "No usable evidence returned by active sources.",
+        source_limitations=list(
+            dict.fromkeys(str(item) for item in limitations if str(item).strip())
+        )[:16],
+        abstention_reason=(
+            None
+            if risk_level != "insufficient_evidence"
+            else "No usable evidence returned by active sources."
+        ),
     )
 
 
@@ -871,46 +1007,64 @@ def _pair_summary(result: PairContextResult) -> dict[str, Any]:
         "pk_summary": pkpd.get("pk_summary") or "",
         "pd_summary": pkpd.get("pd_summary") or "",
         "sources": context.get("sources") or {},
-        "source_limitations": decision.source_limitations if decision else context.get("caveats") or [],
+        "source_limitations": (
+            decision.source_limitations if decision else context.get("caveats") or []
+        ),
     }
 
 
-def _aggregate_signals(primary_context: dict[str, Any], pair_results: list[PairContextResult]) -> dict[str, Any]:
+def _aggregate_signals(
+    primary_context: dict[str, Any], pair_results: list[PairContextResult]
+) -> dict[str, Any]:
     signals = dict(primary_context.get("signals") or {})
     tabular = dict(signals.get("tabular") or {})
     tabular["pair_summaries"] = [_pair_summary(result) for result in pair_results]
     signals["tabular"] = tabular
     signals.setdefault("medication_set", {})
     signals["medication_set"]["pair_count"] = len(pair_results)
-    signals["medication_set"]["top_pairs"] = [_pair_summary(result) for result in pair_results[:8]]
+    signals["medication_set"]["top_pairs"] = [
+        _pair_summary(result) for result in pair_results[:8]
+    ]
     return signals
 
 
-def _aggregate_pkpd(primary_context: dict[str, Any], pair_summaries: list[dict[str, Any]]) -> dict[str, Any]:
+def _aggregate_pkpd(
+    primary_context: dict[str, Any], pair_summaries: list[dict[str, Any]]
+) -> dict[str, Any]:
     pkpd = dict(primary_context.get("pkpd") or {})
     lines = []
     for row in pair_summaries[:8]:
         pair = " + ".join(row["pair"])
         pk = _compact(row.get("pk_summary") or "No PK summary", 220)
         pd = _compact(row.get("pd_summary") or "No PD summary", 180)
-        lines.append(f"{pair}: risk={row['risk_level']} confidence={row['confidence']}; PK={pk}; PD={pd}")
+        lines.append(
+            f"{pair}: risk={row['risk_level']} confidence={row['confidence']}; PK={pk}; PD={pd}"
+        )
     if lines:
         pkpd["pk_summary"] = "Medication-set pair PK review: " + " || ".join(lines)
-        pkpd["pd_summary"] = "Medication-set pair PD/toxicity review: " + " || ".join(lines)
+        pkpd["pd_summary"] = "Medication-set pair PD/toxicity review: " + " || ".join(
+            lines
+        )
     return pkpd
 
 
-def _medication_set_drug_identities(medications: list[str], pair_results: list[PairContextResult]) -> list[dict[str, Any]]:
-    by_name: dict[str, dict[str, Any]] = {drug.lower(): {"name": drug, "ids": {}, "synonyms": []} for drug in medications}
+def _medication_set_drug_identities(
+    medications: list[str], pair_results: list[PairContextResult]
+) -> list[dict[str, Any]]:
+    by_name: dict[str, dict[str, Any]] = {
+        drug.lower(): {"name": drug, "ids": {}, "synonyms": []} for drug in medications
+    }
     for result in pair_results:
         for side in ("a", "b"):
-            raw = ((result.context.get("drugs") or {}).get(side) or {})
+            raw = (result.context.get("drugs") or {}).get(side) or {}
             name = str(raw.get("name") or "").strip().lower()
             if not name:
                 continue
             row = by_name.setdefault(name, {"name": name, "ids": {}, "synonyms": []})
             row["ids"].update(raw.get("ids") or {})
-            row["synonyms"] = _unique([*(row.get("synonyms") or []), *(raw.get("synonyms") or [])])
+            row["synonyms"] = _unique(
+                [*(row.get("synonyms") or []), *(raw.get("synonyms") or [])]
+            )
     return list(by_name.values())
 
 
@@ -934,7 +1088,12 @@ def _merge_sources(contexts: list[dict[str, Any]]) -> dict[str, list[str]]:
     for context in contexts:
         for key, values in (context.get("sources") or {}).items():
             merged.setdefault(key, [])
-            merged[key] = _unique([*merged[key], *[str(item) for item in values or [] if str(item).strip()]])
+            merged[key] = _unique(
+                [
+                    *merged[key],
+                    *[str(item) for item in values or [] if str(item).strip()],
+                ]
+            )
     return merged
 
 
@@ -1001,7 +1160,9 @@ def _default_event_store(settings: Settings) -> SQLiteEventStore | None:
     return SQLiteEventStore(settings.sqlite_cache_path)
 
 
-def _evidence_cards_from_context(analysis_id: str, context: dict[str, Any], pair: list[str]) -> list[EvidenceCard]:
+def _evidence_cards_from_context(
+    analysis_id: str, context: dict[str, Any], pair: list[str]
+) -> list[EvidenceCard]:
     cards: list[EvidenceCard] = []
     signals = context.get("signals") or {}
     tabular = signals.get("tabular") or {}
@@ -1009,7 +1170,7 @@ def _evidence_cards_from_context(analysis_id: str, context: dict[str, Any], pair
     clinical_reference = signals.get("clinical_reference") or {}
     pkpd = context.get("pkpd") or {}
 
-    canonical = ((pkpd.get("pk_detail") or {}).get("canonical_interaction") or {})
+    canonical = (pkpd.get("pk_detail") or {}).get("canonical_interaction") or {}
     if canonical:
         claim = str(canonical.get("mechanism") or canonical)
         cards.append(
@@ -1041,7 +1202,10 @@ def _evidence_cards_from_context(analysis_id: str, context: dict[str, Any], pair
             )
         )
 
-    if any(faers.get(key) for key in ("top_reactions_a", "top_reactions_b", "combo_reactions")):
+    if any(
+        faers.get(key)
+        for key in ("top_reactions_a", "top_reactions_b", "combo_reactions")
+    ):
         cards.append(
             _card(
                 analysis_id,
@@ -1052,7 +1216,9 @@ def _evidence_cards_from_context(analysis_id: str, context: dict[str, Any], pair
                 "pharmacovigilance_signal",
                 pair,
                 payload=faers,
-                limitations=["FAERS reports are spontaneous reports and cannot establish causality or incidence."],
+                limitations=[
+                    "FAERS reports are spontaneous reports and cannot establish causality or incidence."
+                ],
             )
         )
 
@@ -1073,7 +1239,8 @@ def _evidence_cards_from_context(analysis_id: str, context: dict[str, Any], pair
                 "label",
                 [drug_name],
                 payload=label,
-                limitations=label.get("limitations") or ["Label content is product/version specific."],
+                limitations=label.get("limitations")
+                or ["Label content is product/version specific."],
             )
         )
 
@@ -1112,7 +1279,9 @@ def _evidence_cards_from_context(analysis_id: str, context: dict[str, Any], pair
                 "mechanistic",
                 [drug_name],
                 payload=fda_ref,
-                limitations=["Reference table examples are not exhaustive and are not patient-specific guidance."],
+                limitations=[
+                    "Reference table examples are not exhaustive and are not patient-specific guidance."
+                ],
             )
         )
 
@@ -1120,11 +1289,27 @@ def _evidence_cards_from_context(analysis_id: str, context: dict[str, Any], pair
     pd_summary = str(pkpd.get("pd_summary") or "").strip()
     if pk_summary:
         cards.append(
-            _card(analysis_id, "PK/PD engine", "mechanism_engine", "pk_mechanism", pk_summary, "mechanistic", pair)
+            _card(
+                analysis_id,
+                "PK/PD engine",
+                "mechanism_engine",
+                "pk_mechanism",
+                pk_summary,
+                "mechanistic",
+                pair,
+            )
         )
     if pd_summary:
         cards.append(
-            _card(analysis_id, "PK/PD engine", "mechanism_engine", "pd_mechanism", pd_summary, "mechanistic", pair)
+            _card(
+                analysis_id,
+                "PK/PD engine",
+                "mechanism_engine",
+                "pd_mechanism",
+                pd_summary,
+                "mechanistic",
+                pair,
+            )
         )
     return cards
 
@@ -1167,7 +1352,10 @@ def _mechanism_graph_from_context(
     edges: list[MechanismEdge] = []
     clusters: list[MechanismCluster] = []
 
-    for graph in (detect_pk_mechanisms(context, cards, pair), detect_pd_mechanisms(context, cards, pair)):
+    for graph in (
+        detect_pk_mechanisms(context, cards, pair),
+        detect_pd_mechanisms(context, cards, pair),
+    ):
         nodes.extend(graph.nodes)
         edges.extend(graph.edges)
         clusters.extend(graph.clusters)
@@ -1206,8 +1394,14 @@ def _decision_from_context(
         recommended_action=_recommended_action(risk_level),
         monitoring=_monitoring_hints(context),
         missing_patient_factors=missing_patient_factors_for_decision(),
-        source_limitations=list(dict.fromkeys(str(item) for item in source_limitations if str(item).strip()))[:12],
-        abstention_reason=None if risk_level != "insufficient_evidence" else "No usable evidence returned by active sources.",
+        source_limitations=list(
+            dict.fromkeys(str(item) for item in source_limitations if str(item).strip())
+        )[:12],
+        abstention_reason=(
+            None
+            if risk_level != "insufficient_evidence"
+            else "No usable evidence returned by active sources."
+        ),
     )
 
 
@@ -1226,7 +1420,9 @@ def _recommended_action(risk_level: str) -> str:
 
 def _monitoring_hints(context: dict[str, Any]) -> list[str]:
     pkpd = context.get("pkpd") or {}
-    text = " ".join(str(pkpd.get(key) or "") for key in ("pk_summary", "pd_summary")).lower()
+    text = " ".join(
+        str(pkpd.get(key) or "") for key in ("pk_summary", "pd_summary")
+    ).lower()
     hints = []
     if "warfarin" in text or "inr" in text or "anticoagul" in text:
         hints.append("INR and bleeding signs")
@@ -1243,9 +1439,13 @@ def _deterministic_verification(
     safety_report: SafetyReport,
     evidence_cards: list[EvidenceCard],
 ) -> dict[str, Any]:
-    return ExplanationVerifier().verify(
-        answer_text=answer_text,
-        decision=decision,
-        evidence_cards=evidence_cards,
-        safety_report=safety_report,
-    ).to_dict()
+    return (
+        ExplanationVerifier()
+        .verify(
+            answer_text=answer_text,
+            decision=decision,
+            evidence_cards=evidence_cards,
+            safety_report=safety_report,
+        )
+        .to_dict()
+    )

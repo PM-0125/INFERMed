@@ -4,7 +4,6 @@ import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
-
 RiskLevel = str
 
 FAERS_CAVEAT = (
@@ -48,10 +47,15 @@ def build_interaction_result(
     risk_summary = calculate_risk_summary(context)
     risk_level, risk_label, confidence = risk_summary
 
-    medication_set_drugs = drugs.get("set") if isinstance(drugs.get("set"), list) else None
+    medication_set_drugs = (
+        drugs.get("set") if isinstance(drugs.get("set"), list) else None
+    )
     if medication_set_drugs:
         mapped_drugs = [
-            map_drug_identity(raw if isinstance(raw, dict) else {"name": str(raw)}, str((raw or {}).get("name") if isinstance(raw, dict) else raw))
+            map_drug_identity(
+                raw if isinstance(raw, dict) else {"name": str(raw)},
+                str((raw or {}).get("name") if isinstance(raw, dict) else raw),
+            )
             for raw in medication_set_drugs
         ]
     else:
@@ -98,7 +102,9 @@ def map_drug_identity(raw: Dict[str, Any], fallback_name: str) -> Dict[str, Any]
     if rxcui:
         out["rxcui"] = str(rxcui)
 
-    aliases = [str(item).strip() for item in raw.get("synonyms", []) or [] if str(item).strip()]
+    aliases = [
+        str(item).strip() for item in raw.get("synonyms", []) or [] if str(item).strip()
+    ]
     if aliases:
         out["aliases"] = aliases[:MAX_ALIASES]
     return out
@@ -106,7 +112,11 @@ def map_drug_identity(raw: Dict[str, Any], fallback_name: str) -> Dict[str, Any]
 
 def calculate_risk_summary(context: Dict[str, Any]) -> Tuple[RiskLevel, str, str]:
     if not has_decision_evidence(context):
-        return "unknown", "Insufficient Evidence", "No usable evidence returned by active sources"
+        return (
+            "unknown",
+            "Insufficient Evidence",
+            "No usable evidence returned by active sources",
+        )
 
     pkpd = context.get("pkpd") or {}
     signals = context.get("signals") or {}
@@ -145,7 +155,10 @@ def calculate_risk_summary(context: Dict[str, Any]) -> Tuple[RiskLevel, str, str
     dili_values = [_coerce_float(tabular.get(key)) for key in ("dili_a", "dili_b")]
     dict_values = [_coerce_float(tabular.get(key)) for key in ("dict_a", "dict_b")]
     diqt_values = [_coerce_float(tabular.get(key)) for key in ("diqt_a", "diqt_b")]
-    if any(value is not None and value >= TOXICITY_SCORE_HIGH for value in dili_values + dict_values + diqt_values):
+    if any(
+        value is not None and value >= TOXICITY_SCORE_HIGH
+        for value in dili_values + dict_values + diqt_values
+    ):
         score += 1
 
     if score >= RISK_SCORE_HIGH:
@@ -164,26 +177,46 @@ def has_decision_evidence(context: Dict[str, Any]) -> bool:
 
     if _coerce_float(tabular.get("prr")) is not None:
         return True
-    if any(_coerce_float(tabular.get(key)) is not None for key in ("dili_a", "dili_b", "dict_a", "dict_b", "diqt_a", "diqt_b")):
+    if any(
+        _coerce_float(tabular.get(key)) is not None
+        for key in ("dili_a", "dili_b", "dict_a", "dict_b", "diqt_a", "diqt_b")
+    ):
         return True
-    if any(tabular.get(key) for key in ("side_effects_a", "side_effects_b", "side_effects_pair")):
+    if any(
+        tabular.get(key)
+        for key in ("side_effects_a", "side_effects_b", "side_effects_pair")
+    ):
         return True
     if tabular.get("nci_almanac"):
         return True
-    if any(faers.get(key) for key in ("top_reactions_a", "top_reactions_b", "combo_reactions")):
+    if any(
+        faers.get(key)
+        for key in ("top_reactions_a", "top_reactions_b", "combo_reactions")
+    ):
         return True
 
     pk_detail = pkpd.get("pk_detail") or {}
     if pk_detail.get("canonical_interaction"):
         return True
     overlaps = pk_detail.get("overlaps") or {}
-    if any(overlaps.get(key) for key in ("inhibition", "induction", "shared_substrate")):
+    if any(
+        overlaps.get(key) for key in ("inhibition", "induction", "shared_substrate")
+    ):
         return True
 
     pd_detail = pkpd.get("pd_detail") or {}
     if pd_detail.get("overlap_targets") or pd_detail.get("overlap_pathways"):
         return True
-    if any(mechanistic.get(key) for key in ("targets_a", "targets_b", "pathways_a", "pathways_b", "common_pathways")):
+    if any(
+        mechanistic.get(key)
+        for key in (
+            "targets_a",
+            "targets_b",
+            "pathways_a",
+            "pathways_b",
+            "common_pathways",
+        )
+    ):
         return True
     if any(
         mechanistic.get(key)
@@ -233,7 +266,9 @@ def infer_interaction_class(pkpd: Dict[str, Any]) -> str:
 def parse_assessment_sections(text: str) -> List[Dict[str, str]]:
     cleaned = (text or "").strip()
     if not cleaned:
-        return [{"title": "Assessment", "body": "No generated assessment was returned."}]
+        return [
+            {"title": "Assessment", "body": "No generated assessment was returned."}
+        ]
 
     matches = list(re.finditer(r"(?m)^##\s+(.+?)\s*$", cleaned))
     if not matches:
@@ -270,14 +305,20 @@ def build_source_badges(context: Dict[str, Any]) -> List[str]:
     return list(dict.fromkeys(badges))
 
 
-def build_overview_card(context: Dict[str, Any], risk_summary: Tuple[RiskLevel, str, str]) -> Dict[str, Any]:
+def build_overview_card(
+    context: Dict[str, Any], risk_summary: Tuple[RiskLevel, str, str]
+) -> Dict[str, Any]:
     risk_level, risk_label, confidence = risk_summary
     pkpd = context.get("pkpd") or {}
     meta = context.get("meta") or {}
     return {
         "metrics": [
             {"label": "Risk", "value": risk_label, "tone": risk_level},
-            {"label": "Evidence mode", "value": str(meta.get("data_mode") or "configured"), "tone": "neutral"},
+            {
+                "label": "Evidence mode",
+                "value": str(meta.get("data_mode") or "configured"),
+                "tone": "neutral",
+            },
             {"label": "Confidence", "value": confidence, "tone": "neutral"},
         ],
         "rows": [
@@ -313,9 +354,21 @@ def build_openfda_card(faers: Dict[str, Any]) -> Dict[str, Any]:
         ]
     return {
         "metrics": [
-            {"label": "Drug A rows", "value": _shown_of_total(shown_a, len(top_a)), "tone": "neutral"},
-            {"label": "Drug B rows", "value": _shown_of_total(shown_b, len(top_b)), "tone": "neutral"},
-            {"label": "Combo rows", "value": _shown_of_total(shown_combo, len(combo)), "tone": "moderate" if combo else "neutral"},
+            {
+                "label": "Drug A rows",
+                "value": _shown_of_total(shown_a, len(top_a)),
+                "tone": "neutral",
+            },
+            {
+                "label": "Drug B rows",
+                "value": _shown_of_total(shown_b, len(top_b)),
+                "tone": "neutral",
+            },
+            {
+                "label": "Combo rows",
+                "value": _shown_of_total(shown_combo, len(combo)),
+                "tone": "moderate" if combo else "neutral",
+            },
         ],
         "rows": rows,
         "caveat": _subset_note(
@@ -328,7 +381,9 @@ def build_openfda_card(faers: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def build_internal_card(tabular: Dict[str, Any], pkpd: Dict[str, Any]) -> Dict[str, Any]:
+def build_internal_card(
+    tabular: Dict[str, Any], pkpd: Dict[str, Any]
+) -> Dict[str, Any]:
     canonical = (pkpd.get("pk_detail") or {}).get("canonical_interaction") or {}
     rows: List[Dict[str, str]] = []
     if canonical:
@@ -343,22 +398,60 @@ def build_internal_card(tabular: Dict[str, Any], pkpd: Dict[str, Any]) -> Dict[s
     side_a = _strings(tabular.get("side_effects_a"))
     side_b = _strings(tabular.get("side_effects_b"))
     if side_a:
-        rows.append({"title": "Drug A side-effect signals", "description": ", ".join(side_a[:MAX_SIDE_EFFECTS]), "meta": _returned_note(len(side_a))})
+        rows.append(
+            {
+                "title": "Drug A side-effect signals",
+                "description": ", ".join(side_a[:MAX_SIDE_EFFECTS]),
+                "meta": _returned_note(len(side_a)),
+            }
+        )
     if side_b:
-        rows.append({"title": "Drug B side-effect signals", "description": ", ".join(side_b[:MAX_SIDE_EFFECTS]), "meta": _returned_note(len(side_b))})
+        rows.append(
+            {
+                "title": "Drug B side-effect signals",
+                "description": ", ".join(side_b[:MAX_SIDE_EFFECTS]),
+                "meta": _returned_note(len(side_b)),
+            }
+        )
     nci_rows = _nci_rows(tabular.get("nci_almanac"))
     rows.extend(nci_rows)
     if not rows:
-        rows.append({"title": "No internal rows returned", "description": "No public parquet or canonical rows were available for this query.", "meta": "Internal"})
+        rows.append(
+            {
+                "title": "No internal rows returned",
+                "description": "No public parquet or canonical rows were available for this query.",
+                "meta": "Internal",
+            }
+        )
 
     prr = tabular.get("prr")
     return {
         "metrics": [
-            {"label": "PRR", "value": _display(prr, "Not available"), "tone": _prr_tone(prr)},
-            {"label": "DILI", "value": _score_pair(tabular, "dili_a", "dili_b"), "tone": "neutral"},
-            {"label": "DICT", "value": _score_pair(tabular, "dict_a", "dict_b"), "tone": "neutral"},
-            {"label": "DIQT", "value": _score_pair(tabular, "diqt_a", "diqt_b"), "tone": "neutral"},
-            {"label": "NCI", "value": _returned_note(len(tabular.get("nci_almanac") or [])), "tone": "neutral"},
+            {
+                "label": "PRR",
+                "value": _display(prr, "Not available"),
+                "tone": _prr_tone(prr),
+            },
+            {
+                "label": "DILI",
+                "value": _score_pair(tabular, "dili_a", "dili_b"),
+                "tone": "neutral",
+            },
+            {
+                "label": "DICT",
+                "value": _score_pair(tabular, "dict_a", "dict_b"),
+                "tone": "neutral",
+            },
+            {
+                "label": "DIQT",
+                "value": _score_pair(tabular, "diqt_a", "diqt_b"),
+                "tone": "neutral",
+            },
+            {
+                "label": "NCI",
+                "value": _returned_note(len(tabular.get("nci_almanac") or [])),
+                "tone": "neutral",
+            },
         ],
         "rows": rows,
     }
@@ -379,7 +472,9 @@ def build_mechanisms_card(
             if values:
                 parts.append(f"{role}: {', '.join(values[:MAX_ENZYME_PER_ROLE])}")
         if parts:
-            rows.append({"title": label, "description": "; ".join(parts), "meta": "Enzymes"})
+            rows.append(
+                {"title": label, "description": "; ".join(parts), "meta": "Enzymes"}
+            )
 
     for key, title in (
         ("targets_a", "Drug A targets"),
@@ -404,7 +499,13 @@ def build_mechanisms_card(
     ):
         values = _strings(mechanistic.get(key))
         if values:
-            rows.append({"title": title, "description": ", ".join(values[:MAX_TARGET_VALUES]), "meta": meta})
+            rows.append(
+                {
+                    "title": title,
+                    "description": ", ".join(values[:MAX_TARGET_VALUES]),
+                    "meta": meta,
+                }
+            )
 
     for key, title, meta in (
         ("uniprot_targets_a", "Drug A UniProt target details", "UniProt"),
@@ -412,7 +513,13 @@ def build_mechanisms_card(
     ):
         values = _protein_labels(mechanistic.get(key))
         if values:
-            rows.append({"title": title, "description": ", ".join(values[:MAX_TARGET_VALUES]), "meta": meta})
+            rows.append(
+                {
+                    "title": title,
+                    "description": ", ".join(values[:MAX_TARGET_VALUES]),
+                    "meta": meta,
+                }
+            )
 
     for key, title, meta in (
         ("kegg_pathways_a", "Drug A KEGG pathway IDs", "KEGG"),
@@ -423,7 +530,13 @@ def build_mechanisms_card(
     ):
         values = _pathway_labels(mechanistic.get(key))
         if values:
-            rows.append({"title": title, "description": ", ".join(values[:MAX_TARGET_VALUES]), "meta": meta})
+            rows.append(
+                {
+                    "title": title,
+                    "description": ", ".join(values[:MAX_TARGET_VALUES]),
+                    "meta": meta,
+                }
+            )
 
     for key, title in (
         ("kegg_enzymes_a", "Drug A KEGG enzyme hints"),
@@ -431,22 +544,46 @@ def build_mechanisms_card(
     ):
         values = _enzyme_labels(mechanistic.get(key))
         if values:
-            rows.append({"title": title, "description": ", ".join(values[:MAX_TARGET_VALUES]), "meta": "KEGG"})
+            rows.append(
+                {
+                    "title": title,
+                    "description": ", ".join(values[:MAX_TARGET_VALUES]),
+                    "meta": "KEGG",
+                }
+            )
 
     rows.extend(_chembl_rows(mechanistic.get("chembl_enrichment")))
     rows.extend(_research_mechanism_rows(research_enrichment or {}))
 
     if not rows:
-        rows.append({"title": "No mechanism rows returned", "description": "No enzyme, target, or pathway rows were available from active sources.", "meta": "Mechanism"})
+        rows.append(
+            {
+                "title": "No mechanism rows returned",
+                "description": "No enzyme, target, or pathway rows were available from active sources.",
+                "meta": "Mechanism",
+            }
+        )
 
     pk_detail = pkpd.get("pk_detail") or {}
     overlaps = pk_detail.get("overlaps") or {}
     pd_detail = pkpd.get("pd_detail") or {}
     return {
         "metrics": [
-            {"label": "PK overlap", "value": _overlap_metric(overlaps), "tone": "moderate" if any(overlaps.values()) else "neutral"},
-            {"label": "PD targets", "value": str(len(pd_detail.get("overlap_targets") or [])), "tone": "neutral"},
-            {"label": "Pathways", "value": str(len(mechanistic.get("common_pathways") or [])), "tone": "neutral"},
+            {
+                "label": "PK overlap",
+                "value": _overlap_metric(overlaps),
+                "tone": "moderate" if any(overlaps.values()) else "neutral",
+            },
+            {
+                "label": "PD targets",
+                "value": str(len(pd_detail.get("overlap_targets") or [])),
+                "tone": "neutral",
+            },
+            {
+                "label": "Pathways",
+                "value": str(len(mechanistic.get("common_pathways") or [])),
+                "tone": "neutral",
+            },
         ],
         "rows": rows,
     }
@@ -463,37 +600,75 @@ def build_sources_list(context: Dict[str, Any]) -> List[Dict[str, str]]:
             state = "unavailable"
         else:
             state = "disabled"
-        rows.append({"name": str(item.get("name") or "Unknown source"), "state": state, "detail": str(item.get("reason") or "")})
+        rows.append(
+            {
+                "name": str(item.get("name") or "Unknown source"),
+                "state": state,
+                "detail": str(item.get("reason") or ""),
+            }
+        )
 
     if rows:
         return rows
 
     sources = context.get("sources") or {}
     for key, values in sources.items():
-        rows.append({"name": str(key), "state": "active" if values else "disabled", "detail": ", ".join(_strings(values)) or "No rows"})
-    return rows or [{"name": "Source status", "state": "unavailable", "detail": "No source status was returned."}]
+        rows.append(
+            {
+                "name": str(key),
+                "state": "active" if values else "disabled",
+                "detail": ", ".join(_strings(values)) or "No rows",
+            }
+        )
+    return rows or [
+        {
+            "name": "Source status",
+            "state": "unavailable",
+            "detail": "No source status was returned.",
+        }
+    ]
 
 
 def build_references(context: Dict[str, Any]) -> List[Dict[str, str]]:
     rows: List[Dict[str, str]] = []
     drugs = context.get("drugs") or {}
-    clinical = ((context.get("signals") or {}).get("clinical_reference") or {})
-    research = ((context.get("signals") or {}).get("research_enrichment") or {})
+    clinical = (context.get("signals") or {}).get("clinical_reference") or {}
+    research = (context.get("signals") or {}).get("research_enrichment") or {}
     for side in ("a", "b"):
         drug = drugs.get(side) or {}
         name = str(drug.get("name") or f"Drug {side.upper()}")
         ids = drug.get("ids") or {}
         if ids.get("pubchem_cid"):
-            rows.append({"title": f"{name} PubChem compound", "description": f"PubChem CID {ids['pubchem_cid']}", "meta": "PubChem"})
+            rows.append(
+                {
+                    "title": f"{name} PubChem compound",
+                    "description": f"PubChem CID {ids['pubchem_cid']}",
+                    "meta": "PubChem",
+                }
+            )
         if ids.get("rxcui"):
-            rows.append({"title": f"{name} RxNorm concept", "description": f"RxCUI {ids['rxcui']}", "meta": "RxNorm"})
+            rows.append(
+                {
+                    "title": f"{name} RxNorm concept",
+                    "description": f"RxCUI {ids['rxcui']}",
+                    "meta": "RxNorm",
+                }
+            )
         if ids.get("drugbank"):
-            rows.append({"title": f"{name} DrugBank record", "description": f"DrugBank ID {ids['drugbank']}", "meta": "Licensed if enabled"})
+            rows.append(
+                {
+                    "title": f"{name} DrugBank record",
+                    "description": f"DrugBank ID {ids['drugbank']}",
+                    "meta": "Licensed if enabled",
+                }
+            )
 
-        label = (((clinical.get("openfda_label") or {}).get(side) or {}))
+        label = (clinical.get("openfda_label") or {}).get(side) or {}
         if label.get("found"):
             sections = label.get("sections") or {}
-            section_names = ", ".join(str(key).replace("_", " ") for key in list(sections.keys())[:4])
+            section_names = ", ".join(
+                str(key).replace("_", " ") for key in list(sections.keys())[:4]
+            )
             rows.append(
                 {
                     "title": f"{name} openFDA label",
@@ -502,7 +677,7 @@ def build_references(context: Dict[str, Any]) -> List[Dict[str, str]]:
                 }
             )
 
-        dailymed = (((clinical.get("dailymed") or {}).get(side) or {}))
+        dailymed = (clinical.get("dailymed") or {}).get(side) or {}
         for record in (dailymed.get("records") or [])[:2]:
             if not isinstance(record, dict):
                 continue
@@ -516,7 +691,7 @@ def build_references(context: Dict[str, Any]) -> List[Dict[str, str]]:
                     }
                 )
 
-        fda_ref = (((clinical.get("fda_ddi_reference") or {}).get(side) or {}))
+        fda_ref = (clinical.get("fda_ddi_reference") or {}).get(side) or {}
         matches = fda_ref.get("matches") or []
         if matches:
             rows.append(
@@ -528,7 +703,11 @@ def build_references(context: Dict[str, Any]) -> List[Dict[str, str]]:
             )
 
     europe_pmc = research.get("europe_pmc") if isinstance(research, dict) else {}
-    for article in (europe_pmc or {}).get("articles", [])[:5] if isinstance(europe_pmc, dict) else []:
+    for article in (
+        (europe_pmc or {}).get("articles", [])[:5]
+        if isinstance(europe_pmc, dict)
+        else []
+    ):
         if not isinstance(article, dict):
             continue
         title = str(article.get("title") or "Europe PMC article").strip()
@@ -537,7 +716,12 @@ def build_references(context: Dict[str, Any]) -> List[Dict[str, str]]:
         rows.append(
             {
                 "title": title,
-                "description": str(article.get("url") or article.get("doi") or article.get("pmid") or "Literature metadata result"),
+                "description": str(
+                    article.get("url")
+                    or article.get("doi")
+                    or article.get("pmid")
+                    or "Literature metadata result"
+                ),
                 "meta": meta,
             }
         )
@@ -551,7 +735,9 @@ def build_references(context: Dict[str, Any]) -> List[Dict[str, str]]:
                 rows.append(
                     {
                         "title": f"{label} FDA PGx page match",
-                        "description": str(match.get("snippet") or "FDA PGx page match"),
+                        "description": str(
+                            match.get("snippet") or "FDA PGx page match"
+                        ),
                         "meta": "FDA PGx",
                     }
                 )
@@ -582,8 +768,16 @@ def build_references(context: Dict[str, Any]) -> List[Dict[str, str]]:
 
     meta = context.get("meta") or {}
     if meta.get("created_at"):
-        rows.append({"title": "Evidence context cache", "description": f"Context generated at {meta['created_at']}", "meta": "Cache"})
-    rows.append({"title": "OpenFDA caveat", "description": FAERS_CAVEAT, "meta": "FAERS"})
+        rows.append(
+            {
+                "title": "Evidence context cache",
+                "description": f"Context generated at {meta['created_at']}",
+                "meta": "Cache",
+            }
+        )
+    rows.append(
+        {"title": "OpenFDA caveat", "description": FAERS_CAVEAT, "meta": "FAERS"}
+    )
     return rows
 
 
@@ -628,7 +822,9 @@ def _research_mechanism_rows(research: Dict[str, Any]) -> List[Dict[str, str]]:
             b = row.get("protein_b")
             if a and b:
                 score = row.get("score")
-                interactions.append(f"{a}-{b}" + (f" score {score}" if score is not None else ""))
+                interactions.append(
+                    f"{a}-{b}" + (f" score {score}" if score is not None else "")
+                )
         if interactions:
             rows.append(
                 {
@@ -651,7 +847,9 @@ def _research_mechanism_rows(research: Dict[str, Any]) -> List[Dict[str, str]]:
                     continue
                 gene = str(row.get("gene") or "").strip()
                 target_name = str(row.get("target_name") or "").strip()
-                action = str(row.get("action_type") or row.get("act_type") or "").strip()
+                action = str(
+                    row.get("action_type") or row.get("act_type") or ""
+                ).strip()
                 if gene or target_name:
                     target = gene or target_name
                     targets.append(target + (f" ({action})" if action else ""))
@@ -744,18 +942,28 @@ def _nci_rows(value: Any) -> List[Dict[str, str]]:
     return rows
 
 
-def _reaction_rows(title: str, rows: List[Tuple[str, int]], *, shown: int = MAX_REACTION_ROWS) -> Tuple[List[Dict[str, str]], int]:
+def _reaction_rows(
+    title: str, rows: List[Tuple[str, int]], *, shown: int = MAX_REACTION_ROWS
+) -> Tuple[List[Dict[str, str]], int]:
     out: List[Dict[str, str]] = []
     displayed = rows[:shown]
     for term, count in displayed:
-        out.append({"title": f"{title}: {term}", "description": f"{count} report(s) in the returned FAERS subset.", "meta": f"n={count}"})
+        out.append(
+            {
+                "title": f"{title}: {term}",
+                "description": f"{count} report(s) in the returned FAERS subset.",
+                "meta": f"n={count}",
+            }
+        )
     return out, len(displayed)
 
 
 def _mechanism_source_note(key: str, mechanistic: Dict[str, Any], count: int) -> str:
     if key in {"targets_a", "targets_b"}:
         side = "a" if key.endswith("_a") else "b"
-        if mechanistic.get(f"uniprot_ids_{side}") or mechanistic.get(f"uniprot_targets_{side}"):
+        if mechanistic.get(f"uniprot_ids_{side}") or mechanistic.get(
+            f"uniprot_targets_{side}"
+        ):
             return "UniProt / PubChem"
     if key == "common_pathways" and mechanistic.get("kegg_common_pathways"):
         return "KEGG"
@@ -778,8 +986,15 @@ def _pathway_labels(value: Any) -> List[str]:
     out: List[str] = []
     for item in rows:
         if isinstance(item, dict):
-            pathway_id = item.get("pathway_id") or item.get("id") or item.get("stId") or item.get("dbId")
-            name = item.get("pathway_name") or item.get("name") or item.get("displayName")
+            pathway_id = (
+                item.get("pathway_id")
+                or item.get("id")
+                or item.get("stId")
+                or item.get("dbId")
+            )
+            name = (
+                item.get("pathway_name") or item.get("name") or item.get("displayName")
+            )
             if pathway_id and name:
                 out.append(f"{pathway_id}: {name}")
             elif name:
@@ -800,12 +1015,20 @@ def _protein_labels(value: Any) -> List[str]:
     out: List[str] = []
     for item in rows:
         if isinstance(item, dict):
-            accession = item.get("uniprot_id") or item.get("primaryAccession") or item.get("accession")
-            name = item.get("name") or item.get("protein_name") or item.get("original_id")
+            accession = (
+                item.get("uniprot_id")
+                or item.get("primaryAccession")
+                or item.get("accession")
+            )
+            name = (
+                item.get("name") or item.get("protein_name") or item.get("original_id")
+            )
             genes = item.get("gene_names") or []
             if isinstance(genes, str):
                 genes = [genes]
-            gene_text = f" ({', '.join(str(g) for g in genes[:3] if g)})" if genes else ""
+            gene_text = (
+                f" ({', '.join(str(g) for g in genes[:3] if g)})" if genes else ""
+            )
             if accession and name:
                 out.append(f"{accession}: {name}{gene_text}")
             elif accession:
@@ -864,7 +1087,10 @@ def _chembl_rows(value: Any) -> List[Dict[str, str]]:
     if not isinstance(value, dict):
         return []
     rows: List[Dict[str, str]] = []
-    for side, title in (("a", "Drug A ChEMBL bioactivity"), ("b", "Drug B ChEMBL bioactivity")):
+    for side, title in (
+        ("a", "Drug A ChEMBL bioactivity"),
+        ("b", "Drug B ChEMBL bioactivity"),
+    ):
         data = value.get(side)
         if not isinstance(data, dict):
             continue
@@ -874,16 +1100,23 @@ def _chembl_rows(value: Any) -> List[Dict[str, str]]:
             matches = _strings(validation.get("matches"))
             mismatches = _strings(validation.get("mismatches"))
             if matches:
-                parts.append("validated enzymes: " + ", ".join(matches[:MAX_ENZYME_PER_ROLE]))
+                parts.append(
+                    "validated enzymes: " + ", ".join(matches[:MAX_ENZYME_PER_ROLE])
+                )
             if mismatches:
-                parts.append("additional ChEMBL enzymes: " + ", ".join(mismatches[:MAX_ENZYME_PER_ROLE]))
+                parts.append(
+                    "additional ChEMBL enzymes: "
+                    + ", ".join(mismatches[:MAX_ENZYME_PER_ROLE])
+                )
         strengths = data.get("enzyme_strength") or {}
         for strength in ("strong", "moderate", "weak"):
             values = _strings(strengths.get(strength))
             if values:
                 parts.append(f"{strength}: {', '.join(values[:MAX_ENZYME_PER_ROLE])}")
         if parts:
-            rows.append({"title": title, "description": "; ".join(parts), "meta": "ChEMBL"})
+            rows.append(
+                {"title": title, "description": "; ".join(parts), "meta": "ChEMBL"}
+            )
     return rows
 
 

@@ -61,11 +61,13 @@ def _maybe_migrate_legacy_cache(cache_dir: Path) -> None:
 # Data containers
 # ----------------------------------------------------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class FaersQuery:
     """
     Represents a query to the FAERS (FDA Adverse Event Reporting System) API.
     """
+
     drug: str
     count_field: str
     search_filters: Optional[str] = None
@@ -89,6 +91,7 @@ class FaersData:
     """
     Stores FAERS data for a drug, including counts of reactions or other fields.
     """
+
     drug: str
     suffix: Optional[str]
     counts: Counter = field(default_factory=Counter)
@@ -105,15 +108,19 @@ class FaersData:
 # Client
 # ----------------------------------------------------------------------------------------------------------------------
 
+
 class OpenFDAClient:
     """
     Client for querying the OpenFDA drug event API and caching results locally.
     Public API mirrors your previous methods, with safer networking + TTL cache.
     """
+
     BASE_URL = "https://api.fda.gov/drug/event.json"
     SUMMARY_LIMIT = 3
 
-    def __init__(self, cache_dir: str = DEFAULT_CACHE_DIR, ttl_seconds: int = DEFAULT_TTL_SECONDS):
+    def __init__(
+        self, cache_dir: str = DEFAULT_CACHE_DIR, ttl_seconds: int = DEFAULT_TTL_SECONDS
+    ):
         settings = get_settings()
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -127,7 +134,9 @@ class OpenFDAClient:
 
     # ------------------------ internal HTTP ------------------------
 
-    def _request(self, params: Dict[str, str], timeout: int = DEFAULT_TIMEOUT) -> Optional[Dict]:
+    def _request(
+        self, params: Dict[str, str], timeout: int = DEFAULT_TIMEOUT
+    ) -> Optional[Dict]:
         """
         Do a GET with polite retries for 429/5xx. Returns JSON dict or None.
         """
@@ -142,7 +151,7 @@ class OpenFDAClient:
                 resp = self._session.get(self.BASE_URL, params=params, timeout=timeout)
             except requests.RequestException:
                 # transient network error; small backoff and retry
-                time.sleep(0.5 * (2 ** attempt))
+                time.sleep(0.5 * (2**attempt))
                 continue
 
             code = resp.status_code
@@ -154,7 +163,7 @@ class OpenFDAClient:
 
             if code in (429, 500, 502, 503, 504):
                 # exponential backoff
-                time.sleep(0.75 * (2 ** attempt))
+                time.sleep(0.75 * (2**attempt))
                 continue
 
             # Other non-retryable codes
@@ -238,13 +247,21 @@ class OpenFDAClient:
         lines: List[str] = []
         for idx, entry in enumerate(results, start=1):
             effects = (entry.get("patient") or {}).get("reaction", []) or []
-            terms = [e.get("reactionmeddrapt", "Unknown") for e in effects if isinstance(e, dict)]
+            terms = [
+                e.get("reactionmeddrapt", "Unknown")
+                for e in effects
+                if isinstance(e, dict)
+            ]
             if terms:
                 lines.append(
                     f"FDA report #{idx}: Common adverse events include {', '.join(terms[:5])}."
                 )
 
-        summary = "\n".join(lines) if lines else f"{lim} FDA reports retrieved for {drug_name}."
+        summary = (
+            "\n".join(lines)
+            if lines
+            else f"{lim} FDA reports retrieved for {drug_name}."
+        )
         save_text(self.cache_dir, key, summary)
         return summary
 
@@ -252,11 +269,17 @@ class OpenFDAClient:
         """
         Top reactions for a single drug (PRR-like frequency proxy).
         """
-        q = FaersQuery(drug=drug, count_field="patient.reaction.reactionmeddrapt.exact", suffix="reactions")
+        q = FaersQuery(
+            drug=drug,
+            count_field="patient.reaction.reactionmeddrapt.exact",
+            suffix="reactions",
+        )
         data = Counter(self._fetch_and_cache_counts(q))
         return data.most_common(int(top_k))
 
-    def get_time_series(self, drug: str, interval: str = "receivedate") -> List[Tuple[str, int]]:
+    def get_time_series(
+        self, drug: str, interval: str = "receivedate"
+    ) -> List[Tuple[str, int]]:
         """
         Time series of counts (count=<interval>), sorted by date string.
         """
@@ -264,11 +287,15 @@ class OpenFDAClient:
         data = self._fetch_and_cache_counts(q)
         return sorted(data.items(), key=lambda x: x[0])
 
-    def get_age_distribution(self, drug: str, bins: Optional[List[int]] = None) -> Dict[str, int]:
+    def get_age_distribution(
+        self, drug: str, bins: Optional[List[int]] = None
+    ) -> Dict[str, int]:
         """
         Age distribution. If bins provided, bucketize raw ages.
         """
-        q = FaersQuery(drug=drug, count_field="patient.patientonsetage.exact", suffix="age")
+        q = FaersQuery(
+            drug=drug, count_field="patient.patientonsetage.exact", suffix="age"
+        )
         raw = self._fetch_and_cache_counts(q)
         if not bins:
             return raw
@@ -289,10 +316,16 @@ class OpenFDAClient:
         """
         Reporter roles, e.g., physician, consumer, etc.
         """
-        q = FaersQuery(drug=drug, count_field="primarysource.qualification.exact", suffix="reporter")
+        q = FaersQuery(
+            drug=drug,
+            count_field="primarysource.qualification.exact",
+            suffix="reporter",
+        )
         return self._fetch_and_cache_counts(q)
 
-    def get_combination_reactions(self, drug1: str, drug2: str, top_k: int = 5) -> List[Tuple[str, int]]:
+    def get_combination_reactions(
+        self, drug1: str, drug2: str, top_k: int = 5
+    ) -> List[Tuple[str, int]]:
         """
         Top reactions for a combination. Tries a true combo filter first; if empty, returns intersection of singles.
         """
@@ -312,11 +345,21 @@ class OpenFDAClient:
             return Counter(data).most_common(int(top_k))
 
         # fallback: intersection of top reactions from each single
-        c1 = Counter(self._fetch_and_cache_counts(FaersQuery(drug1, "patient.reaction.reactionmeddrapt.exact")))
-        c2 = Counter(self._fetch_and_cache_counts(FaersQuery(drug2, "patient.reaction.reactionmeddrapt.exact")))
+        c1 = Counter(
+            self._fetch_and_cache_counts(
+                FaersQuery(drug1, "patient.reaction.reactionmeddrapt.exact")
+            )
+        )
+        c2 = Counter(
+            self._fetch_and_cache_counts(
+                FaersQuery(drug2, "patient.reaction.reactionmeddrapt.exact")
+            )
+        )
         return (c1 & c2).most_common(int(top_k))
 
-    def get_drug_reaction_evidence(self, drug: str, top_k: int = 10) -> List[EvidenceItem]:
+    def get_drug_reaction_evidence(
+        self, drug: str, top_k: int = 10
+    ) -> List[EvidenceItem]:
         try:
             reactions = self.get_top_reactions(drug, top_k=top_k)
         except Exception:
@@ -334,7 +377,9 @@ class OpenFDAClient:
             for reaction, count in reactions
         ]
 
-    def get_pair_reaction_evidence(self, drug_a: str, drug_b: str, top_k: int = 10) -> List[EvidenceItem]:
+    def get_pair_reaction_evidence(
+        self, drug_a: str, drug_b: str, top_k: int = 10
+    ) -> List[EvidenceItem]:
         try:
             reactions = self.get_combination_reactions(drug_a, drug_b, top_k=top_k)
         except Exception:
@@ -357,19 +402,33 @@ class OpenFDAClient:
     def plot_top_reactions(self, drug: str, top_k: int = 5):
         data = self.get_top_reactions(drug, top_k)
         df = pd.DataFrame(data, columns=["reaction", "count"])
-        return px.bar(df, x="reaction", y="count", title=f"Top {top_k} Reactions for {drug.title()}")
+        return px.bar(
+            df,
+            x="reaction",
+            y="count",
+            title=f"Top {top_k} Reactions for {drug.title()}",
+        )
 
     def plot_time_series(self, drug: str, interval: str = "receivedate"):
         data = self.get_time_series(drug, interval)
         df = pd.DataFrame(data, columns=["date", "count"])
-        return px.line(df, x="date", y="count", title=f"Event Count over Time for {drug.title()}")
+        return px.line(
+            df, x="date", y="count", title=f"Event Count over Time for {drug.title()}"
+        )
 
     def plot_age_distribution(self, drug: str, bins: Optional[List[int]] = None):
         dist = self.get_age_distribution(drug, bins)
         df = pd.DataFrame(list(dist.items()), columns=["age_bin", "count"])
-        return px.bar(df, x="age_bin", y="count", title=f"Age Distribution for {drug.title()}")
+        return px.bar(
+            df, x="age_bin", y="count", title=f"Age Distribution for {drug.title()}"
+        )
 
     def plot_reporter_breakdown(self, drug: str):
         data = self.get_reporter_breakdown(drug)
         df = pd.DataFrame(list(data.items()), columns=["reporter", "count"])
-        return px.pie(df, names="reporter", values="count", title=f"Reporter Breakdown for {drug.title()}")
+        return px.pie(
+            df,
+            names="reporter",
+            values="count",
+            title=f"Reporter Breakdown for {drug.title()}",
+        )

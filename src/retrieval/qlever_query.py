@@ -35,9 +35,15 @@ import requests
 LOG = logging.getLogger(__name__)
 logging.basicConfig(level=os.environ.get("QLEVER_CLIENT_LOGLEVEL", "WARNING").upper())
 
-CORE_ENDPOINT = os.getenv("CORE_ENDPOINT", "").rstrip("/") + ("/" if os.getenv("CORE_ENDPOINT") else "")
-DISEASE_ENDPOINT = os.getenv("DISEASE_ENDPOINT", "").rstrip("/") + ("/" if os.getenv("DISEASE_ENDPOINT") else "")
-BIO_ENDPOINT = os.getenv("BIO_ENDPOINT", "").rstrip("/") + ("/" if os.getenv("BIO_ENDPOINT") else "")
+CORE_ENDPOINT = os.getenv("CORE_ENDPOINT", "").rstrip("/") + (
+    "/" if os.getenv("CORE_ENDPOINT") else ""
+)
+DISEASE_ENDPOINT = os.getenv("DISEASE_ENDPOINT", "").rstrip("/") + (
+    "/" if os.getenv("DISEASE_ENDPOINT") else ""
+)
+BIO_ENDPOINT = os.getenv("BIO_ENDPOINT", "").rstrip("/") + (
+    "/" if os.getenv("BIO_ENDPOINT") else ""
+)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -45,29 +51,37 @@ PUBCHEM_COMPOUND_NS = "http://rdf.ncbi.nlm.nih.gov/pubchem/compound/"
 SIO = "http://semanticscience.org/resource/"
 SKOS = "http://www.w3.org/2004/02/skos/core#"
 RDFS = "http://www.w3.org/2000/01/rdf-schema#"
-OBI_0000299 = "http://purl.obolibrary.org/obo/OBI_0000299"   # has_specified_output (MG -> Endpoint)
-IAO_0000136 = "http://purl.obolibrary.org/obo/IAO_0000136"   # is_about (Endpoint -> SID)
-RO_0000056  = "http://purl.obolibrary.org/obo/RO_0000056"    # participates_in (SID -> MG)
-SIO_VALUE   = "http://semanticscience.org/resource/SIO_000300"
-SIO_UNIT    = "http://semanticscience.org/resource/SIO_000221"
+OBI_0000299 = "http://purl.obolibrary.org/obo/OBI_0000299"  # has_specified_output (MG -> Endpoint)
+IAO_0000136 = "http://purl.obolibrary.org/obo/IAO_0000136"  # is_about (Endpoint -> SID)
+RO_0000056 = "http://purl.obolibrary.org/obo/RO_0000056"  # participates_in (SID -> MG)
+SIO_VALUE = "http://semanticscience.org/resource/SIO_000300"
+SIO_UNIT = "http://semanticscience.org/resource/SIO_000221"
 PCV_OUTCOME = "http://rdf.ncbi.nlm.nih.gov/pubchem/vocabulary#PubChemAssayOutcome"
-RO_0000057  = "http://purl.obolibrary.org/obo/RO_0000057"    # has_participant (Endpoint -> Protein/Gene)
+RO_0000057 = "http://purl.obolibrary.org/obo/RO_0000057"  # has_participant (Endpoint -> Protein/Gene)
 
 MG_PREFIX = "http://rdf.ncbi.nlm.nih.gov/pubchem/measuregroup/"
 EP_PREFIX = "http://rdf.ncbi.nlm.nih.gov/pubchem/endpoint/"
+
 
 # ---------------------------------------------------------------------------
 # Errors
 class QLeverError(RuntimeError):
     pass
 
+
 class QLeverTimeout(QLeverError):
     """Server 429 or client read/connect timeout."""
+
 
 # ---------------------------------------------------------------------------
 # Client
 class QLeverClient:
-    def __init__(self, endpoint: str, timeout_s: int = 30, session: Optional[requests.Session] = None):
+    def __init__(
+        self,
+        endpoint: str,
+        timeout_s: int = 30,
+        session: Optional[requests.Session] = None,
+    ):
         if not endpoint:
             raise ValueError("QLever endpoint is empty.")
         self.endpoint = endpoint.rstrip("/") + "/"
@@ -79,15 +93,24 @@ class QLeverClient:
         self.max_retries: int = int(os.getenv("QLEVER_MAX_RETRIES", "2"))
         self.retry_backoff: float = float(os.getenv("QLEVER_RETRY_BACKOFF", "0.5"))
         self.retry_jitter: float = float(os.getenv("QLEVER_RETRY_JITTER", "0.2"))
-        self.retry_5xx: bool = os.getenv("QLEVER_RETRY_5XX", "1").lower() in {"1", "true", "yes"}
+        self.retry_5xx: bool = os.getenv("QLEVER_RETRY_5XX", "1").lower() in {
+            "1",
+            "true",
+            "yes",
+        }
 
     def _calc_sleep(self, base: float, attempt: int) -> float:
-        sleep = min(30.0, base * (2 ** attempt))
+        sleep = min(30.0, base * (2**attempt))
         if self.retry_jitter > 0:
             sleep += random.random() * self.retry_jitter
         return sleep
 
-    def query(self, sparql: str, retries: Optional[int] = None, backoff_s: Optional[float] = None) -> dict:
+    def query(
+        self,
+        sparql: str,
+        retries: Optional[int] = None,
+        backoff_s: Optional[float] = None,
+    ) -> dict:
         retries = self.max_retries if retries is None else retries
         backoff_s = self.retry_backoff if backoff_s is None else backoff_s
 
@@ -113,19 +136,25 @@ class QLeverClient:
                                 retry_after = float(int(ra))
                             except Exception:
                                 pass
-                        time.sleep(max(retry_after, self._calc_sleep(backoff_s, attempt)))
+                        time.sleep(
+                            max(retry_after, self._calc_sleep(backoff_s, attempt))
+                        )
                         continue
                     if status == 429:
                         raise QLeverTimeout(self._extract_server_error(resp))
                     body = ""
-                    try: body = resp.text[:2000]
-                    except Exception: pass
+                    try:
+                        body = resp.text[:2000]
+                    except Exception:
+                        pass
                     raise QLeverError(f"HTTP {status} from {self.endpoint}: {body}")
 
                 if not resp.ok:
                     body = ""
-                    try: body = resp.text[:2000]
-                    except Exception: pass
+                    try:
+                        body = resp.text[:2000]
+                    except Exception:
+                        pass
                     raise QLeverError(f"HTTP {status} from {self.endpoint}: {body}")
 
                 return resp.json()
@@ -133,13 +162,19 @@ class QLeverClient:
             except (requests.ReadTimeout, requests.ConnectTimeout) as e:
                 last_exc = e
                 if attempt < retries:
-                    time.sleep(self._calc_sleep(backoff_s, attempt)); continue
-                raise QLeverTimeout(f"Client timeout contacting {self.endpoint}: {e}") from e
+                    time.sleep(self._calc_sleep(backoff_s, attempt))
+                    continue
+                raise QLeverTimeout(
+                    f"Client timeout contacting {self.endpoint}: {e}"
+                ) from e
             except requests.ConnectionError as e:
                 last_exc = e
                 if attempt < retries:
-                    time.sleep(self._calc_sleep(backoff_s, attempt)); continue
-                raise QLeverError(f"Connection error contacting {self.endpoint}: {e}") from e
+                    time.sleep(self._calc_sleep(backoff_s, attempt))
+                    continue
+                raise QLeverError(
+                    f"Connection error contacting {self.endpoint}: {e}"
+                ) from e
             except requests.RequestException as e:
                 last_exc = e
                 status = getattr(resp, "status_code", "?")
@@ -168,8 +203,10 @@ class QLeverClient:
             except Exception:
                 return "429 from QLever (no body)"
 
+
 # ---------------------------------------------------------------------------
 # Utilities
+
 
 def _vals(bindings: Sequence[Dict[str, Any]], *cols: str) -> List[Tuple[str, ...]]:
     out: List[Tuple[str, ...]] = []
@@ -184,29 +221,39 @@ def _vals(bindings: Sequence[Dict[str, Any]], *cols: str) -> List[Tuple[str, ...
             out.append(tuple(row))
     return out
 
+
 def _normalize_attr_key(raw_key: str) -> str:
     return re.sub(r"^CID\d+_", "", raw_key)
+
 
 def _ensure_client(which: str) -> QLeverClient:
     if which == "core":
         if not CORE_ENDPOINT:
             raise QLeverError("CORE_ENDPOINT is not set in your environment.")
-        return QLeverClient(CORE_ENDPOINT, timeout_s=int(os.getenv("QLEVER_TIMEOUT_CORE", "90")))
+        return QLeverClient(
+            CORE_ENDPOINT, timeout_s=int(os.getenv("QLEVER_TIMEOUT_CORE", "90"))
+        )
     elif which == "disease":
         if not DISEASE_ENDPOINT:
             raise QLeverError("DISEASE_ENDPOINT is not set in your environment.")
-        return QLeverClient(DISEASE_ENDPOINT, timeout_s=int(os.getenv("QLEVER_TIMEOUT_DISEASE", "90")))
+        return QLeverClient(
+            DISEASE_ENDPOINT, timeout_s=int(os.getenv("QLEVER_TIMEOUT_DISEASE", "90"))
+        )
     raise AssertionError("Unknown client requested")
+
 
 def get_clients_from_env() -> Tuple[QLeverClient, QLeverClient]:
     return _ensure_client("core"), _ensure_client("disease")
 
+
 def sparql_str(s: str) -> str:
     s = s.replace("\\", "\\\\").replace('"', '\\"')
-    return f"\"{s}\""
+    return f'"{s}"'
+
 
 def _get_bio_endpoint() -> Optional[str]:
     return BIO_ENDPOINT or None
+
 
 def _bio_query(query: str) -> Dict[str, Any]:
     endpoint = _get_bio_endpoint()
@@ -216,9 +263,9 @@ def _bio_query(query: str) -> Dict[str, Any]:
     timeout = int(os.getenv("QLEVER_TIMEOUT_BIO", "90"))
     try:
         r = requests.get(
-        endpoint,
-        params={"query": query},
-        headers={"Accept": "application/sparql-results+json"},
+            endpoint,
+            params={"query": query},
+            headers={"Accept": "application/sparql-results+json"},
             timeout=timeout,
         )
         r.raise_for_status()
@@ -230,8 +277,10 @@ def _bio_query(query: str) -> Dict[str, Any]:
         LOG.debug("BIO query failed: %s", e)
         return {}
 
+
 # ---------------------------------------------------------------------------
 # CORE helpers (cached)
+
 
 @lru_cache(maxsize=2048)
 def core_find_cid_by_exact_label(label: str, limit: int = 50) -> List[str]:
@@ -246,8 +295,11 @@ SELECT ?cid WHERE {{
     js = cli.query(q)
     return [cid for (cid,) in _vals(js["results"]["bindings"], "cid")]
 
+
 @lru_cache(maxsize=2048)
-def core_find_cid_by_label_fragment(fragment: str, limit: int = 50) -> List[Tuple[str, str]]:
+def core_find_cid_by_label_fragment(
+    fragment: str, limit: int = 50
+) -> List[Tuple[str, str]]:
     cli = _ensure_client("core")
     frag = fragment.strip()
     q = f"""
@@ -260,9 +312,14 @@ SELECT ?cid ?name WHERE {{
 """
     try:
         js = cli.query(q, retries=0)
-        return cast(List[Tuple[str, str]], _vals(js["results"]["bindings"], "cid", "name"))
+        return cast(
+            List[Tuple[str, str]], _vals(js["results"]["bindings"], "cid", "name")
+        )
     except QLeverTimeout:
-        LOG.warning("Fragment query timed out; falling back to exact label variants for %r", frag)
+        LOG.warning(
+            "Fragment query timed out; falling back to exact label variants for %r",
+            frag,
+        )
 
     candidates = [frag, frag.capitalize(), frag.title(), frag.upper()]
     seen: set[str] = set()
@@ -273,6 +330,7 @@ SELECT ?cid ?name WHERE {{
                 out.append((cid, c))
                 seen.add(cid)
     return out
+
 
 @lru_cache(maxsize=4096)
 def core_synonyms_for_cid(cid_uri: str, limit: int = 1024) -> List[str]:
@@ -317,8 +375,10 @@ SELECT DISTINCT ?name WHERE {{
     for n in names:
         s = re.sub(r"\s+", " ", (n or "").strip())
         if s and s not in seen:
-            out.append(s); seen.add(s)
+            out.append(s)
+            seen.add(s)
     return out
+
 
 def core_descriptors_for_cids(cids: Iterable[str]) -> Dict[str, Dict[str, str]]:
     cids = list(dict.fromkeys(cids))
@@ -344,6 +404,7 @@ ORDER BY ?cid ?key
         out.setdefault(cid, {})[_normalize_attr_key(raw_key)] = val
     return out
 
+
 def _core_get_single_descriptor_value(cid: str, short_key: str) -> Optional[str]:
     cli = _ensure_client("core")
     q = f"""
@@ -359,10 +420,9 @@ LIMIT 1
     vals = _vals(js["results"]["bindings"], "val")
     return vals[0][0] if vals else None
 
+
 def core_xlogp_threshold(
-    max_xlogp: float,
-    limit: int = 1000,
-    must_include_cids: Optional[List[str]] = None
+    max_xlogp: float, limit: int = 1000, must_include_cids: Optional[List[str]] = None
 ) -> Dict[str, float]:
     cli = _ensure_client("core")
     q = f"""
@@ -386,7 +446,10 @@ LIMIT {int(limit)}
                 results[cid] = float(x)
             except ValueError:
                 pass
-        for cid in (must_include_cids or [f"{PUBCHEM_COMPOUND_NS}CID2244", f"{PUBCHEM_COMPOUND_NS}CID1000"]):
+        for cid in must_include_cids or [
+            f"{PUBCHEM_COMPOUND_NS}CID2244",
+            f"{PUBCHEM_COMPOUND_NS}CID1000",
+        ]:
             if cid not in results:
                 v = _core_get_single_descriptor_value(cid, "XLogP3")
                 if v is not None:
@@ -406,7 +469,8 @@ LIMIT {int(limit)}
         results: Dict[str, float] = {}
         for cid in fallback_cids:
             v = _core_get_single_descriptor_value(cid, "XLogP3")
-            if v is None: continue
+            if v is None:
+                continue
             try:
                 fv = float(v)
             except ValueError:
@@ -415,10 +479,14 @@ LIMIT {int(limit)}
                 results[cid] = fv
         return results
 
+
 # ---------------------------------------------------------------------------
 # DISEASE helpers
 
-def disease_find_by_label_fragment(fragment: str, limit: int = 50) -> List[Tuple[str, str]]:
+
+def disease_find_by_label_fragment(
+    fragment: str, limit: int = 50
+) -> List[Tuple[str, str]]:
     cli = _ensure_client("disease")
     frag = fragment.strip().lower()
     q = f"""
@@ -434,6 +502,7 @@ LIMIT {int(limit)}
     js = cli.query(q)
     return cast(List[Tuple[str, str]], _vals(js["results"]["bindings"], "d", "label"))
 
+
 def disease_crossrefs(dz_uri: str, limit: int = 1000) -> List[str]:
     cli = _ensure_client("disease")
     q = f"""
@@ -446,30 +515,31 @@ LIMIT {int(limit)}
     js = cli.query(q)
     return [ext for (ext,) in _vals(js["results"]["bindings"], "ext")]
 
+
 @lru_cache(maxsize=4096)
 def _query_diseases_for_cid(cid_uri: str, limit: int = 20) -> List[str]:
     """
     Query DISEASE index for diseases associated with a CID.
-    
+
     Uses multiple small queries to find diseases through various relationships.
     Returns list of disease labels.
     """
     if not cid_uri:
         return []
-    
+
     try:
         cli = _ensure_client("disease")
     except Exception as e:
         LOG.debug("DISEASE endpoint not available: %s", e)
         return []
-    
+
     # Extract CID number from URI
     cid_match = re.search(r"CID(\d+)", cid_uri)
     if not cid_match:
         return []
     cid_num = cid_match.group(1)
     cid_uri_full = cid_uri
-    
+
     # Multiple small queries to find diseases - optimized for completeness
     queries = [
         # Pattern 1: Direct compound-disease link via vocab:compound
@@ -507,12 +577,12 @@ SELECT DISTINCT ?disease ?label WHERE {{
   VALUES ?lp {{ rdfs:label skos:prefLabel skos:altLabel }}
 }}
 LIMIT {int(limit)}
-"""
+""",
     ]
-    
+
     seen = set()
     diseases = []
-    
+
     # Execute queries sequentially - small queries are faster
     for q in queries:
         try:
@@ -520,7 +590,7 @@ LIMIT {int(limit)}
             for b in js.get("results", {}).get("bindings", []):
                 disease_uri = (b.get("disease", {}) or {}).get("value")
                 label = (b.get("label", {}) or {}).get("value")
-                
+
                 if disease_uri and disease_uri not in seen:
                     seen.add(disease_uri)
                     if label:
@@ -530,7 +600,7 @@ LIMIT {int(limit)}
                         dz_id = disease_uri.rsplit("/", 1)[-1]
                         if dz_id:
                             diseases.append(dz_id)
-                    
+
                     if len(diseases) >= limit:
                         break
             if len(diseases) >= limit:
@@ -538,14 +608,19 @@ LIMIT {int(limit)}
         except Exception as e:
             LOG.debug("Disease query pattern failed for CID %s: %s", cid_uri, e)
             continue
-    
+
     if not diseases:
-        LOG.debug("No disease data found for CID %s - disease index may not have direct compound links", cid_uri)
-    
+        LOG.debug(
+            "No disease data found for CID %s - disease index may not have direct compound links",
+            cid_uri,
+        )
+
     return _normalize_syns(diseases[:limit])
+
 
 # ---------------------------------------------------------------------------
 # BIO helpers
+
 
 def bio_find_measuregroups_by_aid(aid: str, limit: int = 5) -> List[str]:
     aid = aid.strip()
@@ -564,6 +639,7 @@ LIMIT {limit}
     data = _bio_query(q)
     return [b["mg"]["value"] for b in data.get("results", {}).get("bindings", [])]
 
+
 def bio_measuregroup_endpoints(mg_uri: str) -> List[Dict[str, Any]]:
     q = f"""
 PREFIX OBI:<http://purl.obolibrary.org/obo/>
@@ -581,14 +657,17 @@ LIMIT 1000
     data = _bio_query(q)
     out: List[Dict[str, Any]] = []
     for b in data.get("results", {}).get("bindings", []):
-        out.append({
-            "endpoint": b.get("e", {}).get("value"),
-            "value": b.get("val", {}).get("value"),
-            "unit": b.get("unit", {}).get("value"),
-            "unit_label": b.get("unit_label", {}).get("value"),
-            "outcome": b.get("outcome", {}).get("value"),
-        })
+        out.append(
+            {
+                "endpoint": b.get("e", {}).get("value"),
+                "value": b.get("val", {}).get("value"),
+                "unit": b.get("unit", {}).get("value"),
+                "unit_label": b.get("unit_label", {}).get("value"),
+                "outcome": b.get("outcome", {}).get("value"),
+            }
+        )
     return out
+
 
 def bio_measuregroup_sid_cid(mg_uri: str) -> List[Dict[str, str]]:
     q = f"""
@@ -603,8 +682,11 @@ SELECT DISTINCT ?sid ?cid WHERE {{
 LIMIT 5000
 """
     data = _bio_query(q)
-    return [{"sid": b["sid"]["value"], "cid": b["cid"]["value"]}
-            for b in data.get("results", {}).get("bindings", [])]
+    return [
+        {"sid": b["sid"]["value"], "cid": b["cid"]["value"]}
+        for b in data.get("results", {}).get("bindings", [])
+    ]
+
 
 def bio_measuregroup_proteins(mg_uri: str) -> List[Dict[str, Optional[str]]]:
     q = f"""
@@ -618,11 +700,15 @@ SELECT DISTINCT ?e ?prot ?prot_label WHERE {{
 LIMIT 2000
 """
     data = _bio_query(q)
-    return [{
-        "endpoint": b.get("e", {}).get("value"),
-        "protein": b.get("prot", {}).get("value"),
-        "protein_label": b.get("prot_label", {}).get("value"),
-    } for b in data.get("results", {}).get("bindings", [])]
+    return [
+        {
+            "endpoint": b.get("e", {}).get("value"),
+            "protein": b.get("prot", {}).get("value"),
+            "protein_label": b.get("prot_label", {}).get("value"),
+        }
+        for b in data.get("results", {}).get("bindings", [])
+    ]
+
 
 def bio_measuregroup_endpoints_to_bioassay(mg_uri: str) -> List[Dict[str, str]]:
     q = f"""
@@ -635,11 +721,15 @@ SELECT ?e ?aidTok ?bioassay WHERE {{
 LIMIT 5000
 """
     data = _bio_query(q)
-    return [{
-        "endpoint": b.get("e", {}).get("value"),
-        "aid": b.get("aidTok", {}).get("value"),
-        "bioassay": b.get("bioassay", {}).get("value"),
-    } for b in data.get("results", {}).get("bindings", [])]
+    return [
+        {
+            "endpoint": b.get("e", {}).get("value"),
+            "aid": b.get("aidTok", {}).get("value"),
+            "bioassay": b.get("bioassay", {}).get("value"),
+        }
+        for b in data.get("results", {}).get("bindings", [])
+    ]
+
 
 def bio_measuregroup_summary(mg_uri: str) -> Dict[str, Any]:
     return {
@@ -650,22 +740,29 @@ def bio_measuregroup_summary(mg_uri: str) -> Dict[str, Any]:
         "endpoint_to_bioassay": bio_measuregroup_endpoints_to_bioassay(mg_uri),
     }
 
+
 # ---------------------------------------------------------------------------
 # Mechanistic glue
+
 
 def _extract_numeric_cid(cid_uri: str) -> Optional[str]:
     m = re.search(r"CID(\d+)", cid_uri or "")
     return m.group(1) if m else None
+
 
 def _normalize_syns(syns: Iterable[str]) -> List[str]:
     out, seen = [], set()
     for s in syns:
         s = re.sub(r"\s+", " ", (s or "").strip())
         if s and s not in seen:
-            out.append(s); seen.add(s)
+            out.append(s)
+            seen.add(s)
     return out
 
-def _first_cid_and_synonyms(name: str, limit: int = 25) -> tuple[Optional[str], Dict[str, Any]]:
+
+def _first_cid_and_synonyms(
+    name: str, limit: int = 25
+) -> tuple[Optional[str], Dict[str, Any]]:
     """
     Best-effort CID resolution + synonyms.
     Fast path: exact label probes (several casings), then fragment scan.
@@ -686,7 +783,9 @@ def _first_cid_and_synonyms(name: str, limit: int = 25) -> tuple[Optional[str], 
     # 2) Fallback: fragment
     if not pairs:
         try:
-            pairs = core_find_cid_by_label_fragment(name, limit=limit)  # [(cid,label),...]
+            pairs = core_find_cid_by_label_fragment(
+                name, limit=limit
+            )  # [(cid,label),...]
         except Exception:
             pairs = []
 
@@ -706,6 +805,7 @@ def _first_cid_and_synonyms(name: str, limit: int = 25) -> tuple[Optional[str], 
         "synonyms": _normalize_syns(syns)[:256],
     }
     return cid_uri, info
+
 
 def _query_enzymes_for_cid(cid_uri: str) -> Dict[str, List[str]]:
     """
@@ -743,7 +843,7 @@ SELECT DISTINCT ?attr WHERE {{
   FILTER(REGEX(STR(?attr), "(?i)(cyp.*substrate|substrate.*cyp)"))
 }}
 LIMIT 20
-"""
+""",
         ],
         "inhibitor": [
             f"""
@@ -765,7 +865,7 @@ SELECT DISTINCT ?attr WHERE {{
   FILTER(REGEX(STR(?attr), "(?i)(cyp.*inhibit|inhibit.*cyp)"))
 }}
 LIMIT 20
-"""
+""",
         ],
         "inducer": [
             f"""
@@ -787,8 +887,8 @@ SELECT DISTINCT ?attr WHERE {{
   FILTER(REGEX(STR(?attr), "(?i)(cyp.*induc|induc.*cyp)"))
 }}
 LIMIT 20
-"""
-        ]
+""",
+        ],
     }
 
     for role, query_list in queries.items():
@@ -799,7 +899,7 @@ LIMIT 20
                     enzyme = b.get("enzyme", {}).get("value", "")
                     label = b.get("label", {}).get("value", "")
                     attr = b.get("attr", {}).get("value", "")
-                    
+
                     # Extract from label if available
                     if label:
                         enzymes[role].append(label)
@@ -823,7 +923,9 @@ LIMIT 20
     # Strategy 2: Query BIO index for CYP proteins (enzymes are proteins in bioactivity data)
     # Note: BIO index has CYP proteins but doesn't directly indicate role (substrate/inhibitor/inducer)
     # We'll extract all CYP proteins and treat them as potential substrates (most common role)
-    if _get_bio_endpoint() and not any(enzymes.values()):  # Only if CORE didn't find anything
+    if _get_bio_endpoint() and not any(
+        enzymes.values()
+    ):  # Only if CORE didn't find anything
         try:
             bio_query = f"""
 PREFIX OBI:<http://purl.obolibrary.org/obo/>
@@ -857,7 +959,7 @@ LIMIT 50
                     prot_id = (b.get("prot_id", {}) or {}).get("value", "")
                     label = (b.get("label", {}) or {}).get("value", "")
                     identifier = (b.get("identifier", {}) or {}).get("value", "")
-                    
+
                     # Extract CYP identifier - try multiple patterns
                     cyp_name = None
                     if identifier:
@@ -879,44 +981,51 @@ LIMIT 50
                                 cyp_name = f"CYP{num}"
                             else:
                                 cyp_name = f"CYP{num.upper()}"
-                    
+
                     if cyp_name and cyp_name not in cyp_proteins:
                         cyp_proteins.add(cyp_name)
                         # Treat all CYP proteins as potential substrates (most common role)
                         # Note: BIO index doesn't distinguish substrate/inhibitor/inducer roles
                         enzymes["substrate"].append(cyp_name)
-                
+
                 if cyp_proteins:
-                    LOG.debug("Found %d CYP enzymes in BIO index for CID %s", len(cyp_proteins), cid_uri)
+                    LOG.debug(
+                        "Found %d CYP enzymes in BIO index for CID %s",
+                        len(cyp_proteins),
+                        cid_uri,
+                    )
         except Exception as e:
             LOG.debug("BIO enzyme query failed for CID %s: %s", cid_uri, e)
-    
+
     # Deduplicate and normalize
     for role in enzymes:
         enzymes[role] = _normalize_syns(enzymes[role])
-    
+
     if not any(enzymes.values()):
         LOG.debug("No enzyme data found for CID %s", cid_uri)
-    
+
     return enzymes
 
+
 @lru_cache(maxsize=4096)
-def _query_targets_for_cid(cid_uri: str, limit: int = 32, return_dicts: bool = False) -> List[Any]:
+def _query_targets_for_cid(
+    cid_uri: str, limit: int = 32, return_dicts: bool = False
+) -> List[Any]:
     """
     Query BIO index for protein targets associated with a CID via MeasureGroups.
-    
+
     Correct PubChem RDF structure:
       - CID -> SID (via CHEMINF_000477)
       - SID -> MeasureGroup (via substance2measuregroup)
       - MeasureGroup -> Protein (via RO_0000057 has_participant)
-    
+
     Proteins are linked DIRECTLY to MeasureGroups, NOT to Endpoints.
-    
+
     Args:
         cid_uri: Compound URI
         limit: Maximum number of targets to return
         return_dicts: If True, return list of dicts with 'uri' and 'label' keys
-    
+
     Returns:
         If return_dicts=False: list of protein identifiers (strings)
         If return_dicts=True: list of dicts with 'uri' and 'label' keys
@@ -949,12 +1058,12 @@ SELECT DISTINCT ?prot WHERE {{
   FILTER(STRSTARTS(STR(?prot), "http://rdf.ncbi.nlm.nih.gov/pubchem/protein/"))
 }}
 LIMIT {int(limit) * 2}
-"""
+""",
     ]
 
     seen_prot_uris = set()
     prot_uris = []
-    
+
     # Step 1: Get protein URIs (fast query)
     for q in queries:
         try:
@@ -973,23 +1082,23 @@ LIMIT {int(limit) * 2}
         except Exception as e:
             LOG.debug("BIO target query pattern failed for %s: %s", cid_uri, e)
             continue
-    
+
     if not prot_uris:
         LOG.debug("No protein URIs found for CID %s", cid_uri)
         return []
-    
+
     # Step 2: Get identifiers for proteins (batch query - but may timeout, so do in chunks)
     # If identifier query fails, fallback to extracting IDs from URIs
     targets = []
     chunk_size = 10  # Increased chunk size since timeout is now 30s
-    
+
     # Try to get identifiers, but if it times out, use URI-based extraction
     identifier_query_succeeded = False
-    
+
     for i in range(0, min(len(prot_uris), limit * 2), chunk_size):
-        chunk = prot_uris[i:i+chunk_size]
+        chunk = prot_uris[i : i + chunk_size]
         values = " ".join(f"<{p}>" for p in chunk)
-        
+
         id_query = f"""
 PREFIX rdf:<http://www.w3.org/1999/02/22-rdf-syntax-ns#>
 PREFIX dcterms:<http://purl.org/dc/terms/>
@@ -1014,10 +1123,10 @@ SELECT ?prot ?prot_identifier ?uniprot_type ?prot_label WHERE {{
                     prot_identifier = (b.get("prot_identifier", {}) or {}).get("value")
                     uniprot_type = (b.get("uniprot_type", {}) or {}).get("value")
                     prot_label = (b.get("prot_label", {}) or {}).get("value")
-                    
+
                     # Extract protein ID from URI
                     prot_id = prot_uri.rsplit("/", 1)[-1] if prot_uri else ""
-                    
+
                     # Prefer: label > dcterms:identifier (UniProt) > rdf:type UniProt > cleaned protein ID
                     if return_dicts:
                         # Return dict with uri and label
@@ -1049,7 +1158,7 @@ SELECT ?prot ?prot_identifier ?uniprot_type ?prot_label WHERE {{
                                 targets.append(clean_id)
                             else:
                                 targets.append(prot_id)
-                    
+
                     if len(targets) >= limit:
                         break
                 if len(targets) >= limit:
@@ -1057,17 +1166,24 @@ SELECT ?prot ?prot_identifier ?uniprot_type ?prot_label WHERE {{
         except Exception as e:
             LOG.debug("BIO identifier query failed for chunk: %s", e)
             continue
-    
+
     # Fallback: if identifier queries failed or returned no results, extract from URIs
     if not targets and prot_uris:
-        LOG.debug("Using URI-based protein ID extraction (identifier query failed or timed out)")
+        LOG.debug(
+            "Using URI-based protein ID extraction (identifier query failed or timed out)"
+        )
         for prot_uri in prot_uris[:limit]:
             prot_id = prot_uri.rsplit("/", 1)[-1]
             # Clean up protein ID (remove ACC prefix, handle PDB-style IDs)
             clean_id = re.sub(r"^ACC", "", prot_id)
             # If it looks like a PDB chain ID (e.g., "1DE9_A"), keep as is
             if return_dicts:
-                label = clean_id if re.match(r"^\d[A-Z0-9]{3}_[A-Z]$", clean_id) or (clean_id and len(clean_id) > 2) else prot_id
+                label = (
+                    clean_id
+                    if re.match(r"^\d[A-Z0-9]{3}_[A-Z]$", clean_id)
+                    or (clean_id and len(clean_id) > 2)
+                    else prot_id
+                )
                 targets.append({"uri": prot_uri, "label": label})
             else:
                 if re.match(r"^\d[A-Z0-9]{3}_[A-Z]$", clean_id):
@@ -1078,17 +1194,19 @@ SELECT ?prot ?prot_identifier ?uniprot_type ?prot_label WHERE {{
                     targets.append(prot_id)
             if len(targets) >= limit:
                 break
-    
+
     if not targets:
         LOG.debug("No protein targets found for CID %s", cid_uri)
-    
+
     # Don't normalize if returning dicts
     if return_dicts:
         return targets[:limit]
     return _normalize_syns(targets[:limit])
 
+
 # ---------------------------------------------------------------------------
 # Public: mechanistic bundles
+
 
 def get_mechanistic(drugA: str, drugB: str) -> Dict[str, Any]:
     """
@@ -1121,13 +1239,21 @@ def get_mechanistic(drugA: str, drugB: str) -> Dict[str, Any]:
         _ = _ensure_client("core")
     except Exception as e:
         return {
-            "enzymes": {"a": {"substrate": [], "inhibitor": [], "inducer": []},
-                        "b": {"substrate": [], "inhibitor": [], "inducer": []}},
-            "targets_a": [], "targets_b": [],
-            "diseases_a": [], "diseases_b": [],
-            "pathways_a": [], "pathways_b": [], "common_pathways": [],
-            "ids_a": {}, "ids_b": {},
-            "synonyms_a": [], "synonyms_b": [],
+            "enzymes": {
+                "a": {"substrate": [], "inhibitor": [], "inducer": []},
+                "b": {"substrate": [], "inhibitor": [], "inducer": []},
+            },
+            "targets_a": [],
+            "targets_b": [],
+            "diseases_a": [],
+            "diseases_b": [],
+            "pathways_a": [],
+            "pathways_b": [],
+            "common_pathways": [],
+            "ids_a": {},
+            "ids_b": {},
+            "synonyms_a": [],
+            "synonyms_b": [],
             "caveats": [f"QLever CORE unavailable: {e}"],
         }
 
@@ -1138,7 +1264,7 @@ def get_mechanistic(drugA: str, drugB: str) -> Dict[str, Any]:
     # Enzymes - try QLever first, then DrugBank fallback
     enzymes_a = {"substrate": [], "inhibitor": [], "inducer": []}
     enzymes_b = {"substrate": [], "inhibitor": [], "inducer": []}
-    
+
     # Try QLever (CORE/BIO)
     if cid_a:
         try:
@@ -1156,22 +1282,27 @@ def get_mechanistic(drugA: str, drugB: str) -> Dict[str, Any]:
         except Exception as e:
             LOG.warning("Enzyme query failed for %s: %s", drugB, e)
             caveats.append(f"Enzyme query failed for {drugB}: {e}")
-    
+
     # DrugBank fallback: if QLever didn't find enzymes, try DrugBank
     # ChEMBL enrichment: add potency and cross-validation
     # Import here to avoid circular dependency
     chembl_data_a = None
     chembl_data_b = None
-    
+
     try:
         from src.retrieval import duckdb_query as dq
+
         # Initialize DuckDB connection if needed
         dq.init_duckdb_connection("data/duckdb")
         db_client = dq.DuckDBClient("data/duckdb")
-        
+
         # Check if QLever found any enzymes for drugA
         has_enzymes_a = any(enzymes_a.values())
-        LOG.debug("DrugBank fallback check for %s: QLever found enzymes=%s", drugA, has_enzymes_a)
+        LOG.debug(
+            "DrugBank fallback check for %s: QLever found enzymes=%s",
+            drugA,
+            has_enzymes_a,
+        )
         if not has_enzymes_a:
             try:
                 LOG.debug("Attempting DrugBank enzyme query for %s", drugA)
@@ -1181,18 +1312,22 @@ def get_mechanistic(drugA: str, drugB: str) -> Dict[str, Any]:
                     # Use enzyme_action_map if available (proper per-enzyme mapping)
                     enzyme_action_map = db_enzymes_a.get("enzyme_action_map", [])
                     enzymes_list = db_enzymes_a.get("enzymes", [])
-                    
+
                     if enzyme_action_map:
                         # Use structured mapping (preferred)
                         for enzyme_entry in enzyme_action_map:
                             enzyme_name = enzyme_entry.get("enzyme", "")
                             actions = enzyme_entry.get("actions", [])
-                            
+
                             # Extract CYP number if present
-                            cyp_match = re.search(r"(?i)(?:cyp|p\s*450)\s*(\d+[a-z]?\d*)", enzyme_name, re.I)
+                            cyp_match = re.search(
+                                r"(?i)(?:cyp|p\s*450)\s*(\d+[a-z]?\d*)",
+                                enzyme_name,
+                                re.I,
+                            )
                             if cyp_match:
                                 cyp_canon = f"cyp{cyp_match.group(1).lower()}"
-                                
+
                                 # Categorize by all actions for this enzyme
                                 for action in actions:
                                     if "substrate" in action.lower():
@@ -1201,7 +1336,7 @@ def get_mechanistic(drugA: str, drugB: str) -> Dict[str, Any]:
                                         enzymes_a["inhibitor"].append(cyp_canon)
                                     elif "inducer" in action.lower():
                                         enzymes_a["inducer"].append(cyp_canon)
-                                
+
                                 # If no actions specified, default to substrate
                                 if not actions:
                                     enzymes_a["substrate"].append(cyp_canon)
@@ -1209,17 +1344,27 @@ def get_mechanistic(drugA: str, drugB: str) -> Dict[str, Any]:
                         # Fallback to flat list (backward compatibility)
                         actions_list = db_enzymes_a.get("enzyme_actions", [])
                         for i, enzyme_name in enumerate(enzymes_list):
-                            cyp_match = re.search(r"(?i)(?:cyp|p\s*450)\s*(\d+[a-z]?\d*)", enzyme_name, re.I)
+                            cyp_match = re.search(
+                                r"(?i)(?:cyp|p\s*450)\s*(\d+[a-z]?\d*)",
+                                enzyme_name,
+                                re.I,
+                            )
                             if cyp_match:
                                 cyp_canon = f"cyp{cyp_match.group(1).lower()}"
-                                
+
                                 action = None
                                 if actions_list:
                                     if len(actions_list) < len(enzymes_list):
-                                        action = actions_list[0] if actions_list else None
+                                        action = (
+                                            actions_list[0] if actions_list else None
+                                        )
                                     else:
-                                        action = actions_list[i] if i < len(actions_list) else None
-                                
+                                        action = (
+                                            actions_list[i]
+                                            if i < len(actions_list)
+                                            else None
+                                        )
+
                                 if action:
                                     if "substrate" in action.lower():
                                         enzymes_a["substrate"].append(cyp_canon)
@@ -1231,15 +1376,23 @@ def get_mechanistic(drugA: str, drugB: str) -> Dict[str, Any]:
                                         enzymes_a["substrate"].append(cyp_canon)
                                 else:
                                     enzymes_a["substrate"].append(cyp_canon)
-                    
+
                     if any(enzymes_a.values()):
-                        LOG.info("Found %d enzymes from DrugBank for %s", len(enzymes_list), drugA)
+                        LOG.info(
+                            "Found %d enzymes from DrugBank for %s",
+                            len(enzymes_list),
+                            drugA,
+                        )
             except Exception as e:
                 LOG.warning("DrugBank enzyme query failed for %s: %s", drugA, e)
-        
+
         # Check if QLever found any enzymes for drugB
         has_enzymes_b = any(enzymes_b.values())
-        LOG.debug("DrugBank fallback check for %s: QLever found enzymes=%s", drugB, has_enzymes_b)
+        LOG.debug(
+            "DrugBank fallback check for %s: QLever found enzymes=%s",
+            drugB,
+            has_enzymes_b,
+        )
         if not has_enzymes_b:
             try:
                 LOG.debug("Attempting DrugBank enzyme query for %s", drugB)
@@ -1249,18 +1402,22 @@ def get_mechanistic(drugA: str, drugB: str) -> Dict[str, Any]:
                     # Use enzyme_action_map if available (proper per-enzyme mapping)
                     enzyme_action_map = db_enzymes_b.get("enzyme_action_map", [])
                     enzymes_list = db_enzymes_b.get("enzymes", [])
-                    
+
                     if enzyme_action_map:
                         # Use structured mapping (preferred)
                         for enzyme_entry in enzyme_action_map:
                             enzyme_name = enzyme_entry.get("enzyme", "")
                             actions = enzyme_entry.get("actions", [])
-                            
+
                             # Extract CYP number if present
-                            cyp_match = re.search(r"(?i)(?:cyp|p\s*450)\s*(\d+[a-z]?\d*)", enzyme_name, re.I)
+                            cyp_match = re.search(
+                                r"(?i)(?:cyp|p\s*450)\s*(\d+[a-z]?\d*)",
+                                enzyme_name,
+                                re.I,
+                            )
                             if cyp_match:
                                 cyp_canon = f"cyp{cyp_match.group(1).lower()}"
-                                
+
                                 # Categorize by all actions for this enzyme
                                 for action in actions:
                                     if "substrate" in action.lower():
@@ -1269,7 +1426,7 @@ def get_mechanistic(drugA: str, drugB: str) -> Dict[str, Any]:
                                         enzymes_b["inhibitor"].append(cyp_canon)
                                     elif "inducer" in action.lower():
                                         enzymes_b["inducer"].append(cyp_canon)
-                                
+
                                 # If no actions specified, default to substrate
                                 if not actions:
                                     enzymes_b["substrate"].append(cyp_canon)
@@ -1277,17 +1434,27 @@ def get_mechanistic(drugA: str, drugB: str) -> Dict[str, Any]:
                         # Fallback to flat list (backward compatibility)
                         actions_list = db_enzymes_b.get("enzyme_actions", [])
                         for i, enzyme_name in enumerate(enzymes_list):
-                            cyp_match = re.search(r"(?i)(?:cyp|p\s*450)\s*(\d+[a-z]?\d*)", enzyme_name, re.I)
+                            cyp_match = re.search(
+                                r"(?i)(?:cyp|p\s*450)\s*(\d+[a-z]?\d*)",
+                                enzyme_name,
+                                re.I,
+                            )
                             if cyp_match:
                                 cyp_canon = f"cyp{cyp_match.group(1).lower()}"
-                                
+
                                 action = None
                                 if actions_list:
                                     if len(actions_list) < len(enzymes_list):
-                                        action = actions_list[0] if actions_list else None
+                                        action = (
+                                            actions_list[0] if actions_list else None
+                                        )
                                     else:
-                                        action = actions_list[i] if i < len(actions_list) else None
-                                
+                                        action = (
+                                            actions_list[i]
+                                            if i < len(actions_list)
+                                            else None
+                                        )
+
                                 if action:
                                     if "substrate" in action.lower():
                                         enzymes_b["substrate"].append(cyp_canon)
@@ -1299,18 +1466,23 @@ def get_mechanistic(drugA: str, drugB: str) -> Dict[str, Any]:
                                         enzymes_b["substrate"].append(cyp_canon)
                                 else:
                                     enzymes_b["substrate"].append(cyp_canon)
-                    
+
                     if any(enzymes_b.values()):
-                        LOG.info("Found %d enzymes from DrugBank for %s", len(enzymes_list), drugB)
+                        LOG.info(
+                            "Found %d enzymes from DrugBank for %s",
+                            len(enzymes_list),
+                            drugB,
+                        )
             except Exception as e:
                 LOG.warning("DrugBank enzyme query failed for %s: %s", drugB, e)
-        
+
         # Optional: ChEMBL enrichment (if enabled)
         # Note: ChEMBL can provide data even when DrugBank doesn't, so we check ChEMBL
         # regardless of whether enzymes were found from DrugBank/QLever
         if enable_chembl:
             try:
                 from src.retrieval import chembl_client as chembl
+
                 # Enrich after DrugBank fallback
                 # ChEMBL may have data even if DrugBank doesn't, so always try
                 if not chembl_data_a:  # Only query if not already set
@@ -1332,6 +1504,7 @@ def get_mechanistic(drugA: str, drugB: str) -> Dict[str, Any]:
             targets_a_dicts = _query_targets_for_cid(cid_a, limit=32, return_dicts=True)
             # ALWAYS enrich with PubChem REST API labels (not a fallback)
             from src.retrieval import pubchem_client as pc
+
             # Extract protein IDs from dicts
             protein_ids = []
             for t in targets_a_dicts:
@@ -1349,7 +1522,7 @@ def get_mechanistic(drugA: str, drugB: str) -> Dict[str, Any]:
                     protein_ids.append(pid)
                 else:
                     protein_ids.append(str(t))
-            
+
             if protein_ids:
                 try:
                     enriched_targets_a = pc.enrich_protein_ids(protein_ids)
@@ -1357,14 +1530,26 @@ def get_mechanistic(drugA: str, drugB: str) -> Dict[str, Any]:
                     for i, t in enumerate(targets_a_dicts):
                         if isinstance(t, dict) and i < len(enriched_targets_a):
                             enriched = enriched_targets_a[i]
-                            if enriched.get("label") and enriched["label"] != enriched["id"]:
+                            if (
+                                enriched.get("label")
+                                and enriched["label"] != enriched["id"]
+                            ):
                                 t["label"] = enriched["label"]
-                                LOG.debug("Enriched protein label: %s -> %s", enriched["id"], enriched["label"])
+                                LOG.debug(
+                                    "Enriched protein label: %s -> %s",
+                                    enriched["id"],
+                                    enriched["label"],
+                                )
                 except Exception as e:
-                    LOG.warning("PubChem protein label enrichment failed for %s: %s", drugA, e)
-            
+                    LOG.warning(
+                        "PubChem protein label enrichment failed for %s: %s", drugA, e
+                    )
+
             # Convert to strings for backward compatibility, but preserve label info
-            targets_a = [t.get("label", t.get("uri", "")) if isinstance(t, dict) else t for t in targets_a_dicts]
+            targets_a = [
+                t.get("label", t.get("uri", "")) if isinstance(t, dict) else t
+                for t in targets_a_dicts
+            ]
             if not targets_a:
                 LOG.debug("No target data found for %s (CID %s)", drugA, cid_a)
         except Exception as e:
@@ -1375,6 +1560,7 @@ def get_mechanistic(drugA: str, drugB: str) -> Dict[str, Any]:
             targets_b_dicts = _query_targets_for_cid(cid_b, limit=32, return_dicts=True)
             # ALWAYS enrich with PubChem REST API labels (not a fallback)
             from src.retrieval import pubchem_client as pc
+
             # Extract protein IDs from dicts
             protein_ids = []
             for t in targets_b_dicts:
@@ -1390,7 +1576,7 @@ def get_mechanistic(drugA: str, drugB: str) -> Dict[str, Any]:
                     protein_ids.append(pid)
                 else:
                     protein_ids.append(str(t))
-            
+
             if protein_ids:
                 try:
                     enriched_targets_b = pc.enrich_protein_ids(protein_ids)
@@ -1398,13 +1584,25 @@ def get_mechanistic(drugA: str, drugB: str) -> Dict[str, Any]:
                     for i, t in enumerate(targets_b_dicts):
                         if isinstance(t, dict) and i < len(enriched_targets_b):
                             enriched = enriched_targets_b[i]
-                            if enriched.get("label") and enriched["label"] != enriched["id"]:
+                            if (
+                                enriched.get("label")
+                                and enriched["label"] != enriched["id"]
+                            ):
                                 t["label"] = enriched["label"]
-                                LOG.debug("Enriched protein label: %s -> %s", enriched["id"], enriched["label"])
+                                LOG.debug(
+                                    "Enriched protein label: %s -> %s",
+                                    enriched["id"],
+                                    enriched["label"],
+                                )
                 except Exception as e:
-                    LOG.warning("PubChem protein label enrichment failed for %s: %s", drugB, e)
-            
-            targets_b = [t.get("label", t.get("uri", "")) if isinstance(t, dict) else t for t in targets_b_dicts]
+                    LOG.warning(
+                        "PubChem protein label enrichment failed for %s: %s", drugB, e
+                    )
+
+            targets_b = [
+                t.get("label", t.get("uri", "")) if isinstance(t, dict) else t
+                for t in targets_b_dicts
+            ]
             if not targets_b:
                 LOG.debug("No target data found for %s (CID %s)", drugB, cid_b)
         except Exception as e:
@@ -1436,31 +1634,52 @@ def get_mechanistic(drugA: str, drugB: str) -> Dict[str, Any]:
     pk_data_b = {}
     try:
         from src.retrieval import pubchem_client as pc
+
         # Get CID strings (remove "CID" prefix and URI parts if present)
         cid_a_str = None
         cid_b_str = None
         if cid_a:
-            cid_a_str = cid_a.replace("CID", "").replace("http://rdf.ncbi.nlm.nih.gov/pubchem/compound/", "").replace("/", "").strip()
+            cid_a_str = (
+                cid_a.replace("CID", "")
+                .replace("http://rdf.ncbi.nlm.nih.gov/pubchem/compound/", "")
+                .replace("/", "")
+                .strip()
+            )
         if cid_b:
-            cid_b_str = cid_b.replace("CID", "").replace("http://rdf.ncbi.nlm.nih.gov/pubchem/compound/", "").replace("/", "").strip()
-        
+            cid_b_str = (
+                cid_b.replace("CID", "")
+                .replace("http://rdf.ncbi.nlm.nih.gov/pubchem/compound/", "")
+                .replace("/", "")
+                .strip()
+            )
+
         if cid_a_str:
             try:
                 pk_data_a = pc.get_compound_pk_data(cid_a_str)
                 if pk_data_a and any(v is not None for v in pk_data_a.values()):
-                    LOG.info("Fetched PK data for %s (CID %s): %s", drugA, cid_a_str, [k for k, v in pk_data_a.items() if v is not None])
+                    LOG.info(
+                        "Fetched PK data for %s (CID %s): %s",
+                        drugA,
+                        cid_a_str,
+                        [k for k, v in pk_data_a.items() if v is not None],
+                    )
             except Exception as e:
                 LOG.debug("PubChem PK data fetch failed for %s: %s", drugA, e)
         if cid_b_str:
             try:
                 pk_data_b = pc.get_compound_pk_data(cid_b_str)
                 if pk_data_b and any(v is not None for v in pk_data_b.values()):
-                    LOG.info("Fetched PK data for %s (CID %s): %s", drugB, cid_b_str, [k for k, v in pk_data_b.items() if v is not None])
+                    LOG.info(
+                        "Fetched PK data for %s (CID %s): %s",
+                        drugB,
+                        cid_b_str,
+                        [k for k, v in pk_data_b.items() if v is not None],
+                    )
             except Exception as e:
                 LOG.debug("PubChem PK data fetch failed for %s: %s", drugB, e)
     except Exception as e:
         LOG.warning("PubChem client import failed: %s", e)
-    
+
     # Enhanced target enrichment with UniProt
     enriched_targets_a = targets_a
     enriched_targets_b = targets_b
@@ -1468,7 +1687,7 @@ def get_mechanistic(drugA: str, drugB: str) -> Dict[str, Any]:
     uniprot_ids_b = []  # Initialize for use in Reactome section
     uniprot_details_a = []
     uniprot_details_b = []
-    
+
     if enable_uniprot:
         try:
             from src.retrieval import uniprot_client as uc
@@ -1476,46 +1695,76 @@ def get_mechanistic(drugA: str, drugB: str) -> Dict[str, Any]:
             # Extract UniProt IDs from targets and enrich.
             for target in targets_a:
                 target_str = str(target)
-                uniprot_match = re.search(r"([PQO][0-9A-Z]{5})", target_str, re.IGNORECASE)
+                uniprot_match = re.search(
+                    r"([PQO][0-9A-Z]{5})", target_str, re.IGNORECASE
+                )
                 if uniprot_match:
                     uniprot_ids_a.append(uniprot_match.group(1).upper())
 
             for target in targets_b:
                 target_str = str(target)
-                uniprot_match = re.search(r"([PQO][0-9A-Z]{5})", target_str, re.IGNORECASE)
+                uniprot_match = re.search(
+                    r"([PQO][0-9A-Z]{5})", target_str, re.IGNORECASE
+                )
                 if uniprot_match:
                     uniprot_ids_b.append(uniprot_match.group(1).upper())
 
             if uniprot_ids_a:
                 enriched_a = uc.enrich_protein_list(uniprot_ids_a[:10])
                 uniprot_details_a = enriched_a
-                enriched_dict_a = {e["original_id"]: e.get("name", "") for e in enriched_a if e.get("name")}
+                enriched_dict_a = {
+                    e["original_id"]: e.get("name", "")
+                    for e in enriched_a
+                    if e.get("name")
+                }
                 enriched_targets_a = []
                 for target in targets_a:
                     target_str = str(target)
-                    uniprot_match = re.search(r"([PQO][0-9A-Z]{5})", target_str, re.IGNORECASE)
-                    if uniprot_match and uniprot_match.group(1).upper() in enriched_dict_a:
+                    uniprot_match = re.search(
+                        r"([PQO][0-9A-Z]{5})", target_str, re.IGNORECASE
+                    )
+                    if (
+                        uniprot_match
+                        and uniprot_match.group(1).upper() in enriched_dict_a
+                    ):
                         enriched_name = enriched_dict_a[uniprot_match.group(1).upper()]
-                        enriched_targets_a.append(f"{enriched_name} ({target_str})" if enriched_name else target_str)
+                        enriched_targets_a.append(
+                            f"{enriched_name} ({target_str})"
+                            if enriched_name
+                            else target_str
+                        )
                     else:
                         enriched_targets_a.append(target_str)
 
             if uniprot_ids_b:
                 enriched_b = uc.enrich_protein_list(uniprot_ids_b[:10])
                 uniprot_details_b = enriched_b
-                enriched_dict_b = {e["original_id"]: e.get("name", "") for e in enriched_b if e.get("name")}
+                enriched_dict_b = {
+                    e["original_id"]: e.get("name", "")
+                    for e in enriched_b
+                    if e.get("name")
+                }
                 enriched_targets_b = []
                 for target in targets_b:
                     target_str = str(target)
-                    uniprot_match = re.search(r"([PQO][0-9A-Z]{5})", target_str, re.IGNORECASE)
-                    if uniprot_match and uniprot_match.group(1).upper() in enriched_dict_b:
+                    uniprot_match = re.search(
+                        r"([PQO][0-9A-Z]{5})", target_str, re.IGNORECASE
+                    )
+                    if (
+                        uniprot_match
+                        and uniprot_match.group(1).upper() in enriched_dict_b
+                    ):
                         enriched_name = enriched_dict_b[uniprot_match.group(1).upper()]
-                        enriched_targets_b.append(f"{enriched_name} ({target_str})" if enriched_name else target_str)
+                        enriched_targets_b.append(
+                            f"{enriched_name} ({target_str})"
+                            if enriched_name
+                            else target_str
+                        )
                     else:
                         enriched_targets_b.append(target_str)
         except Exception as e:
             LOG.debug("UniProt target enrichment failed: %s", e)
-    
+
     # Get KEGG and Reactome pathways
     kegg_pathways_a = []
     kegg_pathways_b = []
@@ -1527,7 +1776,7 @@ def get_mechanistic(drugA: str, drugB: str) -> Dict[str, Any]:
     reactome_pathway_rows_a = []
     reactome_pathway_rows_b = []
     common_pathways_enhanced = []
-    
+
     try:
         if enable_kegg:
             from src.retrieval import kegg_client as kg
@@ -1535,20 +1784,32 @@ def get_mechanistic(drugA: str, drugB: str) -> Dict[str, Any]:
             # KEGG pathways
             try:
                 kegg_pathway_rows_a = kg.get_drug_pathways(drugA)
-                kegg_pathways_a = [p.get("pathway_name", "") for p in kegg_pathway_rows_a[:5] if p.get("pathway_name")]
+                kegg_pathways_a = [
+                    p.get("pathway_name", "")
+                    for p in kegg_pathway_rows_a[:5]
+                    if p.get("pathway_name")
+                ]
             except Exception as e:
                 LOG.debug("KEGG pathway query failed for %s: %s", drugA, e)
 
             try:
                 kegg_pathway_rows_b = kg.get_drug_pathways(drugB)
-                kegg_pathways_b = [p.get("pathway_name", "") for p in kegg_pathway_rows_b[:5] if p.get("pathway_name")]
+                kegg_pathways_b = [
+                    p.get("pathway_name", "")
+                    for p in kegg_pathway_rows_b[:5]
+                    if p.get("pathway_name")
+                ]
             except Exception as e:
                 LOG.debug("KEGG pathway query failed for %s: %s", drugB, e)
 
             # Common KEGG pathways
             try:
                 kegg_common_rows = kg.get_common_pathways(drugA, drugB)
-                common_pathways_enhanced = [p.get("pathway_name", "") for p in kegg_common_rows[:5] if p.get("pathway_name")]
+                common_pathways_enhanced = [
+                    p.get("pathway_name", "")
+                    for p in kegg_common_rows[:5]
+                    if p.get("pathway_name")
+                ]
             except Exception as e:
                 LOG.debug("KEGG common pathway query failed: %s", e)
 
@@ -1558,15 +1819,27 @@ def get_mechanistic(drugA: str, drugB: str) -> Dict[str, Any]:
             # Reactome pathways (using UniProt IDs from targets)
             if uniprot_ids_a:
                 try:
-                    reactome_pathway_rows_a = rc.get_common_pathways_for_proteins(uniprot_ids_a[:5])
-                    reactome_pathways_a = [p.get("pathway_name", "") for p in reactome_pathway_rows_a[:5] if p.get("pathway_name")]
+                    reactome_pathway_rows_a = rc.get_common_pathways_for_proteins(
+                        uniprot_ids_a[:5]
+                    )
+                    reactome_pathways_a = [
+                        p.get("pathway_name", "")
+                        for p in reactome_pathway_rows_a[:5]
+                        if p.get("pathway_name")
+                    ]
                 except Exception as e:
                     LOG.debug("Reactome pathway query failed for %s: %s", drugA, e)
 
             if uniprot_ids_b:
                 try:
-                    reactome_pathway_rows_b = rc.get_common_pathways_for_proteins(uniprot_ids_b[:5])
-                    reactome_pathways_b = [p.get("pathway_name", "") for p in reactome_pathway_rows_b[:5] if p.get("pathway_name")]
+                    reactome_pathway_rows_b = rc.get_common_pathways_for_proteins(
+                        uniprot_ids_b[:5]
+                    )
+                    reactome_pathways_b = [
+                        p.get("pathway_name", "")
+                        for p in reactome_pathway_rows_b[:5]
+                        if p.get("pathway_name")
+                    ]
                 except Exception as e:
                     LOG.debug("Reactome pathway query failed for %s: %s", drugB, e)
     except Exception as e:
@@ -1578,8 +1851,10 @@ def get_mechanistic(drugA: str, drugB: str) -> Dict[str, Any]:
         "targets_b": enriched_targets_b,  # Enhanced with UniProt names
         "diseases_a": diseases_a,
         "diseases_b": diseases_b,
-        "pathways_a": kegg_pathways_a + reactome_pathways_a,  # Enhanced with KEGG and Reactome
-        "pathways_b": kegg_pathways_b + reactome_pathways_b,  # Enhanced with KEGG and Reactome
+        "pathways_a": kegg_pathways_a
+        + reactome_pathways_a,  # Enhanced with KEGG and Reactome
+        "pathways_b": kegg_pathways_b
+        + reactome_pathways_b,  # Enhanced with KEGG and Reactome
         "common_pathways": common_pathways_enhanced,  # Enhanced with KEGG common pathways
         "ids_a": a_info.get("ids", {}),
         "ids_b": b_info.get("ids", {}),
@@ -1598,15 +1873,16 @@ def get_mechanistic(drugA: str, drugB: str) -> Dict[str, Any]:
         "reactome_pathways_b": reactome_pathway_rows_b[:5],
         "caveats": caveats if caveats else [],
     }
-    
+
     # Add ChEMBL enrichment if available
     if enable_chembl and (chembl_data_a or chembl_data_b):
         mech["chembl_enrichment"] = {
             "a": chembl_data_a,
             "b": chembl_data_b,
         }
-    
+
     return mech
+
 
 def get_mechanistic_enriched(
     drugA: str,
@@ -1644,5 +1920,7 @@ def get_mechanistic_enriched(
                 "Targets derived from BIO endpoints via RO:0000057; interpret as putative."
             )
     except Exception:
-        mech.setdefault("caveats", []).append("BIO enrichment failed; returning base schema.")
+        mech.setdefault("caveats", []).append(
+            "BIO enrichment failed; returning base schema."
+        )
     return mech

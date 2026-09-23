@@ -85,9 +85,10 @@ class TestExpandDrugPairQueries:
     def test_pair_expansion_with_synonyms(self):
         """Test pair expansion with synonyms."""
         result = expand_drug_pair_queries(
-            "warfarin", "aspirin",
+            "warfarin",
+            "aspirin",
             synonyms_a=["coumadin"],
-            synonyms_b=["acetylsalicylic acid"]
+            synonyms_b=["acetylsalicylic acid"],
         )
 
         assert "coumadin" in result["drug_a"]
@@ -218,7 +219,8 @@ class TestCreateExpandedQueryContext:
     def test_context_with_synonyms(self):
         """Test context with synonyms."""
         context = create_expanded_query_context(
-            "warfarin", "aspirin",
+            "warfarin",
+            "aspirin",
             synonyms_a=["coumadin"],
             synonyms_b=["acetylsalicylic acid"],
             semantic_searcher=self.MockSearcher(),
@@ -231,13 +233,17 @@ class TestCreateExpandedQueryContext:
     def test_context_with_semantic(self):
         """Test context with semantic searcher."""
         context = create_expanded_query_context(
-            "warfarin", "aspirin",
+            "warfarin",
+            "aspirin",
             semantic_searcher=self.MockSearcher(),
         )
 
         assert context["expansion_methods"]["semantic"] is True
         # Should include semantically similar drugs
-        assert "coumadin" in context["expanded"]["drug_a"] or "warfarin" in context["expanded"]["drug_a"]
+        assert (
+            "coumadin" in context["expanded"]["drug_a"]
+            or "warfarin" in context["expanded"]["drug_a"]
+        )
 
 
 class TestExpandWithSemanticSimilarity:
@@ -245,6 +251,7 @@ class TestExpandWithSemanticSimilarity:
 
     def test_basic_semantic_expansion(self):
         """Test basic semantic expansion."""
+
         class MockSearcher:
             def search_similar_drugs(self, query, top_k=3, threshold=0.7):
                 return [("coumadin", 0.9), ("jantoven", 0.8)]
@@ -263,6 +270,7 @@ class TestExpandWithSemanticSimilarity:
 
     def test_threshold_filtering(self):
         """Test that threshold filters low-similarity results."""
+
         class MockSearcher:
             def search_similar_drugs(self, query, top_k=3, threshold=0.7):
                 # Only return high similarity
@@ -277,6 +285,7 @@ class TestExpandWithSemanticSimilarity:
 
     def test_exception_handling(self):
         """Test exception handling in semantic expansion."""
+
         class FailingSearcher:
             def search_similar_drugs(self, query, top_k=3, threshold=0.7):
                 raise ValueError("Search failed")

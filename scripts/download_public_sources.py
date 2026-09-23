@@ -23,7 +23,9 @@ FDA_DDI_URL = (
     "https://www.fda.gov/drugs/drug-interactions-labeling/"
     "drug-development-and-drug-interactions-table-substrates-inhibitors-and-inducers"
 )
-REQUEST_HEADERS = {"User-Agent": "INFERMed research downloader (public-source cache warmer)"}
+REQUEST_HEADERS = {
+    "User-Agent": "INFERMed research downloader (public-source cache warmer)"
+}
 
 DEFAULT_DRUGS = [
     "warfarin",
@@ -40,17 +42,38 @@ DEFAULT_DRUGS = [
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Download public-safe reference data and warm API caches.")
-    parser.add_argument("--reference-dir", default="data/reference", help="Local directory for public reference snapshots.")
-    parser.add_argument("--drug", action="append", default=[], help="Drug name to warm; can be repeated.")
-    parser.add_argument("--pgx-url", default="", help="Optional verified FDA PGx page URL to snapshot.")
-    parser.add_argument("--skip-reference", action="store_true", help="Skip FDA reference page downloads.")
-    parser.add_argument("--skip-api-warm", action="store_true", help="Skip per-drug API cache warming.")
+    parser = argparse.ArgumentParser(
+        description="Download public-safe reference data and warm API caches."
+    )
+    parser.add_argument(
+        "--reference-dir",
+        default="data/reference",
+        help="Local directory for public reference snapshots.",
+    )
+    parser.add_argument(
+        "--drug",
+        action="append",
+        default=[],
+        help="Drug name to warm; can be repeated.",
+    )
+    parser.add_argument(
+        "--pgx-url", default="", help="Optional verified FDA PGx page URL to snapshot."
+    )
+    parser.add_argument(
+        "--skip-reference",
+        action="store_true",
+        help="Skip FDA reference page downloads.",
+    )
+    parser.add_argument(
+        "--skip-api-warm", action="store_true", help="Skip per-drug API cache warming."
+    )
     args = parser.parse_args(argv)
 
     reference_dir = Path(args.reference_dir)
     reference_dir.mkdir(parents=True, exist_ok=True)
-    drugs = list(dict.fromkeys([*(args.drug or []), *([] if args.drug else DEFAULT_DRUGS)]))
+    drugs = list(
+        dict.fromkeys([*(args.drug or []), *([] if args.drug else DEFAULT_DRUGS)])
+    )
 
     summary: dict[str, Any] = {
         "created_at": datetime.now(timezone.utc).isoformat(),
@@ -61,9 +84,13 @@ def main(argv: list[str] | None = None) -> int:
     }
 
     if not args.skip_reference:
-        summary["reference_downloads"]["fda_ddi_tables"] = download_fda_ddi_tables(reference_dir)
+        summary["reference_downloads"]["fda_ddi_tables"] = download_fda_ddi_tables(
+            reference_dir
+        )
         if args.pgx_url:
-            summary["reference_downloads"]["fda_pgx_page"] = download_optional_page(args.pgx_url, reference_dir / "fda_pgx_biomarkers.html")
+            summary["reference_downloads"]["fda_pgx_page"] = download_optional_page(
+                args.pgx_url, reference_dir / "fda_pgx_biomarkers.html"
+            )
 
     if not args.skip_api_warm:
         summary["api_warm"] = warm_public_api_caches(drugs)
@@ -88,17 +115,24 @@ def download_fda_ddi_tables(reference_dir: Path) -> dict[str, Any]:
             continue
         headers = table_rows[0]
         if not headers or len(set(headers)) < len(headers):
-            headers = [f"column_{i + 1}" for i in range(max(len(row) for row in table_rows))]
+            headers = [
+                f"column_{i + 1}" for i in range(max(len(row) for row in table_rows))
+            ]
             data_rows = table_rows
         else:
             data_rows = table_rows[1:]
         rows = []
         for raw_row in data_rows:
             row = {
-                headers[i] if i < len(headers) else f"column_{i + 1}": raw_row[i] if i < len(raw_row) else ""
+                headers[i] if i < len(headers) else f"column_{i + 1}": (
+                    raw_row[i] if i < len(raw_row) else ""
+                )
                 for i in range(max(len(headers), len(raw_row)))
             }
-            row = {str(key).strip(): " ".join(str(value).split()) for key, value in row.items()}
+            row = {
+                str(key).strip(): " ".join(str(value).split())
+                for key, value in row.items()
+            }
             if any(value for value in row.values()):
                 rows.append(row)
         if rows:
@@ -111,8 +145,15 @@ def download_fda_ddi_tables(reference_dir: Path) -> dict[str, Any]:
         "downloaded_at": datetime.now(timezone.utc).isoformat(),
         "tables": tables,
     }
-    json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    return {"ok": True, "html_path": str(html_path), "json_path": str(json_path), "table_count": len(tables)}
+    json_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    return {
+        "ok": True,
+        "html_path": str(html_path),
+        "json_path": str(json_path),
+        "table_count": len(tables),
+    }
 
 
 def _guess_table_title(html: str, index: int) -> str | None:
@@ -195,7 +236,9 @@ def warm_public_api_caches(drugs: list[str]) -> dict[str, Any]:
     for drug in drugs:
         item: dict[str, Any] = {}
         try:
-            item["rxnorm"] = _brief(rxnorm.resolve_drug(drug), fields=("resolved", "rxcui", "name"))
+            item["rxnorm"] = _brief(
+                rxnorm.resolve_drug(drug), fields=("resolved", "rxcui", "name")
+            )
         except Exception as exc:
             item["rxnorm"] = {"ok": False, "error": str(exc)}
         try:

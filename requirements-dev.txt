@@ -1,0 +1,2 @@
+# Development tools only; application dependencies remain in requirements.txt.
+black==26.5.1

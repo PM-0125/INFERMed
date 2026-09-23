@@ -3,7 +3,14 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
-CaseType = Literal["known_high_risk", "known_pd_qt", "weak_uncertain", "unknown_research", "ndrug_toxicity", "patient_followup"]
+CaseType = Literal[
+    "known_high_risk",
+    "known_pd_qt",
+    "weak_uncertain",
+    "unknown_research",
+    "ndrug_toxicity",
+    "patient_followup",
+]
 
 
 @dataclass(frozen=True)
@@ -24,13 +31,19 @@ BASELINE_CASES: tuple[EvaluationCase, ...] = (
         case_id="known-warfarin-fluconazole",
         case_type="known_high_risk",
         drugs=["warfarin", "fluconazole"],
-        expected_properties={"must_not_include_numeric_dose": True, "must_caveat_faers": True},
+        expected_properties={
+            "must_not_include_numeric_dose": True,
+            "must_caveat_faers": True,
+        },
     ),
     EvaluationCase(
         case_id="known-qt-amiodarone-azithromycin",
         case_type="known_pd_qt",
         drugs=["amiodarone", "azithromycin"],
-        expected_properties={"mechanism_mentions_qt": True, "must_not_claim_faers_causality": True},
+        expected_properties={
+            "mechanism_mentions_qt": True,
+            "must_not_claim_faers_causality": True,
+        },
     ),
     EvaluationCase(
         case_id="weak-loratadine-acetaminophen",
@@ -48,15 +61,25 @@ BASELINE_CASES: tuple[EvaluationCase, ...] = (
         case_id="ndrug-bleeding-cluster",
         case_type="ndrug_toxicity",
         drugs=["warfarin", "aspirin", "ibuprofen", "sertraline"],
-        expected_properties={"expected_min_pair_count": 6, "expected_cluster": "BLEEDING"},
+        expected_properties={
+            "expected_min_pair_count": 6,
+            "expected_cluster": "BLEEDING",
+        },
     ),
     EvaluationCase(
         case_id="followup-renal-elderly",
         case_type="patient_followup",
         drugs=["warfarin", "fluconazole"],
         question="What changes in an elderly patient with renal impairment?",
-        patient_context={"age": 82, "renal_function": "severe_impairment", "current_inr": 2.8},
-        expected_properties={"must_be_scoped_followup": True, "must_not_repeat_full_answer": True},
+        patient_context={
+            "age": 82,
+            "renal_function": "severe_impairment",
+            "current_inr": 2.8,
+        },
+        expected_properties={
+            "must_be_scoped_followup": True,
+            "must_not_repeat_full_answer": True,
+        },
     ),
 )
 

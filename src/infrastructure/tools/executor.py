@@ -10,7 +10,9 @@ from src.infrastructure.persistence.cache_store import SQLiteToolCacheStore
 class CachedToolExecutor:
     cache_store: SQLiteToolCacheStore
 
-    def execute(self, tool: SourceTool, tool_input: SourceToolInput, *, refresh: bool = False) -> SourceToolResult:
+    def execute(
+        self, tool: SourceTool, tool_input: SourceToolInput, *, refresh: bool = False
+    ) -> SourceToolResult:
         cache_key = self.cache_store.key_for(
             tool_name=tool_input.tool_name,
             tool_version=tool_input.source_version,

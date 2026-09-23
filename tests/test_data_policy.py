@@ -35,6 +35,13 @@ def test_required_public_enrichments_are_not_optional(monkeypatch):
     assert settings.enable_uniprot is True
 
     statuses = {s.name: s for s in get_source_status(settings)}
-    for source_name in ("PubChem PUG-REST", "PubChem PUG-View", "ChEMBL", "KEGG", "Reactome", "UniProt"):
+    for source_name in (
+        "PubChem PUG-REST",
+        "PubChem PUG-View",
+        "ChEMBL",
+        "KEGG",
+        "Reactome",
+        "UniProt",
+    ):
         assert statuses[source_name].enabled is True
         assert statuses[source_name].reason == "Required public enrichment"

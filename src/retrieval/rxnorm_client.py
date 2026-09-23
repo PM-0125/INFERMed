@@ -71,12 +71,16 @@ class RxNormClient:
         save_json(self.cache_dir, key, payload)
         return payload
 
-    def _request_json(self, path: str, params: dict[str, str] | None = None) -> dict[str, Any]:
+    def _request_json(
+        self, path: str, params: dict[str, str] | None = None
+    ) -> dict[str, Any]:
         url = f"{RXNAV_BASE}/{path.lstrip('/')}"
         for attempt in range(3):
             try:
                 time.sleep(RATE_LIMIT_SECONDS)
-                response = self._session.get(url, params=params or {}, timeout=self.timeout)
+                response = self._session.get(
+                    url, params=params or {}, timeout=self.timeout
+                )
                 if response.status_code == 200:
                     data = response.json()
                     return data if isinstance(data, dict) else {}
@@ -94,7 +98,7 @@ class RxNormClient:
     def _find_rxcui(self, drug_name: str) -> str | None:
         for params in ({"name": drug_name}, {"name": drug_name, "search": "1"}):
             data = self._request_json("rxcui.json", params)
-            ids = ((data.get("idGroup") or {}).get("rxnormId") or [])
+            ids = (data.get("idGroup") or {}).get("rxnormId") or []
             if ids:
                 return str(ids[0])
         return None
@@ -106,7 +110,7 @@ class RxNormClient:
 
     def _related_concepts(self, rxcui: str, *, tty: str) -> list[dict[str, str]]:
         data = self._request_json(f"rxcui/{rxcui}/related.json", {"tty": tty})
-        groups = ((data.get("relatedGroup") or {}).get("conceptGroup") or [])
+        groups = (data.get("relatedGroup") or {}).get("conceptGroup") or []
         concepts: list[dict[str, str]] = []
         for group in groups:
             for item in group.get("conceptProperties") or []:
@@ -128,7 +132,7 @@ class RxNormClient:
                 "rxclass/class/byRxcui.json",
                 {"rxcui": rxcui, "relaSource": source},
             )
-            rows = ((data.get("rxclassDrugInfoList") or {}).get("rxclassDrugInfo") or [])
+            rows = (data.get("rxclassDrugInfoList") or {}).get("rxclassDrugInfo") or []
             for row in rows:
                 if not isinstance(row, dict):
                     continue
@@ -144,10 +148,14 @@ class RxNormClient:
                 }
                 if record["class_name"]:
                     out.append(record)
-        return _dedupe_records(out, keys=("class_id", "class_name", "class_type", "relation", "source"))[:24]
+        return _dedupe_records(
+            out, keys=("class_id", "class_name", "class_type", "relation", "source")
+        )[:24]
 
 
-def _dedupe_records(rows: list[dict[str, str]], *, keys: tuple[str, ...]) -> list[dict[str, str]]:
+def _dedupe_records(
+    rows: list[dict[str, str]], *, keys: tuple[str, ...]
+) -> list[dict[str, str]]:
     seen: set[tuple[str, ...]] = set()
     out: list[dict[str, str]] = []
     for row in rows:

@@ -14,7 +14,7 @@ from src.utils.sqlite_cache import SQLiteCache
 
 # allow only safe chars in filenames; normalize to lowercase
 _SAFE = re.compile(r"[^a-z0-9._-]+")
-_source_policy = ContextVar('source_cache_policy', default=(False, None))
+_source_policy = ContextVar("source_cache_policy", default=(False, None))
 
 
 @contextmanager
@@ -31,13 +31,16 @@ def _effective_ttl(ttl):
     _, max_age = _source_policy.get()
     return ttl if max_age is None else min(ttl, max_age) if ttl is not None else max_age
 
+
 def sanitize_key(key: str) -> str:
     return _SAFE.sub("_", key.lower())
+
 
 def ensure_dir(root: str | Path) -> Path:
     root = Path(root)
     root.mkdir(parents=True, exist_ok=True)
     return root
+
 
 def cache_file_path(root: str | Path, key: str, ext: str = "json") -> Path:
     root = ensure_dir(root)
@@ -68,9 +71,13 @@ def _sqlite_cache() -> SQLiteCache | None:
     enabled, path = _sqlite_cache_config()
     return SQLiteCache(path) if enabled else None
 
+
 # -------- JSON --------
 
-def load_json(root: str | Path, key: str, *, ttl: Optional[int] = None, ext: str = "json") -> Optional[dict]:
+
+def load_json(
+    root: str | Path, key: str, *, ttl: Optional[int] = None, ext: str = "json"
+) -> Optional[dict]:
     """
     Load JSON from cache, optionally enforcing a TTL (in seconds).
     Returns None on cache miss, expired entry, or corrupt JSON (corrupt file is removed).
@@ -101,6 +108,7 @@ def load_json(root: str | Path, key: str, *, ttl: Optional[int] = None, ext: str
             pass
         return None
 
+
 def save_json(root: str | Path, key: str, obj: Any, *, ext: str = "json") -> Path:
     """
     Atomically write JSON to cache (write to .tmp then os.replace).
@@ -122,9 +130,13 @@ def save_json(root: str | Path, key: str, obj: Any, *, ext: str = "json") -> Pat
     os.replace(tmp, p)
     return p
 
+
 # -------- TEXT (for small summaries or blobs) --------
 
-def load_text(root: str | Path, key: str, *, ttl: Optional[int] = None, ext: str = "json") -> Optional[str]:
+
+def load_text(
+    root: str | Path, key: str, *, ttl: Optional[int] = None, ext: str = "json"
+) -> Optional[str]:
     if _source_policy.get()[0]:
         return None
     ttl = _effective_ttl(ttl)
@@ -149,6 +161,7 @@ def load_text(root: str | Path, key: str, *, ttl: Optional[int] = None, ext: str
         except Exception:
             pass
         return None
+
 
 def save_text(root: str | Path, key: str, text: str, *, ext: str = "json") -> Path:
     sqlite_cache = _sqlite_cache()

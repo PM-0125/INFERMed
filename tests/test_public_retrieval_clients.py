@@ -34,14 +34,28 @@ def test_rxnorm_client_normalizes_identity_and_classes(monkeypatch, tmp_path):
         if url.endswith("/rxcui.json"):
             return FakeResponse(200, {"idGroup": {"rxnormId": ["11289"]}})
         if url.endswith("/rxcui/11289/properties.json"):
-            return FakeResponse(200, {"properties": {"rxcui": "11289", "name": "warfarin", "tty": "IN", "synonym": ""}})
+            return FakeResponse(
+                200,
+                {
+                    "properties": {
+                        "rxcui": "11289",
+                        "name": "warfarin",
+                        "tty": "IN",
+                        "synonym": "",
+                    }
+                },
+            )
         if url.endswith("/rxcui/11289/related.json"):
             return FakeResponse(
                 200,
                 {
                     "relatedGroup": {
                         "conceptGroup": [
-                            {"conceptProperties": [{"rxcui": "11289", "name": "warfarin", "tty": "IN"}]}
+                            {
+                                "conceptProperties": [
+                                    {"rxcui": "11289", "name": "warfarin", "tty": "IN"}
+                                ]
+                            }
                         ]
                     }
                 },
@@ -284,7 +298,11 @@ def test_open_targets_client_normalizes_search_hits(monkeypatch, tmp_path):
 
 def test_fda_pgx_client_matches_page_snippets(monkeypatch, tmp_path):
     def fake_get(url, timeout=None):
-        return FakeResponse(200, {}, text="<html><body>Warfarin CYP2C9 VKORC1 labeling biomarker table.</body></html>")
+        return FakeResponse(
+            200,
+            {},
+            text="<html><body>Warfarin CYP2C9 VKORC1 labeling biomarker table.</body></html>",
+        )
 
     client = FDAPGxClient(cache_dir=str(tmp_path))
     monkeypatch.setattr(client._session, "get", fake_get)

@@ -1,6 +1,12 @@
-from src.application.use_cases.answer_followup import AnswerFollowUpCommand, AnswerFollowUpUseCase
+from src.application.use_cases.answer_followup import (
+    AnswerFollowUpCommand,
+    AnswerFollowUpUseCase,
+)
 from src.application.source_tools import SourceToolInput, SourceToolResult
-from src.domain.decision.rules import missing_patient_factors_for_decision, patient_amplifiers
+from src.domain.decision.rules import (
+    missing_patient_factors_for_decision,
+    patient_amplifiers,
+)
 from src.domain.decision.scoring import score_pair_context
 from src.domain.evidence.entities import EvidenceCard
 from src.domain.evidence.hierarchy import rank_evidence_cards, strongest_evidence_grade
@@ -57,7 +63,10 @@ def test_decision_scoring_and_mechanism_engines_are_domain_owned():
         },
         "pkpd": {
             "pk_summary": "inhibits CYP2C9",
-            "pk_detail": {"canonical_interaction": {"rule": "x"}, "overlaps": {"inhibition": ["CYP2C9"]}},
+            "pk_detail": {
+                "canonical_interaction": {"rule": "x"},
+                "overlaps": {"inhibition": ["CYP2C9"]},
+            },
             "pd_detail": {"overlap_targets": ["PTGS1"]},
         },
     }
@@ -83,7 +92,9 @@ def test_explanation_verifier_returns_structured_grounding_report():
         confidence="high",
         evidence_grade="mechanistic",
     )
-    report = SafetyReport(analysis_id="ana_1", allow_generation=True, requires_review=False)
+    report = SafetyReport(
+        analysis_id="ana_1", allow_generation=True, requires_review=False
+    )
 
     verification = ExplanationVerifier().verify(
         answer_text="Monitor closely.",
@@ -99,8 +110,16 @@ def test_explanation_verifier_returns_structured_grounding_report():
 
 def test_sqlite_tool_cache_uses_semantic_stable_keys(tmp_path):
     store = SQLiteToolCacheStore(tmp_path / "cache.sqlite")
-    key_a = store.key_for(tool_name="fetch_pubchem_compound", tool_version="1", input_payload={"drug": "warfarin"})
-    key_b = store.key_for(tool_name="fetch_pubchem_compound", tool_version="1", input_payload={"drug": "warfarin"})
+    key_a = store.key_for(
+        tool_name="fetch_pubchem_compound",
+        tool_version="1",
+        input_payload={"drug": "warfarin"},
+    )
+    key_b = store.key_for(
+        tool_name="fetch_pubchem_compound",
+        tool_version="1",
+        input_payload={"drug": "warfarin"},
+    )
 
     store.put(
         cache_key=key_a,
@@ -200,29 +219,43 @@ def test_reasoning_and_research_summaries_expose_clusters_gaps_and_research_sign
         }
     }
 
-    summary = MedicationSetReasoner().summarize(
-        drugs=["a", "b", "c"],
-        pair_summaries=[
-            {"pair": ["a", "b"], "risk_level": "moderate"},
-            {"pair": ["a", "c"], "risk_level": "major"},
-        ],
-        mechanism_graph=graph,
-        profile_graph=profile,
-        reasoning_record=record,
-    ).to_dict()
+    summary = (
+        MedicationSetReasoner()
+        .summarize(
+            drugs=["a", "b", "c"],
+            pair_summaries=[
+                {"pair": ["a", "b"], "risk_level": "moderate"},
+                {"pair": ["a", "c"], "risk_level": "major"},
+            ],
+            mechanism_graph=graph,
+            profile_graph=profile,
+            reasoning_record=record,
+        )
+        .to_dict()
+    )
     signals = ResearchHypothesisBuilder().build(context=context, profile_graph=profile)
 
     assert summary["pair_count"] == 2
     assert summary["top_pairs"][0]["pair"] == ["a", "c"]
     assert summary["clusters"][0]["risk_type"] == "toxicity"
     assert summary["hypotheses"][0]["support_level"] == "insufficient"
-    assert {signal.signal_type for signal in signals} >= {"literature", "protein_network", "experimental_combo", "evidence_gap"}
+    assert {signal.signal_type for signal in signals} >= {
+        "literature",
+        "protein_network",
+        "experimental_combo",
+        "evidence_gap",
+    }
 
 
 def test_followup_use_case_prefers_analysis_snapshot():
     class SnapshotStore:
         def get_analysis_snapshot(self, analysis_id):
-            return {"context": {"meta": {"analysis_id": analysis_id}, "drugs": {"a": {"name": "a"}, "b": {"name": "b"}}}}
+            return {
+                "context": {
+                    "meta": {"analysis_id": analysis_id},
+                    "drugs": {"a": {"name": "a"}, "b": {"name": "b"}},
+                }
+            }
 
     calls = {"context_runner": 0}
 
@@ -240,7 +273,9 @@ def test_followup_use_case_prefers_analysis_snapshot():
         snapshot_store=SnapshotStore(),
     )
     answer = use_case.execute(
-        AnswerFollowUpCommand(question="What changes?", drugs=["a", "b"], context_id="ana_1")
+        AnswerFollowUpCommand(
+            question="What changes?", drugs=["a", "b"], context_id="ana_1"
+        )
     )
 
     assert answer.answer == "Scoped to ana_1"
@@ -251,7 +286,9 @@ def test_followup_use_case_prefers_analysis_snapshot():
 def test_followup_use_case_compacts_repeated_answer_and_adds_patient_context():
     class SnapshotStore:
         def get_analysis_snapshot(self, analysis_id):
-            return {"context": {"meta": {"analysis_id": analysis_id}, "medication_set": {}}}
+            return {
+                "context": {"meta": {"analysis_id": analysis_id}, "medication_set": {}}
+            }
 
     seen_context = {}
 
@@ -282,10 +319,15 @@ def test_followup_use_case_compacts_repeated_answer_and_adds_patient_context():
 
     assert "Bottom Line" not in answer.answer
     assert "Direct Answer" in answer.answer
-    assert seen_context["medication_set"]["patient_context"]["renal_function"] == "severe_impairment"
+    assert (
+        seen_context["medication_set"]["patient_context"]["renal_function"]
+        == "severe_impairment"
+    )
 
 
-def _card(evidence_id: str, source: str, grade: str, *, claim_type: str = "claim") -> EvidenceCard:
+def _card(
+    evidence_id: str, source: str, grade: str, *, claim_type: str = "claim"
+) -> EvidenceCard:
     return EvidenceCard(
         evidence_id=f"ev_{evidence_id}",
         analysis_id="ana_1",

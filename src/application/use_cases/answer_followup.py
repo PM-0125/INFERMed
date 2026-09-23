@@ -4,7 +4,11 @@ from dataclasses import asdict, dataclass, field
 from itertools import combinations
 from typing import Any, Callable
 
-from src.application.ports import AnalysisSnapshotStore, FollowUpGenerator, PairContextRunner
+from src.application.ports import (
+    AnalysisSnapshotStore,
+    FollowUpGenerator,
+    PairContextRunner,
+)
 from src.application.use_cases.analyze_medication_set import (
     PairContextResult,
     build_medication_set_context_from_pair_results,
@@ -65,7 +69,9 @@ class AnswerFollowUpUseCase:
 
     def execute(self, command: AnswerFollowUpCommand) -> FollowUpAnswer:
         if command.follow_up_count >= 3:
-            raise ValueError("Follow-up limit reached for this interaction. Start a new analysis to continue.")
+            raise ValueError(
+                "Follow-up limit reached for this interaction. Start a new analysis to continue."
+            )
         context, context_source = self._context_for_followup(command)
         if command.patient_context:
             context = _context_with_patient_context(context, command.patient_context)
@@ -84,13 +90,17 @@ class AnswerFollowUpUseCase:
             follow_up_count=command.follow_up_count + 1,
         )
         return FollowUpAnswer(
-            answer=_compact_scoped_followup(str(answer.get("text") or "").strip() or "No answer was generated."),
+            answer=_compact_scoped_followup(
+                str(answer.get("text") or "").strip() or "No answer was generated."
+            ),
             cited_cards=self.cited_cards_from_context(context),
             session=session,
             context_source=context_source,
         )
 
-    def _context_for_followup(self, command: AnswerFollowUpCommand) -> tuple[dict[str, Any], str]:
+    def _context_for_followup(
+        self, command: AnswerFollowUpCommand
+    ) -> tuple[dict[str, Any], str]:
         snapshot = self._snapshot_for_context_id(command.context_id)
         if snapshot and isinstance(snapshot.get("context"), dict):
             return snapshot["context"], "analysis_snapshot"
@@ -104,8 +114,17 @@ class AnswerFollowUpUseCase:
         for pair in combinations(drugs, 2):
             context = self.context_runner(pair[0], pair[1])
             cards = evidence_cards_from_context(str(analysis_id), context, list(pair))
-            decision = decision_from_context(str(analysis_id), context, cards, list(pair))
-            pair_results.append(PairContextResult(pair=(pair[0], pair[1]), context=context, evidence_cards=cards, decision=decision))
+            decision = decision_from_context(
+                str(analysis_id), context, cards, list(pair)
+            )
+            pair_results.append(
+                PairContextResult(
+                    pair=(pair[0], pair[1]),
+                    context=context,
+                    evidence_cards=cards,
+                    decision=decision,
+                )
+            )
         return (
             build_medication_set_context_from_pair_results(
                 analysis_id=str(analysis_id),
@@ -122,7 +141,9 @@ class AnswerFollowUpUseCase:
         return self.snapshot_store.get_analysis_snapshot(context_id)
 
 
-def _context_with_patient_context(context: dict[str, Any], patient_context: dict[str, Any]) -> dict[str, Any]:
+def _context_with_patient_context(
+    context: dict[str, Any], patient_context: dict[str, Any]
+) -> dict[str, Any]:
     out = dict(context)
     medset = dict(out.get("medication_set") or {})
     medset["patient_context"] = patient_context
@@ -131,7 +152,13 @@ def _context_with_patient_context(context: dict[str, Any], patient_context: dict
 
 
 def _compact_scoped_followup(answer: str) -> str:
-    prohibited = ("## Bottom Line", "## Interaction Mechanism", "## Clinical Concern", "## Monitoring & Actions", "## Evidence Limitations")
+    prohibited = (
+        "## Bottom Line",
+        "## Interaction Mechanism",
+        "## Clinical Concern",
+        "## Monitoring & Actions",
+        "## Evidence Limitations",
+    )
     if not any(section in answer for section in prohibited):
         return answer
     keep: list[str] = []

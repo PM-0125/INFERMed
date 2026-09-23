@@ -27,5 +27,4 @@ class LLMResponse:
 
 
 class LLMProvider(Protocol):
-    def generate(self, request: LLMRequest) -> LLMResponse:
-        ...
+    def generate(self, request: LLMRequest) -> LLMResponse: ...

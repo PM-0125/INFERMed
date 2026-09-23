@@ -6,7 +6,11 @@ import json
 import hashlib
 import logging
 import re
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout, as_completed
+from concurrent.futures import (
+    ThreadPoolExecutor,
+    TimeoutError as FuturesTimeout,
+    as_completed,
+)
 from contextvars import copy_context
 import time
 import tempfile
@@ -24,7 +28,9 @@ from src.config.settings import get_settings
 # Retrieval modules
 from src.retrieval import duckdb_query as dq
 from src.retrieval.openfda_api import OpenFDAClient
-from src.retrieval import qlever_query as ql  # may expose get_mechanistic_enriched / get_mechanistic
+from src.retrieval import (
+    qlever_query as ql,
+)  # may expose get_mechanistic_enriched / get_mechanistic
 from src.retrieval.semantic_search import get_semantic_searcher, SemanticSearcher
 
 # PK/PD synthesis utilities
@@ -50,7 +56,10 @@ from src.retrieval.hybrid_search import hybrid_search_drugs, adaptive_hybrid_sea
 from src.utils.adaptive_retrieval import adaptive_retrieve, calculate_result_quality
 from src.utils.reranking import get_reranker
 from src.utils.feedback_loops import get_feedback_tracker
-from src.utils.context_filtering import filter_context_by_relevance, filter_context_sections
+from src.utils.context_filtering import (
+    filter_context_by_relevance,
+    filter_context_sections,
+)
 
 # LLM interface
 from src.llm.llm_interface import generate_response, MODEL_NAME as LLM_MODEL_NAME
@@ -73,10 +82,10 @@ VERSION = 12  # bump when schema/logic changes to invalidate old cached contexts
 #            PubChem PK data, target enrichment, pathway enhancements
 
 CACHE_DIR = os.path.join("data", "cache")
-CTX_DIR   = os.path.join(CACHE_DIR, "contexts")
+CTX_DIR = os.path.join(CACHE_DIR, "contexts")
 # Legacy path retained for external callers that may still monkeypatch/import it.
 # New LLM response text is not written to disk.
-RESP_DIR  = os.path.join(CACHE_DIR, "responses")
+RESP_DIR = os.path.join(CACHE_DIR, "responses")
 os.makedirs(CTX_DIR, exist_ok=True)
 
 
@@ -133,9 +142,13 @@ def _context_cache_version_ok(ctx: Dict[str, Any]) -> bool:
 
 
 def _context_cache_fresh(ctx, path):
-    stamp = (ctx.get('meta') or {}).get('evidence_assembled_at')
+    stamp = (ctx.get("meta") or {}).get("evidence_assembled_at")
     try:
-        created = datetime.fromisoformat(stamp).timestamp() if stamp else os.path.getmtime(path)
+        created = (
+            datetime.fromisoformat(stamp).timestamp()
+            if stamp
+            else os.path.getmtime(path)
+        )
         age = time.time() - created
         return 0 <= age < max(0, get_settings().evidence_cache_ttl_hours) * 3600
     except (OSError, ValueError, TypeError):
@@ -143,13 +156,18 @@ def _context_cache_fresh(ctx, path):
 
 
 def _cached_context(ctx, path):
-    meta = ctx.setdefault('meta', {})
-    meta.setdefault('evidence_assembled_at', datetime.fromtimestamp(os.path.getmtime(path), timezone.utc).isoformat())
-    meta['evidence_cache_status'] = 'cached'
+    meta = ctx.setdefault("meta", {})
+    meta.setdefault(
+        "evidence_assembled_at",
+        datetime.fromtimestamp(os.path.getmtime(path), timezone.utc).isoformat(),
+    )
+    meta["evidence_cache_status"] = "cached"
     return ctx
 
 
-def _find_context_cache_by_pair(drugA: str, drugB: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+def _find_context_cache_by_pair(
+    drugA: str, drugB: str
+) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     pair_key = _pair_key(drugA, drugB)
     if not os.path.isdir(CTX_DIR):
         return None, None
@@ -163,7 +181,11 @@ def _find_context_cache_by_pair(drugA: str, drugB: str) -> Tuple[Optional[Dict[s
         except Exception:
             continue
         meta = ctx.get("meta") or {}
-        if meta.get("pair_key") == pair_key and _context_cache_version_ok(ctx) and _context_cache_fresh(ctx, path):
+        if (
+            meta.get("pair_key") == pair_key
+            and _context_cache_version_ok(ctx)
+            and _context_cache_fresh(ctx, path)
+        ):
             return _cached_context(ctx, path), os.path.splitext(name)[0]
     return None, None
 
@@ -184,22 +206,30 @@ def _jsonify_sets(obj):
 def _to_pairs_list(x):
     """Normalize a list of (term, count) tuples to JSON-stable [[term, count], ...]."""
     out = []
-    for t in (x or []):
+    for t in x or []:
         if isinstance(t, (list, tuple)) and len(t) == 2:
             out.append([t[0], t[1]])
     return out
 
 
 # ----------------- retrieval helpers -----------------
-def _qlever_disabled_stub(reason: str = "QLever RDF disabled for NVIDIA demo runtime.") -> Dict[str, Any]:
+def _qlever_disabled_stub(
+    reason: str = "QLever RDF disabled for NVIDIA demo runtime.",
+) -> Dict[str, Any]:
     return {
-        "enzymes": {"a": {"substrate": [], "inhibitor": [], "inducer": []},
-                    "b": {"substrate": [], "inhibitor": [], "inducer": []}},
-        "targets_a": [], "targets_b": [],
-        "pathways_a": [], "pathways_b": [],
+        "enzymes": {
+            "a": {"substrate": [], "inhibitor": [], "inducer": []},
+            "b": {"substrate": [], "inhibitor": [], "inducer": []},
+        },
+        "targets_a": [],
+        "targets_b": [],
+        "pathways_a": [],
+        "pathways_b": [],
         "common_pathways": [],
-        "ids_a": {}, "ids_b": {},
-        "synonyms_a": [], "synonyms_b": [],
+        "ids_a": {},
+        "ids_b": {},
+        "synonyms_a": [],
+        "synonyms_b": [],
         "caveats": [reason],
     }
 
@@ -229,14 +259,22 @@ def _get_qlever_mechanistic_or_stub(drugA: str, drugB: str) -> Dict[str, Any]:
 
     # Finally stub
     return {
-        "enzymes": {"a": {"substrate": [], "inhibitor": [], "inducer": []},
-                    "b": {"substrate": [], "inhibitor": [], "inducer": []}},
-        "targets_a": [], "targets_b": [],
-        "pathways_a": [], "pathways_b": [],
+        "enzymes": {
+            "a": {"substrate": [], "inhibitor": [], "inducer": []},
+            "b": {"substrate": [], "inhibitor": [], "inducer": []},
+        },
+        "targets_a": [],
+        "targets_b": [],
+        "pathways_a": [],
+        "pathways_b": [],
         "common_pathways": [],
-        "ids_a": {}, "ids_b": {},
-        "synonyms_a": [], "synonyms_b": [],
-        "caveats": ["QLever mechanistic unavailable; using DuckDB DrugBank targets as PD fallback."],
+        "ids_a": {},
+        "ids_b": {},
+        "synonyms_a": [],
+        "synonyms_b": [],
+        "caveats": [
+            "QLever mechanistic unavailable; using DuckDB DrugBank targets as PD fallback."
+        ],
     }
 
 
@@ -277,7 +315,9 @@ def _text_value(value: Any) -> str:
     return str(value).strip()
 
 
-def _append_unique(existing: Any, additions: Any, *, limit: Optional[int] = None) -> List[str]:
+def _append_unique(
+    existing: Any, additions: Any, *, limit: Optional[int] = None
+) -> List[str]:
     out: List[str] = []
     seen = set()
     for value in _iter_list(existing) + _iter_list(additions):
@@ -308,13 +348,21 @@ def _normalize_chembl_side(value: Any) -> Dict[str, Any]:
         return out
 
     out.update(dict(value))
-    strengths = value.get("enzyme_strength") if isinstance(value.get("enzyme_strength"), Mapping) else {}
+    strengths = (
+        value.get("enzyme_strength")
+        if isinstance(value.get("enzyme_strength"), Mapping)
+        else {}
+    )
     out["enzyme_strength"] = {
         "strong": _append_unique([], strengths.get("strong")),
         "moderate": _append_unique([], strengths.get("moderate")),
         "weak": _append_unique([], strengths.get("weak")),
     }
-    validation = value.get("chembl_validation") if isinstance(value.get("chembl_validation"), Mapping) else {}
+    validation = (
+        value.get("chembl_validation")
+        if isinstance(value.get("chembl_validation"), Mapping)
+        else {}
+    )
     out["chembl_validation"] = {
         **dict(validation),
         "found": bool(validation.get("found")),
@@ -379,7 +427,9 @@ def _ensure_enrichment_schema(mech: Dict[str, Any]) -> Dict[str, Any]:
         if not isinstance(mech.get(key), list):
             mech[key] = _iter_list(mech.get(key))
 
-    mech["chembl_enrichment"] = _normalize_chembl_enrichment(mech.get("chembl_enrichment"))
+    mech["chembl_enrichment"] = _normalize_chembl_enrichment(
+        mech.get("chembl_enrichment")
+    )
     return mech
 
 
@@ -404,8 +454,12 @@ def _run_parallel_source_tasks(
 
     results: Dict[str, Any] = {}
     worker_count = max(1, min(max_workers, len(tasks)))
-    executor = ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="infermed-source")
-    futures = {executor.submit(copy_context().run, fn): name for name, fn in tasks.items()}
+    executor = ThreadPoolExecutor(
+        max_workers=worker_count, thread_name_prefix="infermed-source"
+    )
+    futures = {
+        executor.submit(copy_context().run, fn): name for name, fn in tasks.items()
+    }
 
     try:
         for future in as_completed(futures, timeout=max(0.1, timeout_s)):
@@ -435,7 +489,12 @@ def _pathway_names(rows: Any) -> List[str]:
     for row in rows or []:
         if isinstance(row, dict):
             name = row.get("pathway_name") or row.get("name") or row.get("displayName")
-            pathway_id = row.get("pathway_id") or row.get("id") or row.get("stId") or row.get("dbId")
+            pathway_id = (
+                row.get("pathway_id")
+                or row.get("id")
+                or row.get("stId")
+                or row.get("dbId")
+            )
             if name:
                 out.append(str(name))
             elif pathway_id:
@@ -475,10 +534,14 @@ def _merge_chembl_inhibitors(mech: Dict[str, Any], enrichment: Dict[str, Any]) -
             inhibitors.extend(strengths.get(strength) or [])
         if inhibitors:
             side_roles = enzymes.setdefault(side, {})
-            side_roles["inhibitor"] = _append_unique(side_roles.get("inhibitor"), inhibitors)
+            side_roles["inhibitor"] = _append_unique(
+                side_roles.get("inhibitor"), inhibitors
+            )
 
 
-_UNIPROT_ACCESSION = re.compile(r"\b[OPQ][0-9][A-Z0-9]{3}[0-9]\b|\b[A-NR-Z][0-9][A-Z][A-Z0-9]{2}[0-9]\b", re.I)
+_UNIPROT_ACCESSION = re.compile(
+    r"\b[OPQ][0-9][A-Z0-9]{3}[0-9]\b|\b[A-NR-Z][0-9][A-Z][A-Z0-9]{2}[0-9]\b", re.I
+)
 
 
 def _record_key(value: Any) -> str:
@@ -502,7 +565,9 @@ def _record_key(value: Any) -> str:
     return _text_value(value).lower()
 
 
-def _merge_records(existing: Any, additions: Any, *, limit: Optional[int] = None) -> List[Any]:
+def _merge_records(
+    existing: Any, additions: Any, *, limit: Optional[int] = None
+) -> List[Any]:
     out: List[Any] = []
     seen = set()
     for item in _iter_list(existing) + _iter_list(additions):
@@ -526,7 +591,9 @@ def _extract_uniprot_accessions(values: Any) -> List[str]:
                     accessions.append(text)
         else:
             text = str(item or "")
-            accessions.extend(match.group(0).upper() for match in _UNIPROT_ACCESSION.finditer(text))
+            accessions.extend(
+                match.group(0).upper() for match in _UNIPROT_ACCESSION.finditer(text)
+            )
     return _append_unique([], accessions)
 
 
@@ -580,6 +647,7 @@ def _enrich_mechanistic_with_public_rest(
 
     phase_tasks: Dict[str, Callable[[], Any]] = {}
     if settings.enable_pubchem_rest:
+
         def _pubchem_rest() -> Dict[str, Any]:
             from src.retrieval import pubchem_client as pc
 
@@ -605,6 +673,7 @@ def _enrich_mechanistic_with_public_rest(
         phase_tasks["PubChem REST API"] = _pubchem_rest
 
     if settings.enable_kegg:
+
         def _kegg_rest() -> Dict[str, Any]:
             from src.retrieval import kegg_client as kg
 
@@ -619,15 +688,20 @@ def _enrich_mechanistic_with_public_rest(
         phase_tasks["KEGG REST API"] = _kegg_rest
 
     if settings.enable_chembl:
+
         def _chembl_rest() -> Dict[str, Any]:
             from src.retrieval import chembl_client as chembl
 
             enzymes = mech.get("enzymes") or {}
             enrichment = _normalize_chembl_enrichment(mech.get("chembl_enrichment"))
             if not _chembl_side_has_content(enrichment.get("a")):
-                enrichment["a"] = _normalize_chembl_side(chembl.enrich_mechanistic_data(drugA, enzymes.get("a", {}) or {}))
+                enrichment["a"] = _normalize_chembl_side(
+                    chembl.enrich_mechanistic_data(drugA, enzymes.get("a", {}) or {})
+                )
             if not _chembl_side_has_content(enrichment.get("b")):
-                enrichment["b"] = _normalize_chembl_side(chembl.enrich_mechanistic_data(drugB, enzymes.get("b", {}) or {}))
+                enrichment["b"] = _normalize_chembl_side(
+                    chembl.enrich_mechanistic_data(drugB, enzymes.get("b", {}) or {})
+                )
             return enrichment
 
         phase_tasks["ChEMBL REST API"] = _chembl_rest
@@ -658,21 +732,31 @@ def _enrich_mechanistic_with_public_rest(
     kegg_enzymes_b = kegg.get("enzymes_b") or []
     if kegg_pathways_a:
         mech["kegg_pathways_a"] = kegg_pathways_a[:5]
-        mech["pathways_a"] = _append_unique(mech.get("pathways_a"), _pathway_names(kegg_pathways_a), limit=24)
+        mech["pathways_a"] = _append_unique(
+            mech.get("pathways_a"), _pathway_names(kegg_pathways_a), limit=24
+        )
     if kegg_pathways_b:
         mech["kegg_pathways_b"] = kegg_pathways_b[:5]
-        mech["pathways_b"] = _append_unique(mech.get("pathways_b"), _pathway_names(kegg_pathways_b), limit=24)
+        mech["pathways_b"] = _append_unique(
+            mech.get("pathways_b"), _pathway_names(kegg_pathways_b), limit=24
+        )
     if kegg_common:
         mech["kegg_common_pathways"] = kegg_common[:5]
-        mech["common_pathways"] = _append_unique(mech.get("common_pathways"), _pathway_names(kegg_common), limit=24)
+        mech["common_pathways"] = _append_unique(
+            mech.get("common_pathways"), _pathway_names(kegg_common), limit=24
+        )
     if kegg_enzymes_a:
         mech["kegg_enzymes_a"] = kegg_enzymes_a[:8]
         side_roles = mech["enzymes"].setdefault("a", {})
-        side_roles["substrate"] = _append_unique(side_roles.get("substrate"), _enzyme_tokens_from_kegg(kegg_enzymes_a))
+        side_roles["substrate"] = _append_unique(
+            side_roles.get("substrate"), _enzyme_tokens_from_kegg(kegg_enzymes_a)
+        )
     if kegg_enzymes_b:
         mech["kegg_enzymes_b"] = kegg_enzymes_b[:8]
         side_roles = mech["enzymes"].setdefault("b", {})
-        side_roles["substrate"] = _append_unique(side_roles.get("substrate"), _enzyme_tokens_from_kegg(kegg_enzymes_b))
+        side_roles["substrate"] = _append_unique(
+            side_roles.get("substrate"), _enzyme_tokens_from_kegg(kegg_enzymes_b)
+        )
 
     chembl_enrichment = phase_results.get("ChEMBL REST API")
     if chembl_enrichment:
@@ -681,6 +765,7 @@ def _enrich_mechanistic_with_public_rest(
         _merge_chembl_inhibitors(mech, enrichment)
 
     if settings.enable_uniprot:
+
         def _uniprot_rest() -> Dict[str, Any]:
             from src.retrieval import uniprot_client as uc
 
@@ -697,13 +782,16 @@ def _enrich_mechanistic_with_public_rest(
                     }
             return out
 
-        uniprot = _run_parallel_source_tasks(
-            {"UniProt REST API": _uniprot_rest},
-            timeout_s=rest_timeout_s,
-            caveats=caveats,
-            label="UniProt target enrichment",
-            max_workers=1,
-        ).get("UniProt REST API") or {}
+        uniprot = (
+            _run_parallel_source_tasks(
+                {"UniProt REST API": _uniprot_rest},
+                timeout_s=rest_timeout_s,
+                caveats=caveats,
+                label="UniProt target enrichment",
+                max_workers=1,
+            ).get("UniProt REST API")
+            or {}
+        )
         for side in ("a", "b"):
             side_data = uniprot.get(side) or {}
             if side_data.get("targets"):
@@ -720,12 +808,15 @@ def _enrich_mechanistic_with_public_rest(
                 )
 
     if settings.enable_reactome:
+
         def _reactome_rest() -> Dict[str, Any]:
             from src.retrieval import reactome_client as rc
 
             out: Dict[str, Any] = {}
             for side, drug in (("a", drugA), ("b", drugB)):
-                uniprot_ids = _append_unique([], mech.get(f"uniprot_ids_{side}"), limit=12)
+                uniprot_ids = _append_unique(
+                    [], mech.get(f"uniprot_ids_{side}"), limit=12
+                )
                 if not uniprot_ids:
                     continue
                 pathways = rc.get_drug_target_pathways(drug, uniprot_ids[:8])
@@ -733,17 +824,22 @@ def _enrich_mechanistic_with_public_rest(
                     out[side] = pathways
             return out
 
-        reactome = _run_parallel_source_tasks(
-            {"Reactome REST API": _reactome_rest},
-            timeout_s=rest_timeout_s,
-            caveats=caveats,
-            label="Reactome pathway enrichment",
-            max_workers=1,
-        ).get("Reactome REST API") or {}
+        reactome = (
+            _run_parallel_source_tasks(
+                {"Reactome REST API": _reactome_rest},
+                timeout_s=rest_timeout_s,
+                caveats=caveats,
+                label="Reactome pathway enrichment",
+                max_workers=1,
+            ).get("Reactome REST API")
+            or {}
+        )
         for side in ("a", "b"):
             pathways = reactome.get(side) or []
             if pathways:
-                mech[f"reactome_pathways_{side}"] = _merge_records(mech.get(f"reactome_pathways_{side}"), pathways, limit=10)
+                mech[f"reactome_pathways_{side}"] = _merge_records(
+                    mech.get(f"reactome_pathways_{side}"), pathways, limit=10
+                )
                 mech[f"pathways_{side}"] = _append_unique(
                     mech.get(f"pathways_{side}"),
                     _pathway_names(pathways),
@@ -758,12 +854,18 @@ def _bool_qlever_contributed(mech: Dict[str, Any]) -> bool:
     """Heuristic: did QLever contribute anything non-empty to mechanistic evidence (post-synthesis)?"""
     ez = mech.get("enzymes", {})
     nonempty_ez = any(
-        (ez.get(s, {}).get(k) for s in ("a", "b") for k in ("substrate", "inhibitor", "inducer"))
+        (
+            ez.get(s, {}).get(k)
+            for s in ("a", "b")
+            for k in ("substrate", "inhibitor", "inducer")
+        )
     )
     return bool(
         nonempty_ez
-        or mech.get("targets_a") or mech.get("targets_b")
-        or mech.get("pathways_a") or mech.get("pathways_b")
+        or mech.get("targets_a")
+        or mech.get("targets_b")
+        or mech.get("pathways_a")
+        or mech.get("pathways_b")
         or mech.get("common_pathways")
     )
 
@@ -771,11 +873,19 @@ def _bool_qlever_contributed(mech: Dict[str, Any]) -> bool:
 def _bool_qlever_contributed_raw(raw: Dict[str, Any]) -> bool:
     """Heuristic on the raw QLever block (pre-synthesis)."""
     ez = raw.get("enzymes", {})
-    nonempty_ez = any((ez.get(s, {}).get(k) for s in ("a", "b") for k in ("substrate", "inhibitor", "inducer")))
+    nonempty_ez = any(
+        (
+            ez.get(s, {}).get(k)
+            for s in ("a", "b")
+            for k in ("substrate", "inhibitor", "inducer")
+        )
+    )
     return bool(
         nonempty_ez
-        or raw.get("targets_a") or raw.get("targets_b")
-        or raw.get("pathways_a") or raw.get("pathways_b")
+        or raw.get("targets_a")
+        or raw.get("targets_b")
+        or raw.get("pathways_a")
+        or raw.get("pathways_b")
         or raw.get("common_pathways")
     )
 
@@ -797,6 +907,7 @@ def _collect_public_clinical_reference(
     tasks: Dict[str, Callable[[], Any]] = {}
 
     if settings.enable_rxnorm:
+
         def _rxnorm_lookup() -> Dict[str, Any]:
             from src.retrieval.rxnorm_client import RxNormClient
 
@@ -809,6 +920,7 @@ def _collect_public_clinical_reference(
         tasks["RxNorm/RxClass API"] = _rxnorm_lookup
 
     if settings.enable_openfda_label:
+
         def _openfda_label_lookup() -> Dict[str, Any]:
             from src.retrieval.openfda_label_client import OpenFDALabelClient
 
@@ -821,6 +933,7 @@ def _collect_public_clinical_reference(
         tasks["openFDA Drug Label API"] = _openfda_label_lookup
 
     if settings.enable_dailymed:
+
         def _dailymed_lookup() -> Dict[str, Any]:
             from src.retrieval.dailymed_client import DailyMedClient
 
@@ -871,10 +984,12 @@ def _clinical_reference_has_content(reference: Dict[str, Any]) -> bool:
 
 
 def _rxnorm_id(reference: Dict[str, Any], side: str) -> Optional[str]:
-    value = (((reference.get("rxnorm") or {}).get(side) or {}).get("rxcui"))
+    value = ((reference.get("rxnorm") or {}).get(side) or {}).get("rxcui")
     if value:
         return str(value)
-    label_rxcuis = (((reference.get("openfda_label") or {}).get(side) or {}).get("rxcui") or [])
+    label_rxcuis = ((reference.get("openfda_label") or {}).get(side) or {}).get(
+        "rxcui"
+    ) or []
     if label_rxcuis:
         return str(label_rxcuis[0])
     return None
@@ -906,7 +1021,15 @@ def _research_seed_terms(mech: Dict[str, Any], *, limit: int = 16) -> List[str]:
     cleaned: List[str] = []
     for item in seeds:
         if isinstance(item, Mapping):
-            for key in ("gene_names", "uniprot_id", "primaryAccession", "accession", "name", "protein_name", "enzyme_name"):
+            for key in (
+                "gene_names",
+                "uniprot_id",
+                "primaryAccession",
+                "accession",
+                "name",
+                "protein_name",
+                "enzyme_name",
+            ):
                 value = item.get(key)
                 if isinstance(value, list):
                     cleaned.extend(str(v) for v in value)
@@ -957,7 +1080,9 @@ def _collect_api_research_enrichment(
                 "scope": "Experimental oncology cell-line combination screen; hypothesis support only.",
             },
             "sider_nsides_offsides": {
-                "enabled": bool(getattr(settings, "enable_sider_nsides_offsides", False)),
+                "enabled": bool(
+                    getattr(settings, "enable_sider_nsides_offsides", False)
+                ),
                 "runtime": "DuckDB parquet layer when OFFSIDES/SIDER parquet files are present.",
                 "scope": "Adverse-event and label side-effect context, not causal incidence.",
             },
@@ -968,14 +1093,18 @@ def _collect_api_research_enrichment(
     tasks: Dict[str, Callable[[], Any]] = {}
 
     if getattr(settings, "enable_europe_pmc", False):
+
         def _europe_pmc_lookup() -> Dict[str, Any]:
             from src.retrieval.research_api_clients import EuropePMCClient
 
-            return EuropePMCClient().search_interaction_literature(drugA, drugB, limit=5)
+            return EuropePMCClient().search_interaction_literature(
+                drugA, drugB, limit=5
+            )
 
         tasks["Europe PMC REST API"] = _europe_pmc_lookup
 
     if getattr(settings, "enable_fda_pgx", False):
+
         def _fda_pgx_lookup() -> Dict[str, Any]:
             from src.retrieval.research_api_clients import FDAPGxClient
 
@@ -984,6 +1113,7 @@ def _collect_api_research_enrichment(
         tasks["FDA PGx biomarker pages"] = _fda_pgx_lookup
 
     if getattr(settings, "enable_open_targets", False):
+
         def _open_targets_lookup() -> Dict[str, Any]:
             from src.retrieval.research_api_clients import OpenTargetsClient
 
@@ -1000,14 +1130,18 @@ def _collect_api_research_enrichment(
         tasks["Open Targets GraphQL API"] = _open_targets_lookup
 
     if getattr(settings, "enable_stringdb", False) and seeds:
+
         def _string_lookup() -> Dict[str, Any]:
             from src.retrieval.research_api_clients import StringDBClient
 
-            return StringDBClient(caller_identity=settings.string_caller_identity).get_network_summary(seeds[:12])
+            return StringDBClient(
+                caller_identity=settings.string_caller_identity
+            ).get_network_summary(seeds[:12])
 
         tasks["STRING API"] = _string_lookup
 
     if getattr(settings, "enable_drugcentral", False):
+
         def _drugcentral_lookup() -> Dict[str, Any]:
             from src.retrieval.research_api_clients import DrugCentralClient
 
@@ -1020,10 +1154,13 @@ def _collect_api_research_enrichment(
         tasks["DrugCentral DRS API"] = _drugcentral_lookup
 
     if getattr(settings, "enable_biogrid", False):
+
         def _biogrid_lookup() -> Dict[str, Any]:
             from src.retrieval.research_api_clients import BioGRIDClient
 
-            return BioGRIDClient(access_key=settings.biogrid_access_key).get_interactions(seeds[:12])
+            return BioGRIDClient(
+                access_key=settings.biogrid_access_key
+            ).get_interactions(seeds[:12])
 
         tasks["BioGRID REST API"] = _biogrid_lookup
 
@@ -1117,7 +1254,9 @@ def retrieve_and_normalize(
     if settings.enable_semantic_search:
         try:
             semantic_searcher = get_semantic_searcher()
-            use_semantic = bool(semantic_searcher and getattr(semantic_searcher, "model", None))
+            use_semantic = bool(
+                semantic_searcher and getattr(semantic_searcher, "model", None)
+            )
         except Exception as e:
             caveats.append(f"Semantic search unavailable: {e}")
 
@@ -1128,28 +1267,43 @@ def retrieve_and_normalize(
         try:
             drug_queries = []
             if hasattr(db, "has_view") and db.has_view("twosides"):
-                drug_queries.extend([
-                    "SELECT DISTINCT drug_a AS drug FROM twosides",
-                    "SELECT DISTINCT drug_b AS drug FROM twosides",
-                ])
+                drug_queries.extend(
+                    [
+                        "SELECT DISTINCT drug_a AS drug FROM twosides",
+                        "SELECT DISTINCT drug_b AS drug FROM twosides",
+                    ]
+                )
             if hasattr(db, "has_view") and db.has_view("drugbank"):
                 drug_queries.append("SELECT DISTINCT name_lower AS drug FROM drugbank")
             all_drugs_query = "\nUNION\n".join(drug_queries)
-            all_drugs = [row[0] for row in db._con.execute(all_drugs_query).fetchall() if row[0]] if all_drugs_query else []
-            if all_drugs and not semantic_searcher.build_drug_index(all_drugs, force_rebuild=False):
-                LOG.warning("Failed to build drug index, continuing without semantic drug expansion")
+            all_drugs = (
+                [
+                    row[0]
+                    for row in db._con.execute(all_drugs_query).fetchall()
+                    if row[0]
+                ]
+                if all_drugs_query
+                else []
+            )
+            if all_drugs and not semantic_searcher.build_drug_index(
+                all_drugs, force_rebuild=False
+            ):
+                LOG.warning(
+                    "Failed to build drug index, continuing without semantic drug expansion"
+                )
         except Exception as e:
             caveats.append(f"Semantic drug index unavailable: {e}")
             use_semantic = False
 
     # Query expansion: Get synonyms and expand queries (REQUIRED for RAG system)
-    synonyms_a = db.get_synonyms(a) if hasattr(db, 'get_synonyms') else []
-    synonyms_b = db.get_synonyms(b) if hasattr(db, 'get_synonyms') else []
+    synonyms_a = db.get_synonyms(a) if hasattr(db, "get_synonyms") else []
+    synonyms_b = db.get_synonyms(b) if hasattr(db, "get_synonyms") else []
 
     # Expand drug queries. Fall back to lexical expansion if semantic search is unavailable.
     try:
         expanded_queries = create_expanded_query_context(
-            a, b,
+            a,
+            b,
             synonyms_a=synonyms_a,
             synonyms_b=synonyms_b,
             semantic_searcher=semantic_searcher if use_semantic else None,
@@ -1158,8 +1312,14 @@ def retrieve_and_normalize(
         caveats.append(f"Semantic query expansion unavailable: {e}")
         expanded_queries = {
             "original": {"drug_a": a, "drug_b": b},
-            "expanded": expand_drug_pair_queries(a, b, synonyms_a=synonyms_a, synonyms_b=synonyms_b),
-            "expansion_methods": {"synonyms": bool(synonyms_a or synonyms_b), "variations": True, "semantic": False},
+            "expanded": expand_drug_pair_queries(
+                a, b, synonyms_a=synonyms_a, synonyms_b=synonyms_b
+            ),
+            "expansion_methods": {
+                "synonyms": bool(synonyms_a or synonyms_b),
+                "variations": True,
+                "semantic": False,
+            },
         }
 
     expanded_a = expanded_queries["expanded"]["drug_a"]
@@ -1177,16 +1337,22 @@ def retrieve_and_normalize(
             return [(se, 1.0) for se in results]
 
         # Define semantic search function for side effects
-        def semantic_search_side_effects(query: str, k: int, threshold: float) -> List[Tuple[str, float]]:
+        def semantic_search_side_effects(
+            query: str, k: int, threshold: float
+        ) -> List[Tuple[str, float]]:
             """Semantic search for side effects."""
             if not semantic_searcher or not semantic_searcher._initialized:
                 return []
             # First get keyword results to build index if needed
             keyword_results = db.get_side_effects(query, top_k=k * 2) or []
             if keyword_results:
-                semantic_searcher.build_side_effect_index(keyword_results, force_rebuild=False)
+                semantic_searcher.build_side_effect_index(
+                    keyword_results, force_rebuild=False
+                )
             # Search for similar side effects
-            similar = semantic_searcher.search_similar_side_effects(query, top_k=k, threshold=threshold)
+            similar = semantic_searcher.search_similar_side_effects(
+                query, top_k=k, threshold=threshold
+            )
             return similar
 
         # Use adaptive hybrid search for drug A
@@ -1196,7 +1362,7 @@ def retrieve_and_normalize(
             semantic_search_fn=lambda q, k, t: semantic_search_side_effects(q, k, t),
             initial_k=topk_side_effects,
             min_relevance_threshold=0.3,
-            max_k=topk_side_effects * 4
+            max_k=topk_side_effects * 4,
         )
         se_a_raw = [se for se, _ in se_a_results]
 
@@ -1207,12 +1373,14 @@ def retrieve_and_normalize(
             semantic_search_fn=lambda q, k, t: semantic_search_side_effects(q, k, t),
             initial_k=topk_side_effects,
             min_relevance_threshold=0.3,
-            max_k=topk_side_effects * 4
+            max_k=topk_side_effects * 4,
         )
         se_b_raw = [se for se, _ in se_b_results]
 
         # For pair, use hybrid search with expanded terms
-        def keyword_search_pair(term_a: str, term_b: str, k: int) -> List[Tuple[str, float]]:
+        def keyword_search_pair(
+            term_a: str, term_b: str, k: int
+        ) -> List[Tuple[str, float]]:
             """Keyword search for pair side effects."""
             results = db.get_side_effects(term_a, term_b, top_k=k) or []
             return [(se, 1.0) for se in results]
@@ -1228,7 +1396,9 @@ def retrieve_and_normalize(
                 for expanded_term_b in expanded_b[:3]:
                     if expanded_term_a == a and expanded_term_b == b:
                         continue
-                    results = keyword_search_pair(expanded_term_a, expanded_term_b, topk_side_effects * 2)
+                    results = keyword_search_pair(
+                        expanded_term_a, expanded_term_b, topk_side_effects * 2
+                    )
                     if results:
                         se_pair_raw.extend([se for se, _ in results])
                         if len(se_pair_raw) >= topk_side_effects * 2:
@@ -1249,7 +1419,7 @@ def retrieve_and_normalize(
             for se in se_a_raw:
                 rows = db._con.execute(
                     "SELECT MAX(prr) FROM twosides WHERE (drug_a = ? OR drug_b = ?) AND side_effect = ?",
-                    [a.lower(), a.lower(), se]
+                    [a.lower(), a.lower(), se],
                 ).fetchall()
                 if rows and rows[0][0]:
                     prr_data_a[se] = float(rows[0][0])
@@ -1257,7 +1427,7 @@ def retrieve_and_normalize(
             for se in se_b_raw:
                 rows = db._con.execute(
                     "SELECT MAX(prr) FROM twosides WHERE (drug_a = ? OR drug_b = ?) AND side_effect = ?",
-                    [b.lower(), b.lower(), se]
+                    [b.lower(), b.lower(), se],
                 ).fetchall()
                 if rows and rows[0][0]:
                     prr_data_b[se] = float(rows[0][0])
@@ -1271,7 +1441,11 @@ def retrieve_and_normalize(
         dict_b = db.get_dictrank_score(b)
         diqt_a = db.get_diqt_score(a)
         diqt_b = db.get_diqt_score(b)
-        nci_almanac_rows = db.get_nci_almanac_pair(a, b, top_k=12) if hasattr(db, "get_nci_almanac_pair") else []
+        nci_almanac_rows = (
+            db.get_nci_almanac_pair(a, b, top_k=12)
+            if hasattr(db, "get_nci_almanac_pair")
+            else []
+        )
 
         # DrugBank targets (PD fallback) - use query expansion
         db_targets_a = []
@@ -1329,11 +1503,15 @@ def retrieve_and_normalize(
     overlap_targets = mech.get("common_targets", []) or []
 
     if targets_a:
-        scored_targets_a = score_and_rank_targets(targets_a, query_context, overlap_targets)
+        scored_targets_a = score_and_rank_targets(
+            targets_a, query_context, overlap_targets
+        )
         mech["targets_a"] = [t for t, _ in scored_targets_a[:topk_targets]]
 
     if targets_b:
-        scored_targets_b = score_and_rank_targets(targets_b, query_context, overlap_targets)
+        scored_targets_b = score_and_rank_targets(
+            targets_b, query_context, overlap_targets
+        )
         mech["targets_b"] = [t for t, _ in scored_targets_b[:topk_targets]]
 
     # Score and rank pathways
@@ -1342,15 +1520,21 @@ def retrieve_and_normalize(
     common_pathways = mech.get("common_pathways", []) or []
 
     if pathways_a:
-        scored_pathways_a = score_and_rank_pathways(pathways_a, query_context, common_pathways)
+        scored_pathways_a = score_and_rank_pathways(
+            pathways_a, query_context, common_pathways
+        )
         mech["pathways_a"] = [p for p, _ in scored_pathways_a[:topk_pathways]]
 
     if pathways_b:
-        scored_pathways_b = score_and_rank_pathways(pathways_b, query_context, common_pathways)
+        scored_pathways_b = score_and_rank_pathways(
+            pathways_b, query_context, common_pathways
+        )
         mech["pathways_b"] = [p for p, _ in scored_pathways_b[:topk_pathways]]
 
     if common_pathways:
-        scored_common = score_and_rank_pathways(common_pathways, query_context, common_pathways)
+        scored_common = score_and_rank_pathways(
+            common_pathways, query_context, common_pathways
+        )
         mech["common_pathways"] = [p for p, _ in scored_common[:topk_pathways]]
 
     # 5) FAERS via OpenFDA (cached) - use query expansion
@@ -1362,7 +1546,9 @@ def retrieve_and_normalize(
             ofda = OpenFDAClient(cache_dir=openfda_cache)
             # Try expanded terms for FAERS
             for expanded_term_a in expanded_a:
-                reactions = ofda.get_top_reactions(expanded_term_a, top_k=topk_faers * 2)
+                reactions = ofda.get_top_reactions(
+                    expanded_term_a, top_k=topk_faers * 2
+                )
                 if reactions:
                     faers_a = reactions
                     break
@@ -1370,7 +1556,9 @@ def retrieve_and_normalize(
                 faers_a = ofda.get_top_reactions(a, top_k=topk_faers)
 
             for expanded_term_b in expanded_b:
-                reactions = ofda.get_top_reactions(expanded_term_b, top_k=topk_faers * 2)
+                reactions = ofda.get_top_reactions(
+                    expanded_term_b, top_k=topk_faers * 2
+                )
                 if reactions:
                     faers_b = reactions
                     break
@@ -1385,7 +1573,9 @@ def retrieve_and_normalize(
                     for expanded_term_b in expanded_b[:3]:
                         if expanded_term_a == a and expanded_term_b == b:
                             continue  # Already tried
-                        reactions = ofda.get_combination_reactions(expanded_term_a, expanded_term_b, top_k=topk_faers * 2)
+                        reactions = ofda.get_combination_reactions(
+                            expanded_term_a, expanded_term_b, top_k=topk_faers * 2
+                        )
                         if reactions:
                             faers_combo.extend(reactions)
                             if len(faers_combo) >= topk_faers * 2:
@@ -1412,7 +1602,9 @@ def retrieve_and_normalize(
 
     # 5c) API-first research context. This supplements source review and
     # hypothesis generation; it does not alter deterministic PK/PD scoring.
-    research_enrichment = _collect_api_research_enrichment(a, b, mech, settings, caveats)
+    research_enrichment = _collect_api_research_enrichment(
+        a, b, mech, settings, caveats
+    )
 
     # 6) Build normalized context (matches llm_interface expectations)
     ql_contrib = _bool_qlever_contributed(mech)
@@ -1421,7 +1613,9 @@ def retrieve_and_normalize(
     caveats_agg = list(dict.fromkeys((qlev.get("caveats") or []) + caveats))
     if not ql_raw_contrib:
         if settings.enable_qlever:
-            caveats_agg.append("QLever mechanistic unavailable; using available non-QLever evidence.")
+            caveats_agg.append(
+                "QLever mechanistic unavailable; using available non-QLever evidence."
+            )
         else:
             caveats_agg.append("QLever RDF disabled for NVIDIA demo runtime.")
 
@@ -1443,22 +1637,32 @@ def retrieve_and_normalize(
         # Build side effect index if not already built
         all_side_effects = list(set(se_a_raw + se_b_raw + se_pair_raw))
         if all_side_effects:
-            semantic_searcher.build_side_effect_index(all_side_effects, force_rebuild=False)
+            semantic_searcher.build_side_effect_index(
+                all_side_effects, force_rebuild=False
+            )
 
             # Get semantic scores for side effects
             for se in se_a_raw:
-                similar = semantic_searcher.search_similar_side_effects(se, top_k=1, threshold=0.7)
+                similar = semantic_searcher.search_similar_side_effects(
+                    se, top_k=1, threshold=0.7
+                )
                 if similar and similar[0][0] == se:
                     semantic_scores_a[se] = similar[0][1]
 
             for se in se_b_raw:
-                similar = semantic_searcher.search_similar_side_effects(se, top_k=1, threshold=0.7)
+                similar = semantic_searcher.search_similar_side_effects(
+                    se, top_k=1, threshold=0.7
+                )
                 if similar and similar[0][0] == se:
                     semantic_scores_b[se] = similar[0][1]
 
     # Score and rank side effects
-    scored_se_a = score_and_rank_side_effects(se_a_raw, query_context_se, prr_data_a, semantic_scores_a)
-    scored_se_b = score_and_rank_side_effects(se_b_raw, query_context_se, prr_data_b, semantic_scores_b)
+    scored_se_a = score_and_rank_side_effects(
+        se_a_raw, query_context_se, prr_data_a, semantic_scores_a
+    )
+    scored_se_b = score_and_rank_side_effects(
+        se_b_raw, query_context_se, prr_data_b, semantic_scores_b
+    )
 
     # Apply top-K after ranking
     side_effects_a = [se for se, _ in scored_se_a[:topk_side_effects]]
@@ -1472,14 +1676,16 @@ def retrieve_and_normalize(
             for se in se_pair_raw:
                 rows = db._con.execute(
                     "SELECT MAX(prr) FROM twosides WHERE ((drug_a = ? AND drug_b = ?) OR (drug_a = ? AND drug_b = ?)) AND side_effect = ?",
-                    [a.lower(), b.lower(), b.lower(), a.lower(), se]
+                    [a.lower(), b.lower(), b.lower(), a.lower(), se],
                 ).fetchall()
                 if rows and rows[0][0]:
                     prr_data_pair[se] = float(rows[0][0])
         except Exception:
             pass
 
-        scored_se_pair = score_and_rank_side_effects(se_pair_raw, query_context_se, prr_data_pair)
+        scored_se_pair = score_and_rank_side_effects(
+            se_pair_raw, query_context_se, prr_data_pair
+        )
         se_pair_raw_ranked = [se for se, _ in scored_se_pair[:topk_side_effects]]
     else:
         se_pair_raw_ranked = []
@@ -1502,7 +1708,11 @@ def retrieve_and_normalize(
             "diqt": "DIQT",
             "drugbank": "DrugBank local dataset",
         }
-        duckdb_sources = [label for key, label in duckdb_label_by_key.items() if available_sources.get(key)]
+        duckdb_sources = [
+            label
+            for key, label in duckdb_label_by_key.items()
+            if available_sources.get(key)
+        ]
 
     api_sources = []
     if settings.enable_pubchem_rest:
@@ -1521,9 +1731,11 @@ def retrieve_and_normalize(
         api_sources.append("DailyMed SPL API")
     if settings.enable_rxnorm:
         api_sources.append("RxNorm/RxClass API")
-    if (clinical_reference.get("fda_ddi_reference") or {}).get("a", {}).get("matches") or (
-        clinical_reference.get("fda_ddi_reference") or {}
-    ).get("b", {}).get("matches"):
+    if (clinical_reference.get("fda_ddi_reference") or {}).get("a", {}).get(
+        "matches"
+    ) or (clinical_reference.get("fda_ddi_reference") or {}).get("b", {}).get(
+        "matches"
+    ):
         api_sources.append("FDA CYP/transporter reference")
     if settings.enable_fda_pgx:
         api_sources.append("FDA PGx biomarker pages")
@@ -1549,12 +1761,20 @@ def retrieve_and_normalize(
 
     context: Dict[str, Any] = {
         "drugs": {
-            "a": {"name": a, "synonyms": qlev.get("synonyms_a", []) or mech.get("synonyms_a", []), "ids": ids_a},
-            "b": {"name": b, "synonyms": qlev.get("synonyms_b", []) or mech.get("synonyms_b", []), "ids": ids_b},
+            "a": {
+                "name": a,
+                "synonyms": qlev.get("synonyms_a", []) or mech.get("synonyms_a", []),
+                "ids": ids_a,
+            },
+            "b": {
+                "name": b,
+                "synonyms": qlev.get("synonyms_b", []) or mech.get("synonyms_b", []),
+                "ids": ids_b,
+            },
         },
         "signals": {
             "tabular": {
-                "prr": prr_pair,                 # pair PRR proxy (max PRR among pair side-effects), may be None
+                "prr": prr_pair,  # pair PRR proxy (max PRR among pair side-effects), may be None
                 "side_effects_a": side_effects_a,
                 "side_effects_b": side_effects_b,
                 "dili_a": dili_a if dili_a is not None else "unknown",
@@ -1579,25 +1799,45 @@ def retrieve_and_normalize(
         "source_status": source_status,
         "sources": {
             "duckdb": duckdb_sources,
-            "qlever": ["PubChem RDF via QLever"] if (settings.enable_qlever and ql_raw_contrib) else [],
-            "openfda": ["FAERS via OpenFDA (cached)"] if settings.enable_openfda else [],
+            "qlever": (
+                ["PubChem RDF via QLever"]
+                if (settings.enable_qlever and ql_raw_contrib)
+                else []
+            ),
+            "openfda": (
+                ["FAERS via OpenFDA (cached)"] if settings.enable_openfda else []
+            ),
             "apis": api_sources,
             "canonical": ["Canonical PK/PD Dictionary"] if has_canonical else [],
             "semantic": ["Semantic Search (Embeddings)"] if use_semantic else [],
-            "query_expansion": ["Query Expansion (Synonyms, Variations" + (", Semantic Similarity" if use_semantic else "") + ")"],
-            "hybrid_search": ["Hybrid Search (Keyword + Semantic)"] if use_semantic else ["Keyword Search"],
+            "query_expansion": [
+                "Query Expansion (Synonyms, Variations"
+                + (", Semantic Similarity" if use_semantic else "")
+                + ")"
+            ],
+            "hybrid_search": (
+                ["Hybrid Search (Keyword + Semantic)"]
+                if use_semantic
+                else ["Keyword Search"]
+            ),
             "adaptive_retrieval": ["Adaptive Retrieval (Dynamic Top-K)"],
         },
         "meta": {
             "drug_pair": f"{drugA}|{drugB}",
             "pair_key": _pair_key(drugA, drugB),
-            "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
+            "created_at": datetime.now(timezone.utc)
+            .isoformat(timespec="seconds")
+            .replace("+00:00", "Z"),
             "version": VERSION,
             "data_mode": settings.data_mode,
             "qlever_contributed_raw": ql_raw_contrib,
             "qlever_contributed": ql_contrib,
-            "clinical_reference_contributed": _clinical_reference_has_content(clinical_reference),
-            "research_enrichment_contributed": _research_enrichment_has_content(research_enrichment),
+            "clinical_reference_contributed": _clinical_reference_has_content(
+                clinical_reference
+            ),
+            "research_enrichment_contributed": _research_enrichment_has_content(
+                research_enrichment
+            ),
         },
     }
 
@@ -1615,11 +1855,11 @@ def retrieve_and_normalize(
         if side_effects_a and scored_se_a:
             reranked_se_a = reranker.rerank_with_scores(
                 query_text,
-                scored_se_a[:topk_side_effects * 2],
+                scored_se_a[: topk_side_effects * 2],
                 top_k=topk_side_effects,
                 combine_with_original=True,
                 original_weight=0.4,
-                rerank_weight=0.6
+                rerank_weight=0.6,
             )
             side_effects_a = [se for se, _ in reranked_se_a]
             context["signals"]["tabular"]["side_effects_a"] = side_effects_a
@@ -1627,11 +1867,11 @@ def retrieve_and_normalize(
         if side_effects_b and scored_se_b:
             reranked_se_b = reranker.rerank_with_scores(
                 query_text,
-                scored_se_b[:topk_side_effects * 2],
+                scored_se_b[: topk_side_effects * 2],
                 top_k=topk_side_effects,
                 combine_with_original=True,
                 original_weight=0.4,
-                rerank_weight=0.6
+                rerank_weight=0.6,
             )
             side_effects_b = [se for se, _ in reranked_se_b]
             context["signals"]["tabular"]["side_effects_b"] = side_effects_b
@@ -1642,20 +1882,20 @@ def retrieve_and_normalize(
         if mech_targets_a:
             target_texts = [f"{a} targets {t}" for t in mech_targets_a]
             reranked_targets_a = reranker.rerank(
-                f"{a} drug targets",
-                target_texts,
-                top_k=topk_targets
+                f"{a} drug targets", target_texts, top_k=topk_targets
             )
-            context["signals"]["mechanistic"]["targets_a"] = [t.split()[-1] for t, _ in reranked_targets_a]
+            context["signals"]["mechanistic"]["targets_a"] = [
+                t.split()[-1] for t, _ in reranked_targets_a
+            ]
 
         if mech_targets_b:
             target_texts = [f"{b} targets {t}" for t in mech_targets_b]
             reranked_targets_b = reranker.rerank(
-                f"{b} drug targets",
-                target_texts,
-                top_k=topk_targets
+                f"{b} drug targets", target_texts, top_k=topk_targets
             )
-            context["signals"]["mechanistic"]["targets_b"] = [t.split()[-1] for t, _ in reranked_targets_b]
+            context["signals"]["mechanistic"]["targets_b"] = [
+                t.split()[-1] for t, _ in reranked_targets_b
+            ]
         context["sources"]["reranking"] = ["Re-ranking (Cross-Encoder)"]
 
     # Apply query-to-context filtering to remove low-relevance items
@@ -1665,14 +1905,16 @@ def retrieve_and_normalize(
         query_text,
         query_context_se,
         min_relevance=0.0,  # Preserve retrieved evidence for source-traced demo output.
-        preserve_structure=True
+        preserve_structure=True,
     )
 
     # Add filtering metadata to context
     if filter_metadata.get("filter_ratio", 0) > 0:
         filtered_context["meta"]["context_filtered"] = True
         filtered_context["meta"]["filter_ratio"] = filter_metadata["filter_ratio"]
-        filtered_context["meta"]["filtered_sections"] = filter_metadata.get("filtered_sections", [])
+        filtered_context["meta"]["filtered_sections"] = filter_metadata.get(
+            "filtered_sections", []
+        )
 
     return filtered_context
 
@@ -1709,7 +1951,9 @@ def get_context_cached(
                     cached_ctx = json.load(f)
             except (OSError, ValueError):
                 continue
-            if not _context_cache_version_ok(cached_ctx) or not _context_cache_fresh(cached_ctx, candidate_path):
+            if not _context_cache_version_ok(cached_ctx) or not _context_cache_fresh(
+                cached_ctx, candidate_path
+            ):
                 continue
             cached_ctx = _cached_context(cached_ctx, candidate_path)
             if candidate != key:
@@ -1730,31 +1974,41 @@ def get_context_cached(
                     json.dump(cached_ctx, f, ensure_ascii=False, indent=2)
             return cached_ctx, key
 
-    with source_cache_policy(force_refresh=force_refresh,
-                             max_age_s=max(0, get_settings().evidence_cache_ttl_hours) * 3600):
+    with source_cache_policy(
+        force_refresh=force_refresh,
+        max_age_s=max(0, get_settings().evidence_cache_ttl_hours) * 3600,
+    ):
         ctx = retrieve_and_normalize(
-            drugA, drugB, parquet_dir=parquet_dir, openfda_cache=openfda_cache,
-            topk_side_effects=topk_side_effects, topk_faers=topk_faers,
-            topk_targets=topk_targets, topk_pathways=topk_pathways,
+            drugA,
+            drugB,
+            parquet_dir=parquet_dir,
+            openfda_cache=openfda_cache,
+            topk_side_effects=topk_side_effects,
+            topk_faers=topk_faers,
+            topk_targets=topk_targets,
+            topk_pathways=topk_pathways,
         )
-    ctx.setdefault('meta', {}).update(
+    ctx.setdefault("meta", {}).update(
         evidence_assembled_at=datetime.now(timezone.utc).isoformat(),
-        evidence_cache_status='refreshed' if force_refresh else 'rebuilt',
+        evidence_cache_status="refreshed" if force_refresh else "rebuilt",
     )
     settings = get_settings()
-    if settings.cache_backend == 'sqlite':
+    if settings.cache_backend == "sqlite":
         from src.utils.sqlite_cache import SQLiteCache
+
         store = SQLiteCache(settings.sqlite_cache_path)
-        snapshot_key = 'context:' + key
+        snapshot_key = "context:" + key
         # Preserve a pre-existing file snapshot before the first SQLite revision.
         if store.get_json(snapshot_key) is None and os.path.exists(path):
             try:
-                with open(path, encoding='utf-8') as previous:
-                    store.set_json(snapshot_key, json.load(previous), kind='context')
+                with open(path, encoding="utf-8") as previous:
+                    store.set_json(snapshot_key, json.load(previous), kind="context")
             except (ValueError, OSError):
                 pass
-        store.set_json(snapshot_key, ctx, kind='context')
-    with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=CTX_DIR, suffix='.tmp', delete=False) as f:
+        store.set_json(snapshot_key, ctx, kind="context")
+    with tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", dir=CTX_DIR, suffix=".tmp", delete=False
+    ) as f:
         temp_path = f.name
         json.dump(ctx, f, ensure_ascii=False, indent=2)
     try:
@@ -1778,7 +2032,14 @@ def get_response_cached(
     Backward-compatible wrapper. LLM responses are intentionally not cached
     because response text can become stale while retrieval evidence changes.
     """
-    return generate_response(context, mode, seed=seed, temperature=temperature, model_name=model_name, stream=stream)
+    return generate_response(
+        context,
+        mode,
+        seed=seed,
+        temperature=temperature,
+        model_name=model_name,
+        stream=stream,
+    )
 
 
 def run_rag(
@@ -1898,7 +2159,9 @@ def record_feedback(
         LOG.warning(f"Failed to record feedback: {e}")
 
 
-def _feedback_context_snapshot(context: Dict[str, Any], *, mode: Optional[str] = None) -> Dict[str, Any]:
+def _feedback_context_snapshot(
+    context: Dict[str, Any], *, mode: Optional[str] = None
+) -> Dict[str, Any]:
     """Keep feedback useful without storing the full retrieved context blob."""
     signals = context.get("signals", {}) or {}
     tabular = signals.get("tabular", {}) or {}
@@ -1948,27 +2211,58 @@ def _feedback_context_snapshot(context: Dict[str, Any], *, mode: Optional[str] =
             "clinical_reference": {
                 "rxnorm": clinical_reference.get("rxnorm", {}),
                 "openfda_label_found": {
-                    side: bool(((clinical_reference.get("openfda_label", {}) or {}).get(side) or {}).get("found"))
+                    side: bool(
+                        (
+                            (clinical_reference.get("openfda_label", {}) or {}).get(
+                                side
+                            )
+                            or {}
+                        ).get("found")
+                    )
                     for side in ("a", "b")
                 },
                 "dailymed_found": {
-                    side: bool(((clinical_reference.get("dailymed", {}) or {}).get(side) or {}).get("found"))
+                    side: bool(
+                        (
+                            (clinical_reference.get("dailymed", {}) or {}).get(side)
+                            or {}
+                        ).get("found")
+                    )
                     for side in ("a", "b")
                 },
             },
             "research_enrichment": {
-                "europe_pmc_count": len(((research_enrichment.get("europe_pmc") or {}).get("articles") or []))
-                if isinstance(research_enrichment, Mapping)
-                else 0,
-                "fda_pgx_found": bool((research_enrichment.get("fda_pgx") or {}).get("found"))
-                if isinstance(research_enrichment, Mapping)
-                else False,
-                "stringdb_found": bool((research_enrichment.get("stringdb") or {}).get("found"))
-                if isinstance(research_enrichment, Mapping)
-                else False,
+                "europe_pmc_count": (
+                    len(
+                        (
+                            (research_enrichment.get("europe_pmc") or {}).get(
+                                "articles"
+                            )
+                            or []
+                        )
+                    )
+                    if isinstance(research_enrichment, Mapping)
+                    else 0
+                ),
+                "fda_pgx_found": (
+                    bool((research_enrichment.get("fda_pgx") or {}).get("found"))
+                    if isinstance(research_enrichment, Mapping)
+                    else False
+                ),
+                "stringdb_found": (
+                    bool((research_enrichment.get("stringdb") or {}).get("found"))
+                    if isinstance(research_enrichment, Mapping)
+                    else False
+                ),
                 "opentargets_found": bool(
                     isinstance(research_enrichment, Mapping)
-                    and any(((research_enrichment.get("open_targets") or {}).get(side) or {}).get("found") for side in ("a", "b"))
+                    and any(
+                        (
+                            (research_enrichment.get("open_targets") or {}).get(side)
+                            or {}
+                        ).get("found")
+                        for side in ("a", "b")
+                    )
                 ),
             },
         },
@@ -1993,7 +2287,7 @@ def clear_context_cache(drugA: str, drugB: str) -> bool:
             path = os.path.join(CTX_DIR, name)
             try:
                 with open(path, "r", encoding="utf-8") as f:
-                    meta = (json.load(f).get("meta") or {})
+                    meta = json.load(f).get("meta") or {}
             except Exception:
                 continue
             if meta.get("pair_key") == pair_key:

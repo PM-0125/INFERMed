@@ -52,5 +52,4 @@ class SourceTool(Protocol):
     source_name: str
     version: str
 
-    def execute(self, tool_input: SourceToolInput) -> SourceToolResult:
-        ...
+    def execute(self, tool_input: SourceToolInput) -> SourceToolResult: ...

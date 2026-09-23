@@ -18,18 +18,39 @@ from src.evaluation.cases import baseline_cases
 from src.evaluation.safety_checks import evaluate_answer_text
 from src.llm.rag_pipeline import run_rag
 
-
 DEFAULT_CASE_PATH = PROJECT_ROOT / "TESTCASES" / "infermed_5_drug_benchmark_100.csv"
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Run INFERMed medication-set benchmark checks without committing private testcases.")
-    parser.add_argument("--cases", default=str(DEFAULT_CASE_PATH), help="CSV testcase file. Defaults to TESTCASES/infermed_5_drug_benchmark_100.csv")
-    parser.add_argument("--limit", type=int, default=10, help="Maximum cases to evaluate.")
-    parser.add_argument("--live-retrieval", action="store_true", help="Use live/local retrieval sources instead of mock context.")
-    parser.add_argument("--live-llm", action="store_true", help="Use the configured LLM for final answers. Implies --live-retrieval.")
-    parser.add_argument("--baseline", action="store_true", help="Run built-in deterministic baseline cases instead of private CSV.")
-    parser.add_argument("--audience", default="doctor", choices=["doctor", "patient", "pv_research"])
+    parser = argparse.ArgumentParser(
+        description="Run INFERMed medication-set benchmark checks without committing private testcases."
+    )
+    parser.add_argument(
+        "--cases",
+        default=str(DEFAULT_CASE_PATH),
+        help="CSV testcase file. Defaults to TESTCASES/infermed_5_drug_benchmark_100.csv",
+    )
+    parser.add_argument(
+        "--limit", type=int, default=10, help="Maximum cases to evaluate."
+    )
+    parser.add_argument(
+        "--live-retrieval",
+        action="store_true",
+        help="Use live/local retrieval sources instead of mock context.",
+    )
+    parser.add_argument(
+        "--live-llm",
+        action="store_true",
+        help="Use the configured LLM for final answers. Implies --live-retrieval.",
+    )
+    parser.add_argument(
+        "--baseline",
+        action="store_true",
+        help="Run built-in deterministic baseline cases instead of private CSV.",
+    )
+    parser.add_argument(
+        "--audience", default="doctor", choices=["doctor", "patient", "pv_research"]
+    )
     args = parser.parse_args()
 
     if args.baseline:
@@ -37,7 +58,12 @@ def main() -> int:
     else:
         case_path = Path(args.cases)
         if not case_path.exists():
-            print(json.dumps({"ok": False, "error": f"Case file not found: {case_path}"}, indent=2))
+            print(
+                json.dumps(
+                    {"ok": False, "error": f"Case file not found: {case_path}"},
+                    indent=2,
+                )
+            )
             return 2
         cases = _load_cases(case_path)[: max(args.limit, 0)]
     if not cases:
@@ -45,8 +71,12 @@ def main() -> int:
         return 2
 
     use_live_retrieval = bool(args.live_retrieval or args.live_llm)
-    context_runner = _live_context_runner if use_live_retrieval else _mock_context_runner
-    answer_generator = _live_answer_generator if args.live_llm else _mock_answer_generator
+    context_runner = (
+        _live_context_runner if use_live_retrieval else _mock_context_runner
+    )
+    answer_generator = (
+        _live_answer_generator if args.live_llm else _mock_answer_generator
+    )
 
     results = []
     failures = []
@@ -67,19 +97,29 @@ def main() -> int:
                 )
             )
             checks = {
-                "pair_count_ok": analysis.evidence_plan.pair_count == expected_pair_count,
-                "executed_all_pairs": len(analysis.executed_pairs) == expected_pair_count,
-                "medication_set_scope": analysis.decision.interaction_scope == ("medication_set" if len(drugs) > 2 else "pair"),
-                "has_top_pairs": bool((analysis.aggregate_context.get("medication_set") or {}).get("top_pairs")),
+                "pair_count_ok": analysis.evidence_plan.pair_count
+                == expected_pair_count,
+                "executed_all_pairs": len(analysis.executed_pairs)
+                == expected_pair_count,
+                "medication_set_scope": analysis.decision.interaction_scope
+                == ("medication_set" if len(drugs) > 2 else "pair"),
+                "has_top_pairs": bool(
+                    (analysis.aggregate_context.get("medication_set") or {}).get(
+                        "top_pairs"
+                    )
+                ),
                 "no_high_severity_safety_findings": not any(
-                    finding.severity in {"high", "critical"} for finding in analysis.safety_report.findings
+                    finding.severity in {"high", "critical"}
+                    for finding in analysis.safety_report.findings
                 ),
             }
             quality = evaluate_answer_text(
                 str((analysis.rag_output.get("answer") or {}).get("text") or ""),
                 unknown_or_research=case.get("case_type") == "unknown_research",
             )
-            checks.update({f"answer_{key}": value for key, value in quality.checks.items()})
+            checks.update(
+                {f"answer_{key}": value for key, value in quality.checks.items()}
+            )
             row = {
                 "case_id": case["case_id"],
                 "drugs": drugs,
@@ -105,7 +145,11 @@ def main() -> int:
 
     summary = {
         "ok": not failures,
-        "mode": "live_llm" if args.live_llm else "live_retrieval" if use_live_retrieval else "mock_context",
+        "mode": (
+            "live_llm"
+            if args.live_llm
+            else "live_retrieval" if use_live_retrieval else "mock_context"
+        ),
         "case_count": len(results),
         "failure_count": len(failures),
         "results": results,
@@ -119,10 +163,7 @@ def _load_cases(path: Path) -> list[dict[str, Any]]:
     with path.open("r", encoding="utf-8-sig", newline="") as handle:
         reader = csv.DictReader(handle)
         for raw in reader:
-            drugs = [
-                str(raw.get(f"Drug_{idx}") or "").strip()
-                for idx in range(1, 11)
-            ]
+            drugs = [str(raw.get(f"Drug_{idx}") or "").strip() for idx in range(1, 11)]
             drugs = [drug for drug in drugs if drug]
             if len(drugs) < 2:
                 continue
@@ -157,7 +198,9 @@ def _mock_context_runner(drug_a: str, drug_b: str, **kwargs: Any) -> dict[str, A
             "faers": {
                 "top_reactions_a": [[event, 10] for event in shared_signal["events_a"]],
                 "top_reactions_b": [[event, 8] for event in shared_signal["events_b"]],
-                "combo_reactions": [[event, 3] for event in shared_signal["combo_events"]],
+                "combo_reactions": [
+                    [event, 3] for event in shared_signal["combo_events"]
+                ],
             },
             "mechanistic": {
                 "enzymes_a": shared_signal["enzymes_a"],
@@ -170,15 +213,29 @@ def _mock_context_runner(drug_a: str, drug_b: str, **kwargs: Any) -> dict[str, A
             "pk_summary": shared_signal["pk_summary"],
             "pd_summary": shared_signal["pd_summary"],
             "pk_detail": {"overlaps": {"inhibition": shared_signal["shared_enzymes"]}},
-            "pd_detail": {"overlap_targets": shared_signal["shared_targets"], "overlap_pathways": []},
+            "pd_detail": {
+                "overlap_targets": shared_signal["shared_targets"],
+                "overlap_pathways": [],
+            },
         },
         "sources": {"duckdb": ["Benchmark mock context"], "openfda": [], "apis": []},
-        "source_status": [{"name": "Benchmark mock context", "enabled": True, "available": True, "reason": "offline evaluation"}],
-        "caveats": ["Benchmark mock context is structural only; it does not assess clinical truth."],
+        "source_status": [
+            {
+                "name": "Benchmark mock context",
+                "enabled": True,
+                "available": True,
+                "reason": "offline evaluation",
+            }
+        ],
+        "caveats": [
+            "Benchmark mock context is structural only; it does not assess clinical truth."
+        ],
     }
 
 
-def _mock_answer_generator(context: dict[str, Any], mode: str, **kwargs: Any) -> dict[str, Any]:
+def _mock_answer_generator(
+    context: dict[str, Any], mode: str, **kwargs: Any
+) -> dict[str, Any]:
     medset = context.get("medication_set") or {}
     pair_count = medset.get("pair_count", 1)
     return {
@@ -205,7 +262,9 @@ def _live_context_runner(drug_a: str, drug_b: str, **kwargs: Any) -> dict[str, A
     return _retrieve_pair_context(drug_a, drug_b, **kwargs)
 
 
-def _live_answer_generator(context: dict[str, Any], mode: str, **kwargs: Any) -> dict[str, Any]:
+def _live_answer_generator(
+    context: dict[str, Any], mode: str, **kwargs: Any
+) -> dict[str, Any]:
     from src.api.app import _generate_final_answer
 
     return _generate_final_answer(context, mode, **kwargs)
@@ -215,7 +274,13 @@ def _shared_signal(drug_a: str, drug_b: str) -> dict[str, Any]:
     key = f"{drug_a} {drug_b}".lower()
     bleeding_terms = {"warfarin", "aspirin", "ibuprofen", "apixaban", "sertraline"}
     qt_terms = {"amiodarone", "fluconazole", "azithromycin", "citalopram"}
-    cyp_terms = {"warfarin", "fluconazole", "amiodarone", "ketoconazole", "clarithromycin"}
+    cyp_terms = {
+        "warfarin",
+        "fluconazole",
+        "amiodarone",
+        "ketoconazole",
+        "clarithromycin",
+    }
     has_bleeding = any(term in key for term in bleeding_terms)
     has_qt = any(term in key for term in qt_terms)
     has_cyp = any(term in key for term in cyp_terms)
@@ -243,8 +308,14 @@ def _shared_signal(drug_a: str, drug_b: str) -> dict[str, Any]:
         "targets_a": shared_targets,
         "targets_b": shared_targets,
         "shared_targets": shared_targets,
-        "pk_summary": "Mock shared CYP pathway signal." if enzymes else "No mock PK overlap.",
-        "pd_summary": "Mock shared bleeding/QT toxicity signal." if events else "No mock PD overlap.",
+        "pk_summary": (
+            "Mock shared CYP pathway signal." if enzymes else "No mock PK overlap."
+        ),
+        "pd_summary": (
+            "Mock shared bleeding/QT toxicity signal."
+            if events
+            else "No mock PD overlap."
+        ),
     }
 
 

@@ -109,7 +109,10 @@ def _load_data_config() -> dict[str, Any]:
     in this YAML file.
     """
 
-    raw_path = os.getenv("INFERMED_DATA_CONFIG", _DEFAULT_DATA_CONFIG_PATH).strip() or _DEFAULT_DATA_CONFIG_PATH
+    raw_path = (
+        os.getenv("INFERMED_DATA_CONFIG", _DEFAULT_DATA_CONFIG_PATH).strip()
+        or _DEFAULT_DATA_CONFIG_PATH
+    )
     path = Path(raw_path)
     if not path.is_absolute():
         path = _PROJECT_ROOT / path
@@ -136,7 +139,9 @@ def _data_env_overrides_enabled() -> bool:
     return _env_bool("INFERMED_ALLOW_DATA_ENV_OVERRIDES", False)
 
 
-def _config_str(config: dict[str, Any], path: str, default: str, *, env_name: str | None = None) -> str:
+def _config_str(
+    config: dict[str, Any], path: str, default: str, *, env_name: str | None = None
+) -> str:
     if env_name and _data_env_overrides_enabled():
         raw = os.getenv(env_name)
         if raw is not None:
@@ -144,13 +149,17 @@ def _config_str(config: dict[str, Any], path: str, default: str, *, env_name: st
     return _as_str(_nested_get(config, path, default), default)
 
 
-def _config_bool(config: dict[str, Any], path: str, default: bool, *, env_name: str | None = None) -> bool:
+def _config_bool(
+    config: dict[str, Any], path: str, default: bool, *, env_name: str | None = None
+) -> bool:
     if env_name and _data_env_overrides_enabled() and os.getenv(env_name) is not None:
         return _env_bool(env_name, default)
     return _as_bool(_nested_get(config, path, default), default)
 
 
-def _config_int(config: dict[str, Any], path: str, default: int, *, env_name: str | None = None) -> int:
+def _config_int(
+    config: dict[str, Any], path: str, default: int, *, env_name: str | None = None
+) -> int:
     if env_name and _data_env_overrides_enabled() and os.getenv(env_name) is not None:
         return _env_int(env_name, default)
     return _as_int(_nested_get(config, path, default), default)
@@ -223,58 +232,151 @@ def get_settings() -> Settings:
     _load_dotenv_once()
     config = _load_data_config()
 
-    mode = _config_str(config, "runtime.data_mode", "public_safe", env_name="INFERMED_DATA_MODE").lower()
+    mode = _config_str(
+        config, "runtime.data_mode", "public_safe", env_name="INFERMED_DATA_MODE"
+    ).lower()
     if mode not in _VALID_DATA_MODES:
         mode = "public_safe"
 
-    enable_drugbank = _config_bool(config, "runtime.sources.drugbank", False, env_name="ENABLE_DRUGBANK")
-    enable_qlever = _config_bool(config, "runtime.sources.qlever", False, env_name="ENABLE_QLEVER")
+    enable_drugbank = _config_bool(
+        config, "runtime.sources.drugbank", False, env_name="ENABLE_DRUGBANK"
+    )
+    enable_qlever = _config_bool(
+        config, "runtime.sources.qlever", False, env_name="ENABLE_QLEVER"
+    )
 
     # Public-safe mode must not touch restricted DrugBank data or QLever runtime.
     if mode == "public_safe":
         enable_drugbank = False
         enable_qlever = False
 
-    cache_backend = _config_str(config, "runtime.cache.backend", "file", env_name="CACHE_BACKEND").lower()
+    cache_backend = _config_str(
+        config, "runtime.cache.backend", "file", env_name="CACHE_BACKEND"
+    ).lower()
 
     return Settings(
         data_mode=mode,  # type: ignore[arg-type]
-        data_manifest_path=_config_str(config, "runtime.data_manifest_path", _DEFAULT_DATA_CONFIG_PATH, env_name="DATA_MANIFEST_PATH"),
-        duckdb_dir=_config_str(config, "runtime.paths.duckdb_dir", "data/duckdb", env_name="DUCKDB_DIR"),
-        openfda_cache_dir=_config_str(config, "runtime.paths.openfda_cache_dir", "data/cache/openfda", env_name="OPENFDA_CACHE_DIR"),
+        data_manifest_path=_config_str(
+            config,
+            "runtime.data_manifest_path",
+            _DEFAULT_DATA_CONFIG_PATH,
+            env_name="DATA_MANIFEST_PATH",
+        ),
+        duckdb_dir=_config_str(
+            config, "runtime.paths.duckdb_dir", "data/duckdb", env_name="DUCKDB_DIR"
+        ),
+        openfda_cache_dir=_config_str(
+            config,
+            "runtime.paths.openfda_cache_dir",
+            "data/cache/openfda",
+            env_name="OPENFDA_CACHE_DIR",
+        ),
         cache_backend=cache_backend,
-        sqlite_cache_path=_config_str(config, "runtime.cache.sqlite_cache_path", "data/cache/infermed_cache.sqlite", env_name="SQLITE_CACHE_PATH"),
-        enable_event_store=_config_bool(config, "runtime.cache.enable_event_store", cache_backend == "sqlite", env_name="ENABLE_EVENT_STORE"),
-        openfda_ttl_days=_config_int(config, "runtime.source_settings.openfda_ttl_days", 30, env_name="OPENFDA_TTL_DAYS"),
-        evidence_cache_ttl_hours=_config_int(config, "runtime.cache.evidence_ttl_hours", 24),
-        chembl_timeout_s=_config_int(config, "runtime.source_settings.chembl_timeout_s", 10, env_name="CHEMBL_TIMEOUT"),
-        enable_duckdb=_config_bool(config, "runtime.sources.duckdb", True, env_name="ENABLE_DUCKDB"),
+        sqlite_cache_path=_config_str(
+            config,
+            "runtime.cache.sqlite_cache_path",
+            "data/cache/infermed_cache.sqlite",
+            env_name="SQLITE_CACHE_PATH",
+        ),
+        enable_event_store=_config_bool(
+            config,
+            "runtime.cache.enable_event_store",
+            cache_backend == "sqlite",
+            env_name="ENABLE_EVENT_STORE",
+        ),
+        openfda_ttl_days=_config_int(
+            config,
+            "runtime.source_settings.openfda_ttl_days",
+            30,
+            env_name="OPENFDA_TTL_DAYS",
+        ),
+        evidence_cache_ttl_hours=_config_int(
+            config, "runtime.cache.evidence_ttl_hours", 24
+        ),
+        chembl_timeout_s=_config_int(
+            config,
+            "runtime.source_settings.chembl_timeout_s",
+            10,
+            env_name="CHEMBL_TIMEOUT",
+        ),
+        enable_duckdb=_config_bool(
+            config, "runtime.sources.duckdb", True, env_name="ENABLE_DUCKDB"
+        ),
         enable_drugbank=enable_drugbank,
         enable_qlever=enable_qlever,
         enable_pubchem_rest=_config_bool(config, "runtime.sources.pubchem_rest", True),
-        enable_pubchem_pugview=_config_bool(config, "runtime.sources.pubchem_pugview", True),
-        enable_openfda=_config_bool(config, "runtime.sources.openfda", True, env_name="ENABLE_OPENFDA"),
-        enable_openfda_label=_config_bool(config, "runtime.sources.openfda_label", True, env_name="ENABLE_OPENFDA_LABEL"),
-        enable_dailymed=_config_bool(config, "runtime.sources.dailymed", True, env_name="ENABLE_DAILYMED"),
-        enable_rxnorm=_config_bool(config, "runtime.sources.rxnorm", True, env_name="ENABLE_RXNORM"),
+        enable_pubchem_pugview=_config_bool(
+            config, "runtime.sources.pubchem_pugview", True
+        ),
+        enable_openfda=_config_bool(
+            config, "runtime.sources.openfda", True, env_name="ENABLE_OPENFDA"
+        ),
+        enable_openfda_label=_config_bool(
+            config,
+            "runtime.sources.openfda_label",
+            True,
+            env_name="ENABLE_OPENFDA_LABEL",
+        ),
+        enable_dailymed=_config_bool(
+            config, "runtime.sources.dailymed", True, env_name="ENABLE_DAILYMED"
+        ),
+        enable_rxnorm=_config_bool(
+            config, "runtime.sources.rxnorm", True, env_name="ENABLE_RXNORM"
+        ),
         enable_chembl=_config_bool(config, "runtime.sources.chembl", True),
         enable_kegg=_config_bool(config, "runtime.sources.kegg", True),
         enable_reactome=_config_bool(config, "runtime.sources.reactome", True),
         enable_uniprot=_config_bool(config, "runtime.sources.uniprot", True),
-        enable_fda_pgx=_config_bool(config, "runtime.sources.fda_pgx", True, env_name="ENABLE_FDA_PGX"),
-        enable_europe_pmc=_config_bool(config, "runtime.sources.europe_pmc", True, env_name="ENABLE_EUROPE_PMC"),
-        enable_open_targets=_config_bool(config, "runtime.sources.open_targets", True, env_name="ENABLE_OPEN_TARGETS"),
-        enable_stringdb=_config_bool(config, "runtime.sources.stringdb", True, env_name="ENABLE_STRINGDB"),
-        enable_biogrid=_config_bool(config, "runtime.sources.biogrid", bool(_env_str("BIOGRID_ACCESS_KEY", "")), env_name="ENABLE_BIOGRID"),
-        enable_drugcentral=_config_bool(config, "runtime.sources.drugcentral", True, env_name="ENABLE_DRUGCENTRAL"),
-        enable_nci_almanac=_config_bool(config, "runtime.sources.nci_almanac", False, env_name="ENABLE_NCI_ALMANAC"),
-        enable_sider_nsides_offsides=_config_bool(config, "runtime.sources.sider_nsides_offsides", True, env_name="ENABLE_SIDER_NSIDES_OFFSIDES"),
-        enable_canonical_pkpd=_config_bool(config, "runtime.sources.canonical_pkpd", True, env_name="ENABLE_CANONICAL_PKPD"),
-        enable_semantic_search=_config_bool(config, "runtime.sources.semantic_search", False, env_name="ENABLE_SEMANTIC_SEARCH"),
-        enable_reranking=_config_bool(config, "runtime.sources.reranking", False, env_name="ENABLE_RERANKING"),
+        enable_fda_pgx=_config_bool(
+            config, "runtime.sources.fda_pgx", True, env_name="ENABLE_FDA_PGX"
+        ),
+        enable_europe_pmc=_config_bool(
+            config, "runtime.sources.europe_pmc", True, env_name="ENABLE_EUROPE_PMC"
+        ),
+        enable_open_targets=_config_bool(
+            config, "runtime.sources.open_targets", True, env_name="ENABLE_OPEN_TARGETS"
+        ),
+        enable_stringdb=_config_bool(
+            config, "runtime.sources.stringdb", True, env_name="ENABLE_STRINGDB"
+        ),
+        enable_biogrid=_config_bool(
+            config,
+            "runtime.sources.biogrid",
+            bool(_env_str("BIOGRID_ACCESS_KEY", "")),
+            env_name="ENABLE_BIOGRID",
+        ),
+        enable_drugcentral=_config_bool(
+            config, "runtime.sources.drugcentral", True, env_name="ENABLE_DRUGCENTRAL"
+        ),
+        enable_nci_almanac=_config_bool(
+            config, "runtime.sources.nci_almanac", False, env_name="ENABLE_NCI_ALMANAC"
+        ),
+        enable_sider_nsides_offsides=_config_bool(
+            config,
+            "runtime.sources.sider_nsides_offsides",
+            True,
+            env_name="ENABLE_SIDER_NSIDES_OFFSIDES",
+        ),
+        enable_canonical_pkpd=_config_bool(
+            config,
+            "runtime.sources.canonical_pkpd",
+            True,
+            env_name="ENABLE_CANONICAL_PKPD",
+        ),
+        enable_semantic_search=_config_bool(
+            config,
+            "runtime.sources.semantic_search",
+            False,
+            env_name="ENABLE_SEMANTIC_SEARCH",
+        ),
+        enable_reranking=_config_bool(
+            config, "runtime.sources.reranking", False, env_name="ENABLE_RERANKING"
+        ),
         llm_provider=_env_str("LLM_PROVIDER", "mock").lower(),
         nvidia_api_key=os.getenv("NVIDIA_API_KEY", ""),
-        nvidia_base_url=_env_str("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1"),
+        nvidia_base_url=_env_str(
+            "NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1"
+        ),
         nvidia_model=_env_str("NVIDIA_MODEL", ""),
         nvidia_gemma_api_key=os.getenv("NVIDIA_GEMMA_API_KEY", ""),
         nvidia_gemma_model=_env_str("NVIDIA_GEMMA_MODEL", ""),
@@ -283,16 +385,22 @@ def get_settings() -> Settings:
         nvidia_reasoning_effort=_env_str("NVIDIA_REASONING_EFFORT", "").lower(),
         ollama_host=_env_str("OLLAMA_HOST", "http://localhost:11434"),
         ollama_model=_env_str("OLLAMA_MODEL", "gpt-oss"),
-        ollama_timeout_s=_env_float("OLLAMA_TIMEOUT_S", _env_float("LLM_TIMEOUT_S", 5000.0)),
+        ollama_timeout_s=_env_float(
+            "OLLAMA_TIMEOUT_S", _env_float("LLM_TIMEOUT_S", 5000.0)
+        ),
         ollama_num_predict=_env_int("OLLAMA_NUM_PREDICT", -1),
         ollama_num_ctx=_env_int("OLLAMA_NUM_CTX", 8192),
         ollama_reasoning_effort=_env_str("OLLAMA_REASONING_EFFORT", "").lower(),
         ollama_keep_alive=_env_str("OLLAMA_KEEP_ALIVE", "30m"),
         string_caller_identity=_env_str("STRING_CALLER_IDENTITY", "infermed-research"),
         biogrid_access_key=os.getenv("BIOGRID_ACCESS_KEY", ""),
-        llm_temperature=_env_float("LLM_TEMPERATURE", _env_float("NVIDIA_TEMPERATURE", 1.0)),
+        llm_temperature=_env_float(
+            "LLM_TEMPERATURE", _env_float("NVIDIA_TEMPERATURE", 1.0)
+        ),
         llm_top_p=_env_float("LLM_TOP_P", _env_float("NVIDIA_TOP_P", 1.0)),
         llm_max_tokens=_env_int("LLM_MAX_TOKENS", _env_int("NVIDIA_MAX_TOKENS", 4096)),
         llm_stream=_env_bool("LLM_STREAM", _env_bool("NVIDIA_STREAM", False)),
-        llm_timeout_s=_env_float("LLM_TIMEOUT_S", _env_float("NVIDIA_TIMEOUT_S", 300.0)),
+        llm_timeout_s=_env_float(
+            "LLM_TIMEOUT_S", _env_float("NVIDIA_TIMEOUT_S", 300.0)
+        ),
     )

@@ -32,7 +32,10 @@ class ExplanationVerifier:
         safety_report: SafetyReport,
     ) -> GroundingVerification:
         text = (answer_text or "").lower()
-        contains_dose_language = any(term in text for term in ("reduce the dose", "dose reduction", "increase the dose"))
+        contains_dose_language = any(
+            term in text
+            for term in ("reduce the dose", "dose reduction", "increase the dose")
+        )
         notes = [
             "Deterministic grounding verifier.",
             "A model-based critic can be added after decision/evidence schemas stabilize.",

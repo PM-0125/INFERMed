@@ -20,33 +20,76 @@ from markdown_it import MarkdownIt
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CASES = PROJECT_ROOT / "TESTCASES" / "infermed_5_drug_benchmark_100.csv"
 DEFAULT_OUTPUT_ROOT = PROJECT_ROOT / "data" / "response"
-_MARKDOWN_RENDERER = MarkdownIt("commonmark", {"html": False, "linkify": False, "typographer": False})
+_MARKDOWN_RENDERER = MarkdownIt(
+    "commonmark", {"html": False, "linkify": False, "typographer": False}
+)
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Run INFERMed doctor-review test cases and export raw plus readable response packets."
     )
-    parser.add_argument("--cases", default=str(DEFAULT_CASES), help="CSV or XLSX test case file.")
-    parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_ROOT), help="Root output folder. A timestamped run folder is created inside it.")
-    parser.add_argument("--run-dir", default="", help="Existing run directory to resume or rebuild.")
-    parser.add_argument("--resume", action="store_true", help="Reuse successful raw case JSON files already present in --run-dir.")
-    parser.add_argument("--retry-attempts", type=int, default=1, help="Attempts per not-yet-successful case.")
+    parser.add_argument(
+        "--cases", default=str(DEFAULT_CASES), help="CSV or XLSX test case file."
+    )
+    parser.add_argument(
+        "--output-dir",
+        default=str(DEFAULT_OUTPUT_ROOT),
+        help="Root output folder. A timestamped run folder is created inside it.",
+    )
+    parser.add_argument(
+        "--run-dir", default="", help="Existing run directory to resume or rebuild."
+    )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Reuse successful raw case JSON files already present in --run-dir.",
+    )
+    parser.add_argument(
+        "--retry-attempts",
+        type=int,
+        default=1,
+        help="Attempts per not-yet-successful case.",
+    )
     parser.add_argument(
         "--inter-case-delay-s",
         type=int,
         default=0,
         help="Cooldown between completed case requests to reduce hosted-provider pressure.",
     )
-    parser.add_argument("--api-url", default="http://127.0.0.1:8000", help="FastAPI base URL.")
+    parser.add_argument(
+        "--api-url", default="http://127.0.0.1:8000", help="FastAPI base URL."
+    )
     parser.add_argument("--limit", type=int, default=2, help="Maximum cases to run.")
-    parser.add_argument("--case-id", action="append", default=[], help="Run only a specific Case_ID. Can be repeated.")
-    parser.add_argument("--audience", default="doctor", choices=["doctor", "patient", "pv_research"])
-    parser.add_argument("--refresh-evidence", action="store_true", help="Force fresh evidence retrieval.")
+    parser.add_argument(
+        "--case-id",
+        action="append",
+        default=[],
+        help="Run only a specific Case_ID. Can be repeated.",
+    )
+    parser.add_argument(
+        "--audience", default="doctor", choices=["doctor", "patient", "pv_research"]
+    )
+    parser.add_argument(
+        "--refresh-evidence",
+        action="store_true",
+        help="Force fresh evidence retrieval.",
+    )
     parser.add_argument("--timeout-s", type=int, default=900, help="Timeout per case.")
-    parser.add_argument("--wait-api-s", type=int, default=120, help="How long to wait for the API before running each case.")
-    parser.add_argument("--patient-context-json", default="", help="JSON object applied to every case.")
-    parser.add_argument("--pdf", action="store_true", help="Also try to render doctor_review.pdf with Python Playwright if installed.")
+    parser.add_argument(
+        "--wait-api-s",
+        type=int,
+        default=120,
+        help="How long to wait for the API before running each case.",
+    )
+    parser.add_argument(
+        "--patient-context-json", default="", help="JSON object applied to every case."
+    )
+    parser.add_argument(
+        "--pdf",
+        action="store_true",
+        help="Also try to render doctor_review.pdf with Python Playwright if installed.",
+    )
     args = parser.parse_args()
 
     patient_context = _parse_patient_context(args.patient_context_json)
@@ -60,14 +103,21 @@ def main() -> int:
         print(json.dumps({"ok": False, "error": "No cases selected."}, indent=2))
         return 2
 
-    run_dir = Path(args.run_dir) if args.run_dir else Path(args.output_dir) / datetime.now(timezone.utc).strftime("run_%Y%m%d_%H%M%S")
+    run_dir = (
+        Path(args.run_dir)
+        if args.run_dir
+        else Path(args.output_dir)
+        / datetime.now(timezone.utc).strftime("run_%Y%m%d_%H%M%S")
+    )
     raw_dir = run_dir / "raw"
     raw_dir.mkdir(parents=True, exist_ok=True)
     for stale_error in raw_dir.glob("*.error.json"):
         stale_error.unlink(missing_ok=True)
 
     readiness = _get_json(f"{args.api_url.rstrip('/')}/api/readiness", timeout_s=20)
-    (run_dir / "readiness.json").write_text(json.dumps(readiness, indent=2, ensure_ascii=False), encoding="utf-8")
+    (run_dir / "readiness.json").write_text(
+        json.dumps(readiness, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
 
     results: list[dict[str, Any]] = []
     for index, case in enumerate(cases, start=1):
@@ -75,13 +125,22 @@ def main() -> int:
         if args.resume and case_file.exists():
             existing_row = _result_row_from_raw(case_file, run_dir)
             if _result_is_usable(existing_row.get("result") or {}):
-                print(f"[{index}/{len(cases)}] Reusing {case['case_id']}: {', '.join(case['drugs'])}", flush=True)
+                print(
+                    f"[{index}/{len(cases)}] Reusing {case['case_id']}: {', '.join(case['drugs'])}",
+                    flush=True,
+                )
                 results.append(existing_row)
                 continue
-            print(f"[{index}/{len(cases)}] Re-running {case['case_id']} because the saved output is a provider fallback.", flush=True)
+            print(
+                f"[{index}/{len(cases)}] Re-running {case['case_id']} because the saved output is a provider fallback.",
+                flush=True,
+            )
             case_file.unlink(missing_ok=True)
 
-        print(f"[{index}/{len(cases)}] Running {case['case_id']}: {', '.join(case['drugs'])}", flush=True)
+        print(
+            f"[{index}/{len(cases)}] Running {case['case_id']}: {', '.join(case['drugs'])}",
+            flush=True,
+        )
         if not _wait_for_api(args.api_url, timeout_s=args.wait_api_s):
             failure = {
                 "ok": False,
@@ -113,7 +172,9 @@ def main() -> int:
                 "progress": progress,
                 "result": result,
             }
-            case_file.write_text(json.dumps(raw_payload, indent=2, ensure_ascii=False), encoding="utf-8")
+            case_file.write_text(
+                json.dumps(raw_payload, indent=2, ensure_ascii=False), encoding="utf-8"
+            )
             display = _display_result(result)
             results.append(
                 {
@@ -166,7 +227,9 @@ def main() -> int:
             for row in results
         ],
     }
-    (run_dir / "summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
+    (run_dir / "summary.json").write_text(
+        json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
     (run_dir / "responses.jsonl").write_text(
         "\n".join(json.dumps(row, ensure_ascii=False) for row in results),
         encoding="utf-8",
@@ -182,9 +245,16 @@ def main() -> int:
     if args.pdf:
         pdf_status = _try_render_pdf(html_path, run_dir / packet["pdf_filename"])
         summary["pdf"] = pdf_status
-        (run_dir / "summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
+        (run_dir / "summary.json").write_text(
+            json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
 
-    print(json.dumps({"ok": summary["ok"], "run_dir": str(run_dir), "pdf": pdf_status}, indent=2), flush=True)
+    print(
+        json.dumps(
+            {"ok": summary["ok"], "run_dir": str(run_dir), "pdf": pdf_status}, indent=2
+        ),
+        flush=True,
+    )
     return 0 if summary["ok"] else 1
 
 
@@ -194,21 +264,30 @@ def _load_cases(path: Path) -> list[dict[str, Any]]:
     suffix = path.suffix.lower()
     if suffix == ".csv":
         with path.open("r", encoding="utf-8-sig", newline="") as handle:
-            return [_case_from_row(row, index) for index, row in enumerate(csv.DictReader(handle), start=1)]
+            return [
+                _case_from_row(row, index)
+                for index, row in enumerate(csv.DictReader(handle), start=1)
+            ]
     if suffix in {".xlsx", ".xls"}:
         try:
             import pandas as pd
         except ImportError as exc:
-            raise RuntimeError("Reading XLSX requires pandas/openpyxl in the project venv.") from exc
+            raise RuntimeError(
+                "Reading XLSX requires pandas/openpyxl in the project venv."
+            ) from exc
         workbook = pd.ExcelFile(path)
         cases: list[dict[str, Any]] = []
         for sheet_name in workbook.sheet_names:
             frame = pd.read_excel(workbook, sheet_name=sheet_name)
             columns = {str(column) for column in frame.columns}
-            if "Case_ID" not in columns and not any(column.startswith("Drug_") for column in columns):
+            if "Case_ID" not in columns and not any(
+                column.startswith("Drug_") for column in columns
+            ):
                 continue
             for row in frame.to_dict("records"):
-                case = _case_from_row({str(k): v for k, v in row.items()}, len(cases) + 1)
+                case = _case_from_row(
+                    {str(k): v for k, v in row.items()}, len(cases) + 1
+                )
                 if len(case["drugs"]) >= 2:
                     case["sheet"] = sheet_name
                     cases.append(case)
@@ -239,18 +318,24 @@ def _case_from_row(row: dict[str, Any], index: int) -> dict[str, Any]:
 
 
 def _extract_drugs(row: dict[str, Any]) -> list[str]:
-    drugs = [
-        _clean(row.get(f"Drug_{idx}"))
-        for idx in range(1, 16)
-    ]
+    drugs = [_clean(row.get(f"Drug_{idx}")) for idx in range(1, 16)]
     drugs = [drug for drug in drugs if drug]
     if drugs:
         return drugs
 
-    for column in ("Drugs", "Drug_List", "Medication_List", "Medications", "Combination", "Drug_Combination"):
+    for column in (
+        "Drugs",
+        "Drug_List",
+        "Medication_List",
+        "Medications",
+        "Combination",
+        "Drug_Combination",
+    ):
         raw = _clean(row.get(column))
         if raw:
-            parts = raw.replace(" and ", ",").replace("+", ",").replace(";", ",").split(",")
+            parts = (
+                raw.replace(" and ", ",").replace("+", ",").replace(";", ",").split(",")
+            )
             return [part.strip() for part in parts if part.strip()]
     return []
 
@@ -321,7 +406,10 @@ def _run_case_with_retries(
             print(f"  attempt {attempt} failed: {exc}", flush=True)
             if attempt < attempts:
                 backoff_s = min(60, 20 * attempt)
-                print(f"  waiting {backoff_s}s before the next provider attempt", flush=True)
+                print(
+                    f"  waiting {backoff_s}s before the next provider attempt",
+                    flush=True,
+                )
                 time.sleep(backoff_s)
     raise RuntimeError(str(last_error) if last_error else "case failed")
 
@@ -375,12 +463,18 @@ def _run_case(
     errors = [event for event in events if event.get("type") == "error"]
     if errors:
         raise RuntimeError(str(errors[-1].get("detail") or errors[-1]))
-    results = [event.get("result") for event in events if event.get("type") == "result" and event.get("result")]
+    results = [
+        event.get("result")
+        for event in events
+        if event.get("type") == "result" and event.get("result")
+    ]
     if not results:
         raise RuntimeError("Stream ended without a result event.")
     result = results[-1]
     if not _result_is_usable(result):
-        raise RuntimeError("Model returned a provider fallback instead of a usable doctor response.")
+        raise RuntimeError(
+            "Model returned a provider fallback instead of a usable doctor response."
+        )
     return result, progress
 
 
@@ -397,7 +491,11 @@ def _parse_sse(content: str) -> list[dict[str, Any]]:
 
 
 def _display_result(result: dict[str, Any]) -> dict[str, Any]:
-    compatibility = result.get("compatibility") if isinstance(result.get("compatibility"), dict) else {}
+    compatibility = (
+        result.get("compatibility")
+        if isinstance(result.get("compatibility"), dict)
+        else {}
+    )
     display = result if result.get("assessment") else compatibility
     return {
         "analysis_id": result.get("analysisId") or result.get("analysis_id"),
@@ -405,10 +503,16 @@ def _display_result(result: dict[str, Any]) -> dict[str, Any]:
         "risk": display.get("risk") or {},
         "assessment": display.get("assessment") or [],
         "evidence": display.get("evidence") or {},
-        "executed_pairs": result.get("executedPairs") or result.get("executed_pairs") or [],
-        "ndrug_reasoning": result.get("ndrugReasoning") or result.get("ndrug_reasoning") or {},
+        "executed_pairs": result.get("executedPairs")
+        or result.get("executed_pairs")
+        or [],
+        "ndrug_reasoning": result.get("ndrugReasoning")
+        or result.get("ndrug_reasoning")
+        or {},
         "decision": result.get("decision") or {},
-        "safety_report": result.get("safetyReport") or result.get("safety_report") or {},
+        "safety_report": result.get("safetyReport")
+        or result.get("safety_report")
+        or {},
         "response_provenance": result.get("response_provenance") or {},
     }
 
@@ -432,7 +536,9 @@ def _result_is_usable(result: dict[str, Any]) -> bool:
 
 
 def _result_assessment_text(result: dict[str, Any]) -> str:
-    display = result if result.get("assessment") else (result.get("compatibility") or {})
+    display = (
+        result if result.get("assessment") else (result.get("compatibility") or {})
+    )
     parts = []
     assessment = display.get("assessment") or []
     if isinstance(assessment, dict):
@@ -459,7 +565,9 @@ def _render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str
     ]
     for row in rows:
         case = row["case"]
-        lines.extend(["---", "", f"## {case['case_id']}: {' + '.join(case['drugs'])}", ""])
+        lines.extend(
+            ["---", "", f"## {case['case_id']}: {' + '.join(case['drugs'])}", ""]
+        )
         display = row.get("display") or {}
         provenance = display.get("response_provenance") or {}
         if row.get("ok") and provenance:
@@ -475,7 +583,9 @@ def _render_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str
             )
         lines.extend(_case_metadata_markdown(case, row))
         if not row.get("ok"):
-            lines.extend(["", "### Run Error", "", str(row.get("error") or "Unknown error"), ""])
+            lines.extend(
+                ["", "### Run Error", "", str(row.get("error") or "Unknown error"), ""]
+            )
             continue
         display = row["display"]
         risk = display["risk"]
@@ -548,7 +658,9 @@ def _evidence_markdown(evidence: dict[str, Any]) -> list[str]:
         if rows:
             for item in rows:
                 meta = f" ({item.get('meta')})" if item.get("meta") else ""
-                lines.append(f"- **{item.get('title')}{meta}:** {item.get('description')}")
+                lines.append(
+                    f"- **{item.get('title')}{meta}:** {item.get('description')}"
+                )
         else:
             lines.append("- No rows returned.")
         caveat = card.get("caveat")
@@ -559,7 +671,9 @@ def _evidence_markdown(evidence: dict[str, Any]) -> list[str]:
     if sources:
         lines.extend(["#### Sources", ""])
         for source in sources:
-            lines.append(f"- {source.get('name')} - {source.get('state')}: {source.get('detail')}")
+            lines.append(
+                f"- {source.get('name')} - {source.get('state')}: {source.get('detail')}"
+            )
     return lines
 
 
@@ -568,7 +682,9 @@ def _render_html(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
     body = []
     for row in rows:
         case = row["case"]
-        body.append(f"<section class='case'><h2>{_h(case['case_id'])}: {_h(' + '.join(case['drugs']))}</h2>")
+        body.append(
+            f"<section class='case'><h2>{_h(case['case_id'])}: {_h(' + '.join(case['drugs']))}</h2>"
+        )
         display = row.get("display") or {}
         provenance = display.get("response_provenance") or {}
         if row.get("ok") and provenance:
@@ -591,12 +707,18 @@ def _render_html(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
             ("Ground truth status", case.get("ground_truth_status"), True),
         ]:
             css_class = " class='pdf-excluded'" if pdf_excluded else ""
-            body.append(f"<div{css_class}><span>{_h(label)}</span><p>{_h(value or 'not specified')}</p></div>")
+            body.append(
+                f"<div{css_class}><span>{_h(label)}</span><p>{_h(value or 'not specified')}</p></div>"
+            )
         if row.get("patient_context"):
-            body.append(f"<div><span>Patient context</span><p>{_h(json.dumps(row['patient_context'], ensure_ascii=False))}</p></div>")
+            body.append(
+                f"<div><span>Patient context</span><p>{_h(json.dumps(row['patient_context'], ensure_ascii=False))}</p></div>"
+            )
         body.append("</div>")
         if not row.get("ok"):
-            body.append(f"<div class='error'>Run error: {_h(row.get('error') or 'Unknown error')}</div></section>")
+            body.append(
+                f"<div class='error'>Run error: {_h(row.get('error') or 'Unknown error')}</div></section>"
+            )
             continue
         display = row["display"]
         risk = display["risk"]
@@ -817,7 +939,11 @@ def _evidence_html(evidence: dict[str, Any]) -> str:
         if not metrics and not rows:
             rows.append("<p class='evidence-empty'>No evidence rows returned.</p>")
         caveat = card.get("caveat")
-        caveat_html = f"<p class='evidence-caveat'><strong>Caveat:</strong> {_h(caveat)}</p>" if caveat else ""
+        caveat_html = (
+            f"<p class='evidence-caveat'><strong>Caveat:</strong> {_h(caveat)}</p>"
+            if caveat
+            else ""
+        )
         cards.append(
             f"<section class='evidence-card'><h4>{_h(label)}</h4>"
             f"<div class='evidence-metrics'>{''.join(metrics)}</div>"
@@ -828,7 +954,11 @@ def _evidence_html(evidence: dict[str, Any]) -> str:
     if references:
         reference_rows = []
         for reference in references:
-            meta = f" <small>({_h(reference.get('meta'))})</small>" if reference.get("meta") else ""
+            meta = (
+                f" <small>({_h(reference.get('meta'))})</small>"
+                if reference.get("meta")
+                else ""
+            )
             reference_rows.append(
                 "<div class='evidence-row'>"
                 f"<h5>{_h(reference.get('title') or 'Reference')}{meta}</h5>"
@@ -859,7 +989,17 @@ def _try_render_pdf(html_path: Path, pdf_path: Path) -> dict[str, Any]:
             browser = playwright.chromium.launch()
             page = browser.new_page()
             page.goto(html_path.resolve().as_uri(), wait_until="networkidle")
-            page.pdf(path=str(pdf_path), format="A4", print_background=True, margin={"top": "14mm", "bottom": "14mm", "left": "12mm", "right": "12mm"})
+            page.pdf(
+                path=str(pdf_path),
+                format="A4",
+                print_background=True,
+                margin={
+                    "top": "14mm",
+                    "bottom": "14mm",
+                    "left": "12mm",
+                    "right": "12mm",
+                },
+            )
             browser.close()
         return {"ok": True, "path": str(pdf_path)}
     except Exception as exc:
@@ -904,11 +1044,31 @@ def _find_browser_executable() -> str:
         if found:
             return found
     candidates = [
-        Path(os.environ.get("ProgramFiles", "")) / "Google" / "Chrome" / "Application" / "chrome.exe",
-        Path(os.environ.get("ProgramFiles(x86)", "")) / "Google" / "Chrome" / "Application" / "chrome.exe",
-        Path(os.environ.get("LocalAppData", "")) / "Google" / "Chrome" / "Application" / "chrome.exe",
-        Path(os.environ.get("ProgramFiles", "")) / "Microsoft" / "Edge" / "Application" / "msedge.exe",
-        Path(os.environ.get("ProgramFiles(x86)", "")) / "Microsoft" / "Edge" / "Application" / "msedge.exe",
+        Path(os.environ.get("ProgramFiles", ""))
+        / "Google"
+        / "Chrome"
+        / "Application"
+        / "chrome.exe",
+        Path(os.environ.get("ProgramFiles(x86)", ""))
+        / "Google"
+        / "Chrome"
+        / "Application"
+        / "chrome.exe",
+        Path(os.environ.get("LocalAppData", ""))
+        / "Google"
+        / "Chrome"
+        / "Application"
+        / "chrome.exe",
+        Path(os.environ.get("ProgramFiles", ""))
+        / "Microsoft"
+        / "Edge"
+        / "Application"
+        / "msedge.exe",
+        Path(os.environ.get("ProgramFiles(x86)", ""))
+        / "Microsoft"
+        / "Edge"
+        / "Application"
+        / "msedge.exe",
     ]
     for candidate in candidates:
         if candidate.is_file():
@@ -943,7 +1103,9 @@ def _clean(value: Any) -> str:
 
 
 def _safe_name(value: str) -> str:
-    safe = "".join(char if char.isalnum() or char in {"-", "_"} else "_" for char in value.strip())
+    safe = "".join(
+        char if char.isalnum() or char in {"-", "_"} else "_" for char in value.strip()
+    )
     return safe or "case"
 
 

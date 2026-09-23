@@ -1,2 +1,1 @@
 """Clinical decision domain."""
-

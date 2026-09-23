@@ -86,9 +86,18 @@ def test_generate_response_error_path_disclaimer(monkeypatch):
 @pytest.mark.parametrize(
     ("base_url", "expected"),
     [
-        ("https://integrate.api.nvidia.com", "https://integrate.api.nvidia.com/v1/chat/completions"),
-        ("https://integrate.api.nvidia.com/v1", "https://integrate.api.nvidia.com/v1/chat/completions"),
-        ("https://integrate.api.nvidia.com/v1/", "https://integrate.api.nvidia.com/v1/chat/completions"),
+        (
+            "https://integrate.api.nvidia.com",
+            "https://integrate.api.nvidia.com/v1/chat/completions",
+        ),
+        (
+            "https://integrate.api.nvidia.com/v1",
+            "https://integrate.api.nvidia.com/v1/chat/completions",
+        ),
+        (
+            "https://integrate.api.nvidia.com/v1/",
+            "https://integrate.api.nvidia.com/v1/chat/completions",
+        ),
         (
             "https://integrate.api.nvidia.com/v1/chat/completions",
             "https://integrate.api.nvidia.com/v1/chat/completions",
@@ -147,7 +156,10 @@ def test_nvidia_reasoning_effort_is_optional_payload_field(monkeypatch):
         text = ""
 
         def json(self):
-            return {"choices": [{"message": {"content": "OK"}}], "usage": {"completion_tokens": 1}}
+            return {
+                "choices": [{"message": {"content": "OK"}}],
+                "usage": {"completion_tokens": 1},
+            }
 
     def fake_post(url, **kwargs):
         seen["json"] = kwargs["json"]
@@ -236,7 +248,9 @@ def test_nvidia_uses_gemma_secondary_after_primary_gateway_error(monkeypatch):
             return {"choices": [{"message": {"content": "Gemma answer"}}], "usage": {}}
 
     def fake_post(url, **kwargs):
-        seen.append({"auth": kwargs["headers"]["Authorization"], "payload": kwargs["json"]})
+        seen.append(
+            {"auth": kwargs["headers"]["Authorization"], "payload": kwargs["json"]}
+        )
         return GatewayResp() if len(seen) == 1 else OkResp()
 
     monkeypatch.setattr(requests, "post", fake_post, raising=True)
@@ -372,12 +386,19 @@ def test_nvidia_nonstream_uses_reasoning_when_content_missing(monkeypatch):
         def json(self):
             return {
                 "choices": [
-                    {"message": {"content": "", "reasoning_content": "hidden reasoning only"}}
+                    {
+                        "message": {
+                            "content": "",
+                            "reasoning_content": "hidden reasoning only",
+                        }
+                    }
                 ],
                 "usage": {"completion_tokens": 128},
             }
 
-    monkeypatch.setattr(requests, "post", lambda *args, **kwargs: FakeResp(), raising=True)
+    monkeypatch.setattr(
+        requests, "post", lambda *args, **kwargs: FakeResp(), raising=True
+    )
 
     out = generate_response(MINIMAL_CTX, "Doctor", seed=123)
 
@@ -410,8 +431,14 @@ def test_truncation_notice_for_large_context():
     huge_list = [f"path_{i}" for i in range(200)]
     big_ctx = {
         "drugs": {
-            "a": {"name": "DrugA", "ids": {"pubchem_cid": "111", "drugbank": "DB00001"}},
-            "b": {"name": "DrugB", "ids": {"pubchem_cid": "222", "drugbank": "DB00002"}},
+            "a": {
+                "name": "DrugA",
+                "ids": {"pubchem_cid": "111", "drugbank": "DB00001"},
+            },
+            "b": {
+                "name": "DrugB",
+                "ids": {"pubchem_cid": "222", "drugbank": "DB00002"},
+            },
         },
         "signals": {
             "mechanistic": {
@@ -440,33 +467,52 @@ def test_truncation_notice_for_large_context():
                 "diqt_b": 0.2,
             },
         },
-        "sources": {"duckdb": ["TwoSides"], "qlever": ["PubChem RDF subset"], "openfda": ["FAERS"]},
+        "sources": {
+            "duckdb": ["TwoSides"],
+            "qlever": ["PubChem RDF subset"],
+            "openfda": ["FAERS"],
+        },
         "caveats": ["QLever index sampled subset"],
     }
 
     p = build_prompt(big_ctx, "Doctor")
     assert "[Note: some context was truncated for length.]" in p
 
+
 def test_manual_demo_print_only():
     from src.llm.llm_interface import generate_response
+
     ctx = {
-        "drugs": {"a":{"name":"warfarin","ids":{}}, "b":{"name":"fluconazole","ids":{}}},
-        "signals": {"mechanistic":{"enzymes":{
-            "a":{"substrate":["CYP2C9"],"inhibitor":[],"inducer":[]},
-            "b":{"substrate":[],"inhibitor":["CYP2C9"],"inducer":[]}
-        }}},
-        "sources": {"duckdb":["TwoSides"], "qlever":["PubChem RDF subset"], "openfda":["FAERS"]},
+        "drugs": {
+            "a": {"name": "warfarin", "ids": {}},
+            "b": {"name": "fluconazole", "ids": {}},
+        },
+        "signals": {
+            "mechanistic": {
+                "enzymes": {
+                    "a": {"substrate": ["CYP2C9"], "inhibitor": [], "inducer": []},
+                    "b": {"substrate": [], "inhibitor": ["CYP2C9"], "inducer": []},
+                }
+            }
+        },
+        "sources": {
+            "duckdb": ["TwoSides"],
+            "qlever": ["PubChem RDF subset"],
+            "openfda": ["FAERS"],
+        },
     }
     out = generate_response(ctx, "Doctor", seed=42)
     print(out["text"])
 
+
 # --- Optional add-ons below your current tests ---
+
 
 def test_history_block_is_included_in_prompt():
     hist = [
         {"role": "user", "text": "Are DrugA and DrugB safe together?"},
         {"role": "assistant", "text": "They may interact; monitor."},
-        {"role": "user", "text": "What should I watch for?"}
+        {"role": "user", "text": "What should I watch for?"},
     ]
     p = build_prompt(MINIMAL_CTX, "Patient", history=hist)
     assert "## HISTORY (previous turns, summarized)" in p
@@ -475,6 +521,7 @@ def test_history_block_is_included_in_prompt():
     # Policy block should be present
     assert "[POLICY]" in p
 
+
 def test_strip_template_safety_and_single_disclaimer(monkeypatch):
     """Simulate a model that echoes a template safety line; ensure we strip it and append exactly one disclaimer."""
     monkeypatch.setenv("LLM_PROVIDER", "ollama")
@@ -482,6 +529,7 @@ def test_strip_template_safety_and_single_disclaimer(monkeypatch):
 
     class FakeResp:
         status_code = 200
+
         def json(self):
             return {
                 "response": '...analysis...\n"This is research software; final decisions rest with licensed clinicians."\n',
@@ -507,12 +555,11 @@ def test_mock_provider_has_no_network_dependency(monkeypatch):
     assert "Bottom-line risk" in out["text"]
     assert "Disclaimer: Research prototype." in out["text"]
 
+
 def test_policy_present_in_prompt_patient_mode():
     p = build_prompt(MINIMAL_CTX, "Patient")
     assert "[POLICY]" in p
     assert "Use ONLY the evidence" in p
-
-
 
 
 def test_sources_block_explicit_when_empty():
@@ -532,12 +579,27 @@ def test_prompt_includes_enrichment_sources_when_present():
             "mechanistic": {
                 "targets_a": ["CYP2C9"],
                 "uniprot_ids_a": ["P11712"],
-                "kegg_pathways_a": [{"pathway_id": "hsa00982", "pathway_name": "Drug metabolism - cytochrome P450"}],
-                "reactome_pathways_b": [{"pathway_id": "R-HSA-1234", "pathway_name": "Hemostasis"}],
+                "kegg_pathways_a": [
+                    {
+                        "pathway_id": "hsa00982",
+                        "pathway_name": "Drug metabolism - cytochrome P450",
+                    }
+                ],
+                "reactome_pathways_b": [
+                    {"pathway_id": "R-HSA-1234", "pathway_name": "Hemostasis"}
+                ],
                 "chembl_enrichment": {
                     "a": {
-                        "chembl_validation": {"found": True, "matches": ["cyp2c9"], "mismatches": []},
-                        "enzyme_strength": {"strong": ["cyp2c9"], "moderate": [], "weak": []},
+                        "chembl_validation": {
+                            "found": True,
+                            "matches": ["cyp2c9"],
+                            "mismatches": [],
+                        },
+                        "enzyme_strength": {
+                            "strong": ["cyp2c9"],
+                            "moderate": [],
+                            "weak": [],
+                        },
                     }
                 },
             },

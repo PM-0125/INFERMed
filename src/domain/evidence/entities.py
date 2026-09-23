@@ -75,7 +75,9 @@ class SourceCaveat:
         return asdict(self)
 
 
-def evidence_id_for(analysis_id: str, source_name: str, claim_type: str, claim_text: str) -> str:
+def evidence_id_for(
+    analysis_id: str, source_name: str, claim_type: str, claim_text: str
+) -> str:
     payload = {
         "analysis_id": analysis_id,
         "source_name": source_name,

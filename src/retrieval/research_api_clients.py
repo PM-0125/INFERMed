@@ -35,7 +35,9 @@ def _clean_text(value: Any, *, max_chars: int = 500) -> str:
     return text
 
 
-def _dedupe_rows(rows: list[dict[str, Any]], *, key_fields: tuple[str, ...], limit: int) -> list[dict[str, Any]]:
+def _dedupe_rows(
+    rows: list[dict[str, Any]], *, key_fields: tuple[str, ...], limit: int
+) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     seen: set[tuple[str, ...]] = set()
     for row in rows:
@@ -91,7 +93,9 @@ class EuropePMCClient:
         self.timeout = int(timeout)
         self._session = requests.Session()
 
-    def search_interaction_literature(self, drug_a: str, drug_b: str, *, limit: int = 5) -> dict[str, Any]:
+    def search_interaction_literature(
+        self, drug_a: str, drug_b: str, *, limit: int = 5
+    ) -> dict[str, Any]:
         a = str(drug_a or "").strip()
         b = str(drug_b or "").strip()
         if not a or not b:
@@ -119,7 +123,11 @@ class EuropePMCClient:
             },
         )
         articles: list[dict[str, Any]] = []
-        for row in ((payload or {}).get("resultList") or {}).get("result", []) if isinstance(payload, dict) else []:
+        for row in (
+            ((payload or {}).get("resultList") or {}).get("result", [])
+            if isinstance(payload, dict)
+            else []
+        ):
             if not isinstance(row, dict):
                 continue
             pmid = str(row.get("pmid") or "").strip()
@@ -143,7 +151,9 @@ class EuropePMCClient:
                     "url": url,
                 }
             )
-        articles = _dedupe_rows(articles, key_fields=("title", "pmid", "doi"), limit=limit)
+        articles = _dedupe_rows(
+            articles, key_fields=("title", "pmid", "doi"), limit=limit
+        )
         out = {
             "query": query,
             "found": bool(articles),
@@ -179,11 +189,18 @@ class StringDBClient:
         self.caller_identity = caller_identity
         self._session = requests.Session()
 
-    def get_network_summary(self, identifiers: list[str], *, species: int = 9606, limit: int = 12) -> dict[str, Any]:
+    def get_network_summary(
+        self, identifiers: list[str], *, species: int = 9606, limit: int = 12
+    ) -> dict[str, Any]:
         seeds = [str(item).strip() for item in identifiers if str(item or "").strip()]
         seeds = list(dict.fromkeys(seeds))[:limit]
         if not seeds:
-            return {"found": False, "mapped": [], "interactions": [], "query_identifiers": []}
+            return {
+                "found": False,
+                "mapped": [],
+                "interactions": [],
+                "query_identifiers": [],
+            }
 
         key = f"stringdb__network__{species}__{'__'.join(seeds)}"
         cached = load_json(self.cache_dir, key, ttl=self.ttl_seconds)
@@ -230,14 +247,20 @@ class StringDBClient:
                 continue
             interactions.append(
                 {
-                    "protein_a": str(row.get("preferredName_A") or row.get("stringId_A") or ""),
-                    "protein_b": str(row.get("preferredName_B") or row.get("stringId_B") or ""),
+                    "protein_a": str(
+                        row.get("preferredName_A") or row.get("stringId_A") or ""
+                    ),
+                    "protein_b": str(
+                        row.get("preferredName_B") or row.get("stringId_B") or ""
+                    ),
                     "score": row.get("score"),
                     "annotation_a": _clean_text(row.get("annotation_A"), max_chars=140),
                     "annotation_b": _clean_text(row.get("annotation_B"), max_chars=140),
                 }
             )
-        interactions = _dedupe_rows(interactions, key_fields=("protein_a", "protein_b"), limit=limit)
+        interactions = _dedupe_rows(
+            interactions, key_fields=("protein_a", "protein_b"), limit=limit
+        )
         out = {
             "query_identifiers": seeds,
             "found": bool(mapped_rows or interactions),
@@ -309,7 +332,10 @@ class DrugCentralClient:
                 f"{DRUGCENTRAL_API_BASE}/act_table_full/struct_id/{selected['id']}",
                 timeout=self.timeout,
             )
-            targets = self._normalize_targets(targets_payload if isinstance(targets_payload, list) else [], target_limit)
+            targets = self._normalize_targets(
+                targets_payload if isinstance(targets_payload, list) else [],
+                target_limit,
+            )
 
         out = {
             "drug": name,
@@ -381,7 +407,11 @@ class DrugCentralClient:
                     "moa_source": str(row.get("moa_source") or ""),
                 }
             )
-        return _dedupe_rows(targets, key_fields=("gene", "target_name", "act_type", "act_value"), limit=limit)
+        return _dedupe_rows(
+            targets,
+            key_fields=("gene", "target_name", "act_type", "act_value"),
+            limit=limit,
+        )
 
 
 class OpenTargetsClient:
@@ -430,7 +460,11 @@ class OpenTargetsClient:
             headers={"Content-Type": "application/json"},
         )
         errors = payload.get("errors") if isinstance(payload, dict) else None
-        rows = (((payload or {}).get("data") or {}).get("search") or {}).get("hits") if isinstance(payload, dict) else []
+        rows = (
+            (((payload or {}).get("data") or {}).get("search") or {}).get("hits")
+            if isinstance(payload, dict)
+            else []
+        )
         hits: list[dict[str, Any]] = []
         for row in rows or []:
             if not isinstance(row, dict):
@@ -512,7 +546,10 @@ class FDAPGxClient:
         key = f"fda_pgx__page__{index}"
         cached = load_json(self.cache_dir, key, ttl=self.ttl_seconds)
         if cached is not None:
-            return {"url": str(cached.get("url") or url), "text": str(cached.get("text") or "")}
+            return {
+                "url": str(cached.get("url") or url),
+                "text": str(cached.get("text") or ""),
+            }
         text = ""
         for attempt in range(3):
             try:
@@ -532,7 +569,9 @@ class FDAPGxClient:
         return payload
 
     @staticmethod
-    def _matches_for_drug(drug: str, pages: list[dict[str, str]]) -> list[dict[str, str]]:
+    def _matches_for_drug(
+        drug: str, pages: list[dict[str, str]]
+    ) -> list[dict[str, str]]:
         if not drug:
             return []
         pattern = re.compile(re.escape(drug), re.IGNORECASE)
@@ -571,7 +610,9 @@ class BioGRIDClient:
         self.timeout = int(timeout)
         self._session = requests.Session()
 
-    def get_interactions(self, identifiers: list[str], *, tax_id: int = 9606, limit: int = 20) -> dict[str, Any]:
+    def get_interactions(
+        self, identifiers: list[str], *, tax_id: int = 9606, limit: int = 20
+    ) -> dict[str, Any]:
         seeds = [str(item).strip() for item in identifiers if str(item or "").strip()]
         seeds = list(dict.fromkeys(seeds))[:limit]
         if not self.access_key:
@@ -582,7 +623,12 @@ class BioGRIDClient:
                 "interactions": [],
             }
         if not seeds:
-            return {"found": False, "available": True, "interactions": [], "query_identifiers": []}
+            return {
+                "found": False,
+                "available": True,
+                "interactions": [],
+                "query_identifiers": [],
+            }
 
         key = f"biogrid__interactions__{tax_id}__{'__'.join(seeds)}"
         cached = load_json(self.cache_dir, key, ttl=self.ttl_seconds)
@@ -604,20 +650,37 @@ class BioGRIDClient:
             },
         )
         rows: list[dict[str, Any]] = []
-        source_rows = payload.values() if isinstance(payload, dict) else payload if isinstance(payload, list) else []
+        source_rows = (
+            payload.values()
+            if isinstance(payload, dict)
+            else payload if isinstance(payload, list) else []
+        )
         for row in source_rows:
             if not isinstance(row, dict):
                 continue
             rows.append(
                 {
-                    "interactor_a": str(row.get("OFFICIAL_SYMBOL_A") or row.get("BIOGRID_ID_A") or ""),
-                    "interactor_b": str(row.get("OFFICIAL_SYMBOL_B") or row.get("BIOGRID_ID_B") or ""),
+                    "interactor_a": str(
+                        row.get("OFFICIAL_SYMBOL_A") or row.get("BIOGRID_ID_A") or ""
+                    ),
+                    "interactor_b": str(
+                        row.get("OFFICIAL_SYMBOL_B") or row.get("BIOGRID_ID_B") or ""
+                    ),
                     "experimental_system": str(row.get("EXPERIMENTAL_SYSTEM") or ""),
                     "throughput": str(row.get("THROUGHPUT") or ""),
                     "pubmed_id": str(row.get("PUBMED_ID") or ""),
                 }
             )
-        rows = _dedupe_rows(rows, key_fields=("interactor_a", "interactor_b", "experimental_system", "pubmed_id"), limit=limit)
+        rows = _dedupe_rows(
+            rows,
+            key_fields=(
+                "interactor_a",
+                "interactor_b",
+                "experimental_system",
+                "pubmed_id",
+            ),
+            limit=limit,
+        )
         out = {
             "query_identifiers": seeds,
             "found": bool(rows),

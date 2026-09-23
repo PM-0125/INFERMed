@@ -16,5 +16,17 @@ class EvaluationScore:
         return asdict(self)
 
 
-def pass_fail(case_id: str, checks: dict[str, bool], *, notes: list[str] | None = None, payload: dict[str, Any] | None = None) -> EvaluationScore:
-    return EvaluationScore(case_id=case_id, passed=all(checks.values()), checks=checks, notes=notes or [], payload=payload or {})
+def pass_fail(
+    case_id: str,
+    checks: dict[str, bool],
+    *,
+    notes: list[str] | None = None,
+    payload: dict[str, Any] | None = None,
+) -> EvaluationScore:
+    return EvaluationScore(
+        case_id=case_id,
+        passed=all(checks.values()),
+        checks=checks,
+        notes=notes or [],
+        payload=payload or {},
+    )

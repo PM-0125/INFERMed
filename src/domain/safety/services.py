@@ -45,7 +45,9 @@ class ZeroTrustSafetyGate:
         text = answer_text or ""
         findings: list[SafetyFinding] = []
 
-        if _has_quantitative_dose_guidance(text) and not _has_dose_evidence(evidence_cards):
+        if _has_quantitative_dose_guidance(text) and not _has_dose_evidence(
+            evidence_cards
+        ):
             findings.append(
                 SafetyFinding(
                     finding_type="unsupported_dose_guidance",
@@ -66,7 +68,10 @@ class ZeroTrustSafetyGate:
                 )
             )
 
-        if _PATIENT_SPECIFIC_RE.search(text) and reasoning_record.known_status != "known_direct":
+        if (
+            _PATIENT_SPECIFIC_RE.search(text)
+            and reasoning_record.known_status != "known_direct"
+        ):
             findings.append(
                 SafetyFinding(
                     finding_type="unsupported_patient_specific_action",
@@ -78,7 +83,9 @@ class ZeroTrustSafetyGate:
                 )
             )
 
-        if reasoning_record.known_status.startswith("unknown") and not _UNCERTAINTY_RE.search(text):
+        if reasoning_record.known_status.startswith(
+            "unknown"
+        ) and not _UNCERTAINTY_RE.search(text):
             findings.append(
                 SafetyFinding(
                     finding_type="unscoped_hypothesis",
@@ -87,17 +94,23 @@ class ZeroTrustSafetyGate:
                 )
             )
 
-        if reasoning_record.missing_profile_elements and not _UNCERTAINTY_RE.search(text):
+        if reasoning_record.missing_profile_elements and not _UNCERTAINTY_RE.search(
+            text
+        ):
             findings.append(
                 SafetyFinding(
                     finding_type="missing_evidence_disclosure",
                     severity="low",
                     message="The explanation does not disclose missing profile elements.",
-                    payload={"missing_profile_elements": reasoning_record.missing_profile_elements},
+                    payload={
+                        "missing_profile_elements": reasoning_record.missing_profile_elements
+                    },
                 )
             )
 
-        if _mentions_association_source(text) and not _contains_association_caveat(text):
+        if _mentions_association_source(text) and not _contains_association_caveat(
+            text
+        ):
             findings.append(
                 SafetyFinding(
                     finding_type="missing_source_caveat",
@@ -119,8 +132,12 @@ class ZeroTrustSafetyGate:
 
         return SafetyReport(
             analysis_id=analysis_id,
-            allow_generation=not any(item.severity in {"critical"} for item in findings),
-            requires_review=any(item.severity in {"medium", "high", "critical"} for item in findings),
+            allow_generation=not any(
+                item.severity in {"critical"} for item in findings
+            ),
+            requires_review=any(
+                item.severity in {"medium", "high", "critical"} for item in findings
+            ),
             findings=findings,
             guardrail_notes=[
                 "Dose guidance requires direct dose-specific evidence.",
@@ -138,23 +155,46 @@ def _has_dose_evidence(cards: list[EvidenceCard]) -> bool:
     strong_grades = {"label", "guideline", "clinical_study", "pk_study"}
     for card in cards:
         searchable = f"{card.claim_type} {card.claim_text}".lower()
-        if card.evidence_grade in strong_grades and any(term in searchable for term in ("dose", "dosing", "dosage")):
+        if card.evidence_grade in strong_grades and any(
+            term in searchable for term in ("dose", "dosing", "dosage")
+        ):
             return True
     return False
 
 
 def _mentions_association_source(text: str) -> bool:
-    return bool(re.search(r"\b(?:faers|prr|twosides|offsides|nsides|spontaneous reports?)\b", text, re.IGNORECASE))
+    return bool(
+        re.search(
+            r"\b(?:faers|prr|twosides|offsides|nsides|spontaneous reports?)\b",
+            text,
+            re.IGNORECASE,
+        )
+    )
 
 
 def _contains_association_caveat(text: str) -> bool:
-    return bool(re.search(r"\b(?:associative|association|not causal|not causality|does not prove|signal only|reporting)\b", text, re.IGNORECASE))
+    return bool(
+        re.search(
+            r"\b(?:associative|association|not causal|not causality|does not prove|signal only|reporting)\b",
+            text,
+            re.IGNORECASE,
+        )
+    )
 
 
 def _unsupported_named_claims(text: str, cards: list[EvidenceCard]) -> list[str]:
-    evidence_text = " ".join(f"{card.source_name} {card.claim_type} {card.claim_text}" for card in cards).lower()
+    evidence_text = " ".join(
+        f"{card.source_name} {card.claim_type} {card.claim_text}" for card in cards
+    ).lower()
     claims: list[str] = []
-    for term in ("guideline", "clinical trial", "boxed warning", "contraindicated", "drug label", "pharmacogenomic"):
+    for term in (
+        "guideline",
+        "clinical trial",
+        "boxed warning",
+        "contraindicated",
+        "drug label",
+        "pharmacogenomic",
+    ):
         if term in text.lower() and term not in evidence_text:
             claims.append(term)
     return claims

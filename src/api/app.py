@@ -16,7 +16,10 @@ from src.api.schemas import AnalyzeRequest, FollowUpRequest, MedicationSetAnalyz
 from src.api.transformers import build_interaction_result, cited_cards_from_context
 from src.application.commands import AnalyzeMedicationSetCommand
 from src.application.use_cases.analyze_medication_set import AnalyzeMedicationSetUseCase
-from src.application.use_cases.answer_followup import AnswerFollowUpCommand, AnswerFollowUpUseCase
+from src.application.use_cases.answer_followup import (
+    AnswerFollowUpCommand,
+    AnswerFollowUpUseCase,
+)
 from src.config.settings import get_settings
 from src.config.data_policy import get_source_status
 from src.llm.llm_interface import generate_followup_response, generate_response
@@ -50,7 +53,9 @@ def health() -> dict[str, Any]:
     return {
         "ok": True,
         "provider": settings.llm_provider,
-        "modelConfigured": bool(settings.nvidia_model if settings.llm_provider == "nvidia" else True),
+        "modelConfigured": bool(
+            settings.nvidia_model if settings.llm_provider == "nvidia" else True
+        ),
         "dataMode": settings.data_mode,
     }
 
@@ -67,10 +72,14 @@ def analyze_interaction(request: AnalyzeRequest) -> dict[str, Any]:
             )
         )
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Interaction analysis failed: {exc}") from exc
+        raise HTTPException(
+            status_code=500, detail=f"Interaction analysis failed: {exc}"
+        ) from exc
 
     drug_a, drug_b = analysis.executed_pair
-    response = build_interaction_result(analysis.rag_output, fallback_drug_a=drug_a, fallback_drug_b=drug_b)
+    response = build_interaction_result(
+        analysis.rag_output, fallback_drug_a=drug_a, fallback_drug_b=drug_b
+    )
     response.update(analysis.to_read_model())
     return response
 
@@ -88,17 +97,23 @@ def analyze_medication_set(request: MedicationSetAnalyzeRequest) -> dict[str, An
             )
         )
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Medication-set analysis failed: {exc}") from exc
+        raise HTTPException(
+            status_code=500, detail=f"Medication-set analysis failed: {exc}"
+        ) from exc
 
     return _medication_set_response(analysis)
 
 
 @app.post("/api/medication-sets/analyze/stream")
-def analyze_medication_set_stream(request: MedicationSetAnalyzeRequest) -> StreamingResponse:
+def analyze_medication_set_stream(
+    request: MedicationSetAnalyzeRequest,
+) -> StreamingResponse:
     events: queue.Queue[dict[str, Any] | None] = queue.Queue()
 
     def progress(stage: str, message: str, payload: dict[str, Any]) -> None:
-        events.put({"type": "progress", "stage": stage, "message": message, "payload": payload})
+        events.put(
+            {"type": "progress", "stage": stage, "message": message, "payload": payload}
+        )
 
     def worker() -> None:
         try:
@@ -119,17 +134,30 @@ def analyze_medication_set_stream(request: MedicationSetAnalyzeRequest) -> Strea
                 progress_callback=progress,
                 token_callback=lambda text: events.put({"type": "token", "text": text}),
             )
-            log.info("INFERMed analysis completed: analysis_id=%s", analysis.analysis_id)
+            log.info(
+                "INFERMed analysis completed: analysis_id=%s", analysis.analysis_id
+            )
             events.put({"type": "result", "result": _medication_set_response(analysis)})
         except Exception as exc:
             log.exception("INFERMed analysis failed")
-            events.put({"type": "error", "detail": f"Medication-set analysis failed: {exc}"})
+            events.put(
+                {"type": "error", "detail": f"Medication-set analysis failed: {exc}"}
+            )
         finally:
             events.put(None)
 
     def stream() -> Any:
-        yield _sse({"type": "progress", "stage": "queued", "message": "Analysis queued.", "payload": {}})
-        thread = threading.Thread(target=worker, name="infermed-analysis-stream", daemon=True)
+        yield _sse(
+            {
+                "type": "progress",
+                "stage": "queued",
+                "message": "Analysis queued.",
+                "payload": {},
+            }
+        )
+        thread = threading.Thread(
+            target=worker, name="infermed-analysis-stream", daemon=True
+        )
         thread.start()
         started = time.monotonic()
         heartbeat = 0
@@ -152,13 +180,18 @@ def analyze_medication_set_stream(request: MedicationSetAnalyzeRequest) -> Strea
                 break
             yield _sse(item)
 
-    return StreamingResponse(stream(), media_type="text/event-stream",
-                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 def _medication_set_response(analysis: Any) -> dict[str, Any]:
     drug_a, drug_b = analysis.executed_pair
-    legacy = build_interaction_result(analysis.rag_output, fallback_drug_a=drug_a, fallback_drug_b=drug_b)
+    legacy = build_interaction_result(
+        analysis.rag_output, fallback_drug_a=drug_a, fallback_drug_b=drug_b
+    )
     return {
         **legacy,
         **analysis.to_read_model(),
@@ -166,21 +199,29 @@ def _medication_set_response(analysis: Any) -> dict[str, Any]:
             item.decision.to_dict()
             for item in analysis.pair_results
             if item.decision is not None
-        ][:8] or [analysis.decision.to_dict()],
+        ][:8]
+        or [analysis.decision.to_dict()],
         "topRisks": [
             item.decision.to_dict()
             for item in analysis.pair_results
             if item.decision is not None
-        ][:8] or [analysis.decision.to_dict()],
+        ][:8]
+        or [analysis.decision.to_dict()],
         "explanation": {"sections": legacy["assessment"]},
         "evidence_panels": legacy["evidence"],
         "evidencePanels": legacy["evidence"],
         "source_status": legacy["evidence"].get("sources", []),
         "sourceStatus": legacy["evidence"].get("sources", []),
         "evidenceFreshness": [
-            {"pair": list(item.pair),
-             "assembledAt": (item.context.get("meta") or {}).get("evidence_assembled_at"),
-             "cacheStatus": (item.context.get("meta") or {}).get("evidence_cache_status", "unknown")}
+            {
+                "pair": list(item.pair),
+                "assembledAt": (item.context.get("meta") or {}).get(
+                    "evidence_assembled_at"
+                ),
+                "cacheStatus": (item.context.get("meta") or {}).get(
+                    "evidence_cache_status", "unknown"
+                ),
+            }
             for item in analysis.pair_results
         ],
         "limitations": analysis.decision.source_limitations,
@@ -190,7 +231,10 @@ def _medication_set_response(analysis: Any) -> dict[str, Any]:
 
 @app.on_event("startup")
 def startup_readiness_log() -> None:
-    report = _readiness_report(check_llm=os.getenv("INFERMED_STARTUP_LLM_CHECK", "").lower() in {"1", "true", "yes", "on"})
+    report = _readiness_report(
+        check_llm=os.getenv("INFERMED_STARTUP_LLM_CHECK", "").lower()
+        in {"1", "true", "yes", "on"}
+    )
     log.info(
         "INFERMed readiness: ready=%s provider=%s model=%s data_mode=%s sources=%s unavailable=%s",
         report["ready"],
@@ -205,7 +249,9 @@ def startup_readiness_log() -> None:
 
 
 @app.get("/api/readiness")
-def readiness(llm: bool = Query(False, description="Run a tiny real LLM connectivity ping.")) -> dict[str, Any]:
+def readiness(
+    llm: bool = Query(False, description="Run a tiny real LLM connectivity ping.")
+) -> dict[str, Any]:
     return _readiness_report(check_llm=llm)
 
 
@@ -280,7 +326,9 @@ def _retrieve_pair_context(drug_a: str, drug_b: str, **kwargs: Any) -> dict[str,
     return context
 
 
-def _generate_final_answer(context: dict[str, Any], mode: str, **kwargs: Any) -> dict[str, Any]:
+def _generate_final_answer(
+    context: dict[str, Any], mode: str, **kwargs: Any
+) -> dict[str, Any]:
     patient_context = kwargs.get("patient_context")
     if patient_context:
         context = dict(context)
@@ -288,11 +336,27 @@ def _generate_final_answer(context: dict[str, Any], mode: str, **kwargs: Any) ->
         medication_set["patient_context"] = patient_context
         context["medication_set"] = medication_set
     settings = get_settings()
-    gemma_configured = bool(settings.nvidia_gemma_api_key and settings.nvidia_gemma_model)
-    gemma_primary = settings.llm_provider == "nvidia" and settings.nvidia_prefer_gemma and gemma_configured
+    gemma_configured = bool(
+        settings.nvidia_gemma_api_key and settings.nvidia_gemma_model
+    )
+    gemma_primary = (
+        settings.llm_provider == "nvidia"
+        and settings.nvidia_prefer_gemma
+        and gemma_configured
+    )
     if settings.llm_provider == "nvidia":
-        primary_model = settings.nvidia_gemma_model if gemma_primary else settings.nvidia_model
-        route = "gemma-first" if gemma_primary else ("default-first-with-gemma-failover" if gemma_configured else "single-model")
+        primary_model = (
+            settings.nvidia_gemma_model if gemma_primary else settings.nvidia_model
+        )
+        route = (
+            "gemma-first"
+            if gemma_primary
+            else (
+                "default-first-with-gemma-failover"
+                if gemma_configured
+                else "single-model"
+            )
+        )
         reasoning = "n/a" if gemma_primary else settings.nvidia_reasoning_effort
     else:
         primary_model = settings.ollama_model
@@ -305,12 +369,27 @@ def _generate_final_answer(context: dict[str, Any], mode: str, **kwargs: Any) ->
         primary_model,
         reasoning,
         settings.llm_stream,
-        settings.ollama_num_predict if settings.llm_provider == "ollama" else settings.llm_max_tokens,
-        settings.ollama_timeout_s if settings.llm_provider == "ollama" else settings.llm_timeout_s,
+        (
+            settings.ollama_num_predict
+            if settings.llm_provider == "ollama"
+            else settings.llm_max_tokens
+        ),
+        (
+            settings.ollama_timeout_s
+            if settings.llm_provider == "ollama"
+            else settings.llm_timeout_s
+        ),
     )
     started = time.monotonic()
     stream_options = {"on_text": kwargs["on_text"]} if kwargs.get("on_text") else {}
-    answer = generate_response(context, mode, seed=42, temperature=settings.llm_temperature, model_name=None, **stream_options)
+    answer = generate_response(
+        context,
+        mode,
+        seed=42,
+        temperature=settings.llm_temperature,
+        model_name=None,
+        **stream_options,
+    )
     answer_meta = answer.get("meta") or {}
     log.info(
         "INFERMed final LLM call completed: elapsed_s=%.1f answer_chars=%s provider=%s model=%s route_variant=%s",
@@ -322,7 +401,9 @@ def _generate_final_answer(context: dict[str, Any], mode: str, **kwargs: Any) ->
     )
     if answer_meta.get("provider") is None:
         error_preview = " ".join(str(answer.get("text") or "").split())[:320]
-        log.warning("INFERMed final LLM call produced no provider result: %s", error_preview)
+        log.warning(
+            "INFERMed final LLM call produced no provider result: %s", error_preview
+        )
     return answer
 
 
@@ -350,7 +431,9 @@ def _readiness_report(*, check_llm: bool = False) -> dict[str, Any]:
         if row.enabled and not row.available
     ]
     llm_status = _llm_readiness(settings, check_llm=check_llm)
-    if not llm_status["configured"] or (check_llm and not llm_status.get("connected", False)):
+    if not llm_status["configured"] or (
+        check_llm and not llm_status.get("connected", False)
+    ):
         issues.append(f"LLM: {llm_status.get('detail')}")
     ready = not issues
     return {
@@ -364,8 +447,12 @@ def _readiness_report(*, check_llm: bool = False) -> dict[str, Any]:
         "llm": llm_status,
         "sources": {
             "enabled_count": sum(1 for row in source_rows if row.enabled),
-            "available_enabled_count": sum(1 for row in source_rows if row.enabled and row.available),
-            "unavailable_enabled_count": sum(1 for row in source_rows if row.enabled and not row.available),
+            "available_enabled_count": sum(
+                1 for row in source_rows if row.enabled and row.available
+            ),
+            "unavailable_enabled_count": sum(
+                1 for row in source_rows if row.enabled and not row.available
+            ),
             "items": sources,
         },
         "issues": issues,
@@ -380,7 +467,11 @@ def _llm_readiness(settings: Any, *, check_llm: bool) -> dict[str, Any]:
             "configured": bool(settings.nvidia_api_key and settings.nvidia_model),
             "connected": None,
             "checked": False,
-            "detail": "NVIDIA_API_KEY and NVIDIA_MODEL configured" if settings.nvidia_api_key and settings.nvidia_model else "Missing NVIDIA_API_KEY or NVIDIA_MODEL",
+            "detail": (
+                "NVIDIA_API_KEY and NVIDIA_MODEL configured"
+                if settings.nvidia_api_key and settings.nvidia_model
+                else "Missing NVIDIA_API_KEY or NVIDIA_MODEL"
+            ),
             "stream": settings.llm_stream,
             "timeout_s": settings.llm_timeout_s,
             "max_tokens": settings.llm_max_tokens,
@@ -413,7 +504,11 @@ def _nvidia_ping(settings: Any) -> dict[str, Any]:
 
     started = time.monotonic()
     url = settings.nvidia_base_url.rstrip("/")
-    endpoint = url + "/chat/completions" if url.endswith("/v1") else url + "/v1/chat/completions"
+    endpoint = (
+        url + "/chat/completions"
+        if url.endswith("/v1")
+        else url + "/v1/chat/completions"
+    )
     payload = {
         "model": settings.nvidia_model,
         "messages": [{"role": "user", "content": "Reply with OK only."}],
@@ -427,12 +522,20 @@ def _nvidia_ping(settings: Any) -> dict[str, Any]:
     try:
         response = requests.post(
             endpoint,
-            headers={"Authorization": f"Bearer {settings.nvidia_api_key}", "Content-Type": "application/json"},
+            headers={
+                "Authorization": f"Bearer {settings.nvidia_api_key}",
+                "Content-Type": "application/json",
+            },
             json=payload,
             timeout=min(float(settings.llm_timeout_s), 30.0),
         )
     except requests.RequestException as exc:
-        return {"checked": True, "connected": False, "detail": f"NVIDIA ping failed: {exc}", "latency_s": round(time.monotonic() - started, 2)}
+        return {
+            "checked": True,
+            "connected": False,
+            "detail": f"NVIDIA ping failed: {exc}",
+            "latency_s": round(time.monotonic() - started, 2),
+        }
     if response.status_code != 200:
         return {
             "checked": True,
@@ -440,7 +543,12 @@ def _nvidia_ping(settings: Any) -> dict[str, Any]:
             "detail": f"NVIDIA ping HTTP {response.status_code}: {response.text[:160]}",
             "latency_s": round(time.monotonic() - started, 2),
         }
-    return {"checked": True, "connected": True, "detail": "NVIDIA ping succeeded", "latency_s": round(time.monotonic() - started, 2)}
+    return {
+        "checked": True,
+        "connected": True,
+        "detail": "NVIDIA ping succeeded",
+        "latency_s": round(time.monotonic() - started, 2),
+    }
     try:
         return SQLiteEventStore(settings.sqlite_cache_path)
     except Exception:

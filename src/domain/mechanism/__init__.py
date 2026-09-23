@@ -1,2 +1,1 @@
 """Mechanism graph domain."""
-

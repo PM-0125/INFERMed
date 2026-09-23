@@ -41,8 +41,10 @@ LOG = logging.getLogger(__name__)
 
 # ---------- Helpers ----------
 
+
 def _p(*parts: str) -> str:
     return str(Path(*parts))
+
 
 def _norm_name(s: Optional[str]) -> Optional[str]:
     if s is None:
@@ -50,8 +52,10 @@ def _norm_name(s: Optional[str]) -> Optional[str]:
     s = str(s).strip().replace("\xa0", " ")
     return s.lower()
 
+
 def _sql_path(path: str) -> str:
     return str(path).replace("'", "''")
+
 
 def _file_exists(base_dir: str, filename: str) -> bool:
     return Path(base_dir, filename).exists()
@@ -61,6 +65,7 @@ _REGISTERED_VIEWS_BY_BASE: Dict[Tuple[str, bool, bool, bool, bool], set[str]] = 
 
 
 # ---------- Connection / View Registration ----------
+
 
 @lru_cache(maxsize=8)
 def init_duckdb_connection(
@@ -75,15 +80,29 @@ def init_duckdb_connection(
     """
     settings = get_settings()
     base_dir = os.path.abspath(base_dir)
-    use_duckdb = settings.enable_duckdb if enable_duckdb is None else bool(enable_duckdb)
-    use_drugbank = settings.enable_drugbank if enable_drugbank is None else bool(enable_drugbank)
+    use_duckdb = (
+        settings.enable_duckdb if enable_duckdb is None else bool(enable_duckdb)
+    )
+    use_drugbank = (
+        settings.enable_drugbank if enable_drugbank is None else bool(enable_drugbank)
+    )
     use_sider_nsides_offsides = (
         settings.enable_sider_nsides_offsides
         if enable_sider_nsides_offsides is None
         else bool(enable_sider_nsides_offsides)
     )
-    use_nci_almanac = settings.enable_nci_almanac if enable_nci_almanac is None else bool(enable_nci_almanac)
-    key = (base_dir, use_drugbank, use_duckdb, use_sider_nsides_offsides, use_nci_almanac)
+    use_nci_almanac = (
+        settings.enable_nci_almanac
+        if enable_nci_almanac is None
+        else bool(enable_nci_almanac)
+    )
+    key = (
+        base_dir,
+        use_drugbank,
+        use_duckdb,
+        use_sider_nsides_offsides,
+        use_nci_almanac,
+    )
     if duckdb is None:
         _REGISTERED_VIEWS_BY_BASE[key] = set()
         return None
@@ -127,8 +146,10 @@ def _register_views(
     # Check if enzyme_action_map column exists in parquet
     if enable_drugbank and _file_exists(base_dir, "drugbank.parquet"):
         try:
-            schema = con.execute(f"DESCRIBE SELECT * FROM read_parquet('{_sql_path(drugbank)}') LIMIT 0").fetchall()
-            has_enzyme_action_map = any(col[0] == 'enzyme_action_map' for col in schema)
+            schema = con.execute(
+                f"DESCRIBE SELECT * FROM read_parquet('{_sql_path(drugbank)}') LIMIT 0"
+            ).fetchall()
+            has_enzyme_action_map = any(col[0] == "enzyme_action_map" for col in schema)
             if has_enzyme_action_map:
                 con.execute(f"""
                     CREATE OR REPLACE VIEW drugbank AS
@@ -164,7 +185,9 @@ def _register_views(
                 """)
             registered.add("drugbank")
         except Exception as e:
-            LOG.warning("DrugBank parquet was present but could not be registered: %s", e)
+            LOG.warning(
+                "DrugBank parquet was present but could not be registered: %s", e
+            )
 
     # TwoSides (tidy long)
     if _file_exists(base_dir, "twosides.parquet"):
@@ -180,7 +203,9 @@ def _register_views(
             """)
             registered.add("twosides")
         except Exception as e:
-            LOG.warning("TWOSIDES parquet was present but could not be registered: %s", e)
+            LOG.warning(
+                "TWOSIDES parquet was present but could not be registered: %s", e
+            )
 
     # OFFSIDES (single-drug off-label ADE signals)
     if enable_sider_nsides_offsides and _file_exists(base_dir, "offsides.parquet"):
@@ -196,10 +221,14 @@ def _register_views(
             """)
             registered.add("offsides")
         except Exception as e:
-            LOG.warning("OFFSIDES parquet was present but could not be registered: %s", e)
+            LOG.warning(
+                "OFFSIDES parquet was present but could not be registered: %s", e
+            )
 
     # SIDER label-derived side effects
-    if enable_sider_nsides_offsides and _file_exists(base_dir, "sider_label_side_effects.parquet"):
+    if enable_sider_nsides_offsides and _file_exists(
+        base_dir, "sider_label_side_effects.parquet"
+    ):
         try:
             con.execute(f"""
                 CREATE OR REPLACE VIEW sider_label_side_effects AS
@@ -213,7 +242,10 @@ def _register_views(
             """)
             registered.add("sider_label_side_effects")
         except Exception as e:
-            LOG.warning("SIDER label side-effect parquet was present but could not be registered: %s", e)
+            LOG.warning(
+                "SIDER label side-effect parquet was present but could not be registered: %s",
+                e,
+            )
 
     # NCI-ALMANAC experimental oncology combination screen.
     if enable_nci_almanac and _file_exists(base_dir, "nci_almanac.parquet"):
@@ -251,7 +283,9 @@ def _register_views(
             """)
             registered.add("nci_almanac")
         except Exception as e:
-            LOG.warning("NCI-ALMANAC parquet was present but could not be registered: %s", e)
+            LOG.warning(
+                "NCI-ALMANAC parquet was present but could not be registered: %s", e
+            )
 
     if enable_nci_almanac and _file_exists(base_dir, "nci_almanac_compounds.parquet"):
         try:
@@ -265,7 +299,10 @@ def _register_views(
             """)
             registered.add("nci_almanac_compounds")
         except Exception as e:
-            LOG.warning("NCI-ALMANAC compound alias parquet was present but could not be registered: %s", e)
+            LOG.warning(
+                "NCI-ALMANAC compound alias parquet was present but could not be registered: %s",
+                e,
+            )
 
     # DICTRank
     if _file_exists(base_dir, "dictrank.parquet"):
@@ -279,7 +316,9 @@ def _register_views(
             """)
             registered.add("dictrank")
         except Exception as e:
-            LOG.warning("DICTRank parquet was present but could not be registered: %s", e)
+            LOG.warning(
+                "DICTRank parquet was present but could not be registered: %s", e
+            )
 
     # DILIRank
     if _file_exists(base_dir, "dilirank.parquet"):
@@ -293,7 +332,9 @@ def _register_views(
             """)
             registered.add("dilirank")
         except Exception as e:
-            LOG.warning("DILIrank parquet was present but could not be registered: %s", e)
+            LOG.warning(
+                "DILIrank parquet was present but could not be registered: %s", e
+            )
 
     # DIQT (tidy 2-col)
     if _file_exists(base_dir, "diqt.parquet"):
@@ -314,6 +355,7 @@ def _register_views(
 
 # ---------- Client API ----------
 
+
 class DuckDBClient:
     """
     Thin wrapper exposing retrieval functions expected by the RAG pipeline.
@@ -330,8 +372,14 @@ class DuckDBClient:
     ):
         settings = get_settings()
         self.base_dir = os.path.abspath(base_dir)
-        self.enable_duckdb = settings.enable_duckdb if enable_duckdb is None else bool(enable_duckdb)
-        self.enable_drugbank = settings.enable_drugbank if enable_drugbank is None else bool(enable_drugbank)
+        self.enable_duckdb = (
+            settings.enable_duckdb if enable_duckdb is None else bool(enable_duckdb)
+        )
+        self.enable_drugbank = (
+            settings.enable_drugbank
+            if enable_drugbank is None
+            else bool(enable_drugbank)
+        )
         self.enable_sider_nsides_offsides = (
             settings.enable_sider_nsides_offsides
             if enable_sider_nsides_offsides is None
@@ -366,7 +414,8 @@ class DuckDBClient:
             "twosides": self.has_view("twosides"),
             "offsides": self.has_view("offsides"),
             "sider_label_side_effects": self.has_view("sider_label_side_effects"),
-            "nci_almanac": self.has_view("nci_almanac") and self.has_view("nci_almanac_compounds"),
+            "nci_almanac": self.has_view("nci_almanac")
+            and self.has_view("nci_almanac_compounds"),
             "dilirank": self.has_view("dilirank"),
             "dictrank": self.has_view("dictrank"),
             "diqt": self.has_view("diqt"),
@@ -434,7 +483,9 @@ class DuckDBClient:
             ).fetchall()
         return [str(row[0]) for row in rows if row and row[0]]
 
-    def get_nci_almanac_pair(self, drug_a: str, drug_b: str, top_k: int = 20) -> List[Dict[str, Any]]:
+    def get_nci_almanac_pair(
+        self, drug_a: str, drug_b: str, top_k: int = 20
+    ) -> List[Dict[str, Any]]:
         """Return strongest NCI-ALMANAC experimental combo-screen rows for a drug pair.
 
         This is oncology cell-line screening evidence. It is useful for hypothesis
@@ -443,7 +494,12 @@ class DuckDBClient:
         """
         a = _norm_name(drug_a)
         b = _norm_name(drug_b)
-        if not a or not b or not self.has_view("nci_almanac") or not self.has_view("nci_almanac_compounds"):
+        if (
+            not a
+            or not b
+            or not self.has_view("nci_almanac")
+            or not self.has_view("nci_almanac_compounds")
+        ):
             return []
 
         nsc_a = self._get_nci_nscs(a)
@@ -509,8 +565,12 @@ class DuckDBClient:
         for row in rows:
             item = dict(zip(keys, row))
             item["score_definition"] = "expected_growth - percent_growth"
-            item["score_direction"] = "higher positive score means stronger-than-expected cell growth inhibition"
-            item["evidence_scope"] = "experimental oncology cell-line combination screen; hypothesis support only"
+            item["score_direction"] = (
+                "higher positive score means stronger-than-expected cell growth inhibition"
+            )
+            item["evidence_scope"] = (
+                "experimental oncology cell-line combination screen; hypothesis support only"
+            )
             out.append(item)
         return out
 
@@ -580,7 +640,9 @@ class DuckDBClient:
         else:
             return "low"
 
-    def get_diqt_score(self, drug_name: str | List[str]) -> Optional[float] | Dict[str, Optional[float]]:
+    def get_diqt_score(
+        self, drug_name: str | List[str]
+    ) -> Optional[float] | Dict[str, Optional[float]]:
         """Get DIQT score for a drug or list of drugs."""
         if isinstance(drug_name, list):
             return self._get_diqt_score_batch(drug_name)
@@ -678,7 +740,9 @@ class DuckDBClient:
         """
         # Batch mode: list of drugs
         if isinstance(drug_a, list):
-            return self.get_side_effects_batch(drug_a, top_k_per_drug=top_k, min_prr=min_prr)
+            return self.get_side_effects_batch(
+                drug_a, top_k_per_drug=top_k, min_prr=min_prr
+            )
 
         a = _norm_name(drug_a)
         b = _norm_name(drug_b) if drug_b else None
@@ -690,36 +754,30 @@ class DuckDBClient:
             parts: List[str] = []
             params: List[Any] = []
             if self.has_view("twosides"):
-                parts.append(
-                    """
+                parts.append("""
                     SELECT side_effect, MAX(prr) AS score, 1 AS source_priority
                     FROM twosides
                     WHERE (drug_a = ? OR drug_b = ?)
                       AND (prr IS NULL OR prr >= ?)
                     GROUP BY side_effect
-                    """
-                )
+                    """)
                 params.extend([a, a, float(min_prr)])
             if self.has_view("offsides"):
-                parts.append(
-                    """
+                parts.append("""
                     SELECT side_effect, MAX(prr) AS score, 2 AS source_priority
                     FROM offsides
                     WHERE drug_name = ?
                       AND (prr IS NULL OR prr >= ?)
                     GROUP BY side_effect
-                    """
-                )
+                    """)
                 params.extend([a, float(min_prr)])
             if self.has_view("sider_label_side_effects"):
-                parts.append(
-                    """
+                parts.append("""
                     SELECT side_effect, CAST(NULL AS DOUBLE) AS score, 3 AS source_priority
                     FROM sider_label_side_effects
                     WHERE drug_name = ?
                     GROUP BY side_effect
-                    """
-                )
+                    """)
                 params.append(a)
             if not parts:
                 return []
@@ -927,6 +985,7 @@ class DuckDBClient:
             if enzyme_action_map_str:
                 try:
                     import json
+
                     enzyme_action_map = json.loads(enzyme_action_map_str)
                 except Exception:
                     pass
@@ -934,7 +993,7 @@ class DuckDBClient:
             return {
                 "enzymes": enzymes,
                 "enzyme_actions": enzyme_actions,
-                "enzyme_action_map": enzyme_action_map
+                "enzyme_action_map": enzyme_action_map,
             }
 
         # Try partial match
@@ -951,6 +1010,7 @@ class DuckDBClient:
             if enzyme_action_map_str:
                 try:
                     import json
+
                     enzyme_action_map = json.loads(enzyme_action_map_str)
                 except Exception:
                     pass
@@ -958,12 +1018,14 @@ class DuckDBClient:
             return {
                 "enzymes": enzymes,
                 "enzyme_actions": enzyme_actions,
-                "enzyme_action_map": enzyme_action_map
+                "enzyme_action_map": enzyme_action_map,
             }
 
         return {"enzymes": [], "enzyme_actions": [], "enzyme_action_map": []}
 
-    def get_drug_targets(self, drug_name: str | List[str]) -> List[str] | Dict[str, List[str]]:
+    def get_drug_targets(
+        self, drug_name: str | List[str]
+    ) -> List[str] | Dict[str, List[str]]:
         """Get drug targets for a single drug or batch of drugs."""
         if isinstance(drug_name, list):
             return self._get_drug_targets_batch(drug_name)
@@ -1004,7 +1066,9 @@ class DuckDBClient:
                     break
         return result
 
-    def get_pair_evidence(self, drug_a: str, drug_b: str, top_k: int = 20) -> List[EvidenceItem]:
+    def get_pair_evidence(
+        self, drug_a: str, drug_b: str, top_k: int = 20
+    ) -> List[EvidenceItem]:
         a = _norm_name(drug_a)
         b = _norm_name(drug_b)
         if not a or not b or not self.has_view("twosides"):

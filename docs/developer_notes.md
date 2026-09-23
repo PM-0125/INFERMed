@@ -334,3 +334,25 @@ Current supported enrichment fields include:
 Legacy/ad hoc helpers and old RDF notes are kept locally under `scripts/deferred/`, which is intentionally ignored by Git. Treat that folder as scratch/reference material, not part of the active demo workflow.
 
 PubChem RDF file lists used to construct historical CORE/DISEASE/BIO QLever endpoints are also deferred under `scripts/deferred/pubchem_list/`. They are not needed for the public-safe app runtime.
+
+## 12. Code Quality Checks
+
+Install development tooling with `python -m pip install -r requirements-dev.txt`.
+Black is pinned in that file and configured in `pyproject.toml`. Private models,
+test-case archives, datasets, deferred scripts, and virtual environments are excluded.
+
+```powershell
+python -m black src tests scripts
+python -m black --check src tests scripts
+$env:INFERMED_SKIP_DOTENV = 'true'
+$env:INFERMED_LOAD_DOTENV = 'false'
+python -m pytest tests -q
+npm.cmd --prefix frontend run lint
+npm.cmd --prefix frontend run build
+```
+
+The GitHub Code quality workflow checks Black, frontend ESLint, and the frontend
+production build on pushes and pull requests. It does not currently run backend
+tests or clinical evaluations. Run backend tests locally before pushing.
+Black is a formatter, not a clinical checker or Python static analyzer. Ruff is
+not yet configured. Code-quality checks do not establish medical correctness.

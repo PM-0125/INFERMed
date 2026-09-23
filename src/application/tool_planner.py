@@ -4,7 +4,11 @@ from dataclasses import dataclass
 from itertools import combinations
 
 from src.domain.medication.entities import MedicationConcept
-from src.infrastructure.tools.registry import ToolDefinition, ToolRegistry, default_tool_registry
+from src.infrastructure.tools.registry import (
+    ToolDefinition,
+    ToolRegistry,
+    default_tool_registry,
+)
 
 
 @dataclass(frozen=True)
@@ -29,8 +33,12 @@ class ToolPlanner:
     def __init__(self, registry: ToolRegistry | None = None):
         self.registry = registry or default_tool_registry()
 
-    def create_plan(self, concepts: list[MedicationConcept], *, data_mode: str) -> EvidencePlan:
-        names = [concept.normalized_name for concept in concepts if concept.normalized_name]
+    def create_plan(
+        self, concepts: list[MedicationConcept], *, data_mode: str
+    ) -> EvidencePlan:
+        names = [
+            concept.normalized_name for concept in concepts if concept.normalized_name
+        ]
         pairs = list(combinations(names, 2))
         return EvidencePlan(
             drug_count=len(names),

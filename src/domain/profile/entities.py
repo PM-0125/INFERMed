@@ -74,13 +74,22 @@ class DrugProfileGraph:
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
-    def nodes_for_drug(self, drug: str, node_type: ProfileNodeType | None = None) -> list[ProfileNode]:
+    def nodes_for_drug(
+        self, drug: str, node_type: ProfileNodeType | None = None
+    ) -> list[ProfileNode]:
         drug_key = drug.lower()
-        rows = [node for node in self.nodes if drug_key in {item.lower() for item in node.drug_scope}]
+        rows = [
+            node
+            for node in self.nodes
+            if drug_key in {item.lower() for item in node.drug_scope}
+        ]
         if node_type is not None:
             rows = [node for node in rows if node.type == node_type]
         return rows
 
     def shared_nodes(self, node_type: ProfileNodeType) -> list[ProfileNode]:
-        return [node for node in self.nodes if node.type == node_type and len(set(node.drug_scope)) > 1]
-
+        return [
+            node
+            for node in self.nodes
+            if node.type == node_type and len(set(node.drug_scope)) > 1
+        ]
