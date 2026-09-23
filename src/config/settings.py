@@ -177,6 +177,9 @@ class Settings:
     openfda_ttl_days: int = 30
     evidence_cache_ttl_hours: int = 24
     chembl_timeout_s: int = 10
+    enrichment_max_calls: int = 4
+    enrichment_deadline_s: int = 30
+    enrichment_source_timeout_s: int = 10
 
     enable_duckdb: bool = True
     enable_drugbank: bool = False
@@ -272,6 +275,11 @@ def get_settings() -> Settings:
             env_name="OPENFDA_CACHE_DIR",
         ),
         cache_backend=cache_backend,
+        enrichment_max_calls=_config_int(config, "runtime.enrichment.max_calls", 4),
+        enrichment_deadline_s=_config_int(config, "runtime.enrichment.deadline_s", 30),
+        enrichment_source_timeout_s=_config_int(
+            config, "runtime.enrichment.source_timeout_s", 10
+        ),
         sqlite_cache_path=_config_str(
             config,
             "runtime.cache.sqlite_cache_path",

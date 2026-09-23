@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import logging
 import uuid
-from dataclasses import dataclass
+from copy import deepcopy
+from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from src.application.commands import AnalyzeMedicationSetCommand
@@ -13,6 +14,7 @@ from src.application.interaction_modeling import (
     build_interaction_reasoning_record,
 )
 from src.application.tool_planner import EvidencePlan, ToolPlanner
+from src.application.reasoning_input import build_reasoning_input
 from src.config.settings import Settings, get_settings
 from src.domain.decision.entities import InteractionDecision
 from src.domain.decision.rules import (
@@ -87,10 +89,12 @@ class MedicationSetAnalysis:
     safety_report: SafetyReport
     ndrug_summary: dict[str, Any]
     events: list[DomainEvent]
+    verification: dict[str, Any] = field(default_factory=dict)
 
     def to_read_model(self) -> dict[str, Any]:
         return {
             "analysis_id": self.analysis_id,
+            "verification": self.verification,
             "analysisId": self.analysis_id,
             "request_id": self.request_id,
             "normalized_medications": [item.to_dict() for item in self.medications],
@@ -138,6 +142,7 @@ class AnalyzeMedicationSetUseCase:
         tool_planner: ToolPlanner | None = None,
         safety_gate: ZeroTrustSafetyGate | None = None,
         progress_callback: ProgressCallback | None = None,
+        evidence_enricher: Callable | None = None,
     ):
         self.rag_runner = rag_runner
         self.context_runner = context_runner
@@ -153,6 +158,7 @@ class AnalyzeMedicationSetUseCase:
         self.safety_gate = safety_gate or ZeroTrustSafetyGate()
         self.explanation_verifier = ExplanationVerifier()
         self.progress_callback = progress_callback
+        self.evidence_enricher = evidence_enricher
 
     def execute(self, command: AnalyzeMedicationSetCommand) -> MedicationSetAnalysis:
         analysis_id = "ana_" + uuid.uuid4().hex
@@ -242,6 +248,14 @@ class AnalyzeMedicationSetUseCase:
             pairs=evidence_plan.priority_pairs,
             command=command,
         )
+        if self.evidence_enricher is not None:
+            pair_results = self.evidence_enricher(
+                pair_results,
+                analysis_id=analysis_id,
+                settings=self.settings,
+                refresh=command.refresh_evidence,
+                progress=self._progress,
+            )
         executed_pairs = [item.pair for item in pair_results]
         executed_pair = executed_pairs[0]
         aggregate_context = build_medication_set_context_from_pair_results(
@@ -266,19 +280,7 @@ class AnalyzeMedicationSetUseCase:
             },
         )
 
-        answer = self._generate_medication_set_answer(
-            aggregate_context,
-            command=command,
-            fallback_answer=pair_results[0].answer or {},
-        )
-        rag_output = {"context": aggregate_context, "answer": answer}
-        self._progress(
-            "finalization_started",
-            "Checking the explanation and preparing evidence cards.",
-            {},
-        )
         context = aggregate_context
-        answer_text = str(answer.get("text") or "").strip()
 
         self._publish(
             analysis_id,
@@ -415,6 +417,55 @@ class AnalyzeMedicationSetUseCase:
             component="decision",
         )
 
+        context["reasoning_input"] = build_reasoning_input(
+            profile_graph=profile_graph,
+            reasoning_record=reasoning_record,
+            ndrug_summary=ndrug_summary,
+            decision=decision,
+            evidence_cards=evidence_cards,
+        )
+        context["reasoning_input"]["patient_context"] = patient_context.to_dict()
+        self._progress(
+            "reasoning_ready",
+            "Drug profiles, hypotheses and evidence-linked decision prepared.",
+            {},
+        )
+        self._publish(
+            analysis_id,
+            "ExplanationInputPrepared",
+            request_id=request_id,
+            payload={"input_hash": stable_hash(context)},
+            component="explanation",
+        )
+        try:
+            answer = self._generate_medication_set_answer(
+                deepcopy(context),
+                command=command,
+                fallback_answer=pair_results[0].answer or {},
+            )
+            answer_text = str(answer.get("text") or "").strip()
+            if (
+                not answer_text
+                or answer_text.startswith(
+                    (
+                        "Unable to generate",
+                        "No generated answer",
+                        "No answer was generated",
+                    )
+                )
+                or (answer.get("meta") or {}).get("error")
+            ):
+                raise RuntimeError(
+                    "Explanation generation failed; no valid model assessment was returned."
+                )
+        except Exception:
+            if self.event_store is not None:
+                self.event_store.update_analysis_status(analysis_id, "failed")
+            raise
+        rag_output = {"context": context, "answer": answer}
+        self._progress(
+            "finalization_started", "Checking explanation claims against evidence.", {}
+        )
         safety_report = self.safety_gate.evaluate(
             analysis_id=analysis_id,
             answer_text=answer_text,
@@ -432,6 +483,14 @@ class AnalyzeMedicationSetUseCase:
             component="safety",
         )
 
+        verification = _deterministic_verification(
+            answer_text, decision, safety_report, evidence_cards
+        )
+        self._progress(
+            "verification_completed",
+            "Automated evidence checks completed; clinical review remains necessary.",
+            {"status": verification["status"]},
+        )
         explanation_id = (
             "exp_"
             + stable_hash({"analysis_id": analysis_id, "answer": answer_text})[:16]
@@ -441,9 +500,7 @@ class AnalyzeMedicationSetUseCase:
                 explanation_id=explanation_id,
                 analysis_id=analysis_id,
                 answer_text=answer_text,
-                verification=_deterministic_verification(
-                    answer_text, decision, safety_report, evidence_cards
-                ),
+                verification=verification,
                 model_name=(answer.get("meta") or {}).get("model"),
                 output_hash=stable_hash(answer_text),
             )
@@ -453,6 +510,7 @@ class AnalyzeMedicationSetUseCase:
                 decision=decision.to_dict(),
                 response_read_model={
                     "answer": answer,
+                    "verification": verification,
                     "pair_results": [item.to_dict() for item in pair_results],
                 },
             )
@@ -499,6 +557,7 @@ class AnalyzeMedicationSetUseCase:
             safety_report=safety_report,
             ndrug_summary=ndrug_summary,
             events=self.event_bus.events,
+            verification=verification,
         )
 
     def _publish(self, analysis_id: str, event_type: str, **kwargs: Any) -> None:
@@ -690,6 +749,9 @@ def build_medication_set_context_from_pair_results(
             "set": drug_identities,
         },
         "medication_set": {
+            "enrichment": [
+                result.context.get("graph_enrichment", {}) for result in pair_results
+            ],
             "analysis_id": analysis_id,
             "drugs": medications,
             "drug_count": len(medications),
@@ -873,7 +935,7 @@ def _profile_graph_from_pair_results(
 ) -> DrugProfileGraph:
     node_rows: dict[str, Any] = {}
     edge_rows: dict[tuple[str, str, str], Any] = {}
-    missing: dict[str, set[str]] = {drug: set() for drug in drugs}
+    missing: dict[str, set[str]] = {}
     limitations: list[str] = []
 
     for result in pair_results:
@@ -898,8 +960,12 @@ def _profile_graph_from_pair_results(
                 )
         for edge in graph.edges:
             edge_rows.setdefault((edge.source_id, edge.target_id, edge.type), edge)
-        for drug, gaps in graph.missing_elements.items():
-            missing.setdefault(drug, set()).update(gaps)
+        for drug in graph.drugs:
+            gaps = set(graph.missing_elements.get(drug, []))
+            if drug not in missing:
+                missing[drug] = gaps
+            else:
+                missing[drug].intersection_update(gaps)
         limitations.extend(graph.source_limitations)
 
     return DrugProfileGraph(

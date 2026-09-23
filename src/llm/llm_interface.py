@@ -1033,6 +1033,9 @@ def build_prompt(
     if blocks.get("__TRUNCATED__") or hist_flag:
         prompt += "\n\n[Note: some context was truncated for length.]"
 
+    from src.application.reasoning_input import render_reasoning_input
+
+    prompt += render_reasoning_input((context or {}).get("reasoning_input") or {})
     return prompt
 
 
@@ -1069,6 +1072,10 @@ def build_compact_analysis_prompt(context: Dict[str, Any], mode: str) -> str:
         for label, value in evidence_rows
         if value and value not in {"(no data)", "(truncated or missing)"}
     )
+
+    from src.application.reasoning_input import render_reasoning_input
+
+    evidence += render_reasoning_input((context or {}).get("reasoning_input") or {})
 
     return f"""You are INFERMed's evidence-grounded clinical interaction analyst.
 
@@ -1108,6 +1115,9 @@ def build_followup_prompt(
     hist_block, hist_truncated = _format_history(history or [], budget_chars=900)
     prior = _compact_text(prior_assessment or "", max_chars=1800)
     raw_context = _compact_json(context or {}, max_chars=2200)
+    from src.application.reasoning_input import render_reasoning_input
+
+    raw_context += render_reasoning_input((context or {}).get("reasoning_input") or {})
     question_text = _compact_text(question or "", max_chars=1000)
 
     mode_lower = (mode or "").lower()
@@ -1348,6 +1358,37 @@ def _summarize_context(ctx: Dict[str, Any], mode: str) -> Dict[str, str]:
     pk_txt, pk_len, pk_prio = _format_pk(ctx)
     pk_meta_txt = _format_pk_meta(ctx)  # NEW: PK metadata from PubChem
     pd_txt, pd_len, pd_prio = _format_pd(ctx)
+    graph_signals = ((ctx.get("reasoning_input") or {}).get("reasoning") or {}).get(
+        "signals"
+    ) or []
+    for category in ("pk_overlap", "pd_overlap"):
+        matches = [row for row in graph_signals if row.get("category") == category]
+        if not matches:
+            continue
+        graph_text = (
+            "Graph-derived shared-profile evidence: "
+            + "; ".join(
+                f"{' + '.join(row.get('drug_scope') or [])}: {row.get('label', '')}"
+                for row in matches
+            )
+            + ". Hypothesis-level overlap; direction, magnitude and clinical significance are not established by sharing alone."
+        )
+        if category == "pk_overlap":
+            if not (ctx.get("pkpd") or {}).get("pk_summary"):
+                pk_txt = graph_text
+            else:
+                pk_txt += (
+                    " "
+                    + graph_text
+                    + " Retain any disagreement between source summaries and graph inference as uncertainty."
+                )
+            pk_len = len(pk_txt)
+        else:
+            if not (ctx.get("pkpd") or {}).get("pd_summary"):
+                pd_txt = graph_text
+            else:
+                pd_txt += " " + graph_text
+            pd_len = len(pd_txt)
     faers_txt, faers_len = _format_faers(ctx, limit=5)
     clinical_reference_txt = _format_clinical_reference(ctx)
     research_enrichment_txt = _format_research_enrichment(ctx)
@@ -1390,7 +1431,7 @@ def _summarize_context(ctx: Dict[str, Any], mode: str) -> Dict[str, str]:
     kept: Dict[str, str] = {}
 
     for label, ln, prio, txt in sorted(parts, key=lambda x: x[2]):
-        if used + ln <= budget:
+        if ctx.get("reasoning_input") or used + ln <= budget:
             kept[label] = txt
             used += ln
         else:

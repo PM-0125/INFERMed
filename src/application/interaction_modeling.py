@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping, ValuesView
 from typing import Any
 
 from src.application.events import stable_hash
@@ -48,6 +49,30 @@ def build_drug_profile_graph(
         _add_label_profile(builder, drug, side, context, evidence_cards)
 
     _add_shared_overlap_profile(builder, drugs, context, evidence_cards)
+    for card in evidence_cards:
+        if card.claim_type != "mechanism_enrichment":
+            continue
+        kind = card.payload.get("profile_kind")
+        label = card.payload.get("profile_label")
+        if (
+            kind not in {"target", "pathway"}
+            or not isinstance(label, str)
+            or not label.strip()
+        ):
+            continue
+        for drug in drugs:
+            if drug in card.drug_scope:
+                builder.add_profile_item(
+                    drug=drug,
+                    category="targets" if kind == "target" else "pathways",
+                    node_type=kind,
+                    label=label,
+                    edge_type=(
+                        "has_target" if kind == "target" else "participates_in_pathway"
+                    ),
+                    evidence_ids=[card.evidence_id],
+                    payload=card.payload,
+                )
     return builder.to_graph()
 
 
@@ -115,7 +140,7 @@ def build_interaction_reasoning_record(
     pk_nodes = profile_graph.shared_nodes("enzyme") + profile_graph.shared_nodes(
         "transporter"
     )
-    if pk_nodes:
+    for pk_nodes, scope in _scoped_node_groups(pk_nodes):
         evidence_ids = _unique(item for node in pk_nodes for item in node.evidence_ids)
         labels = ", ".join(node.label for node in pk_nodes[:6])
         signals.append(
@@ -123,7 +148,7 @@ def build_interaction_reasoning_record(
                 category="pk_overlap",
                 label=f"Shared PK-relevant proteins: {labels}",
                 support_level="plausible",
-                drug_scope=drugs,
+                drug_scope=scope,
                 evidence_ids=evidence_ids,
                 payload={"nodes": [node.to_dict() for node in pk_nodes[:12]]},
             )
@@ -137,7 +162,7 @@ def build_interaction_reasoning_record(
                     f"enzymes or transporters: {labels}."
                 ),
                 "plausible",
-                drugs,
+                scope,
                 evidence_ids,
                 [
                     "Shared PK proteins indicate plausibility, not direction or magnitude by themselves."
@@ -148,7 +173,7 @@ def build_interaction_reasoning_record(
     pd_nodes = profile_graph.shared_nodes("target") + profile_graph.shared_nodes(
         "pathway"
     )
-    if pd_nodes:
+    for pd_nodes, scope in _scoped_node_groups(pd_nodes):
         evidence_ids = _unique(item for node in pd_nodes for item in node.evidence_ids)
         labels = ", ".join(node.label for node in pd_nodes[:6])
         signals.append(
@@ -156,7 +181,7 @@ def build_interaction_reasoning_record(
                 category="pd_overlap",
                 label=f"Shared PD-relevant targets/pathways: {labels}",
                 support_level="plausible",
-                drug_scope=drugs,
+                drug_scope=scope,
                 evidence_ids=evidence_ids,
                 payload={"nodes": [node.to_dict() for node in pd_nodes[:12]]},
             )
@@ -170,7 +195,7 @@ def build_interaction_reasoning_record(
                     f"shared targets or pathways: {labels}."
                 ),
                 "plausible",
-                drugs,
+                scope,
                 evidence_ids,
                 [
                     "Target/pathway overlap does not prove clinical interaction without stronger evidence."
@@ -181,7 +206,7 @@ def build_interaction_reasoning_record(
     toxicity_nodes = profile_graph.shared_nodes(
         "adverse_event"
     ) + profile_graph.shared_nodes("toxicity_marker")
-    if toxicity_nodes:
+    for toxicity_nodes, scope in _scoped_node_groups(toxicity_nodes):
         evidence_ids = _unique(
             item for node in toxicity_nodes for item in node.evidence_ids
         )
@@ -191,7 +216,7 @@ def build_interaction_reasoning_record(
                 category="toxicity_convergence",
                 label=f"Convergent toxicity/adverse-event profile: {labels}",
                 support_level="weak" if not pair_signal_cards else "supported",
-                drug_scope=drugs,
+                drug_scope=scope,
                 evidence_ids=evidence_ids,
                 payload={"nodes": [node.to_dict() for node in toxicity_nodes[:12]]},
                 limitations=[
@@ -214,6 +239,14 @@ def build_interaction_reasoning_record(
         uncertainty_factors=uncertainty,
         required_next_evidence=required_next_evidence,
     )
+
+
+def _scoped_node_groups(nodes):
+    groups = {}
+    for node in nodes:
+        scope = tuple(sorted(set(node.drug_scope)))
+        groups.setdefault(scope, []).append(node)
+    return [(rows, list(scope)) for scope, rows in groups.items()]
 
 
 class _ProfileGraphBuilder:
@@ -642,7 +675,7 @@ def _add_shared_overlap_profile(
     pd_detail = pkpd.get("pd_detail") or {}
     evidence_ids = _card_ids(evidence_cards, claim_contains=("mechanism", "pk", "pd"))
 
-    for value in _flatten_values((pk_detail.get("overlaps") or {}).values()):
+    for value in _flatten_values(pk_detail.get("overlaps")):
         node_type, category, edge_type = _protein_node_type(str(value))
         builder.add_shared_item(
             drugs=drugs,
@@ -884,17 +917,17 @@ def _card_ids(
 def _flatten_values(value: Any) -> list[Any]:
     if value is None:
         return []
-    if isinstance(value, dict):
+    if isinstance(value, Mapping):
         rows = []
         for item in value.values():
             rows.extend(_flatten_values(item))
         return rows
-    if isinstance(value, (list, tuple, set)):
+    if isinstance(value, (list, tuple, set, ValuesView)):
         rows = []
         for item in value:
             rows.extend(_flatten_values(item))
         return rows
-    return [value]
+    return [value.strip()] if isinstance(value, str) and value.strip() else []
 
 
 def _list_dicts(value: Any) -> list[dict[str, Any]]:

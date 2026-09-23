@@ -80,6 +80,7 @@ function normalizeInteractionResult(raw: InteractionResult): InteractionResult {
   const evidence = display?.evidence ?? ({} as InteractionResult['evidence'])
   return {
     ...raw,
+    verification: raw?.verification ?? display?.verification,
     drugs: asArray(display?.drugs).map(drug => ({
       name: asString(drug?.name, 'Unknown drug'),
       pubchemCid: asOptionalString(drug?.pubchemCid),

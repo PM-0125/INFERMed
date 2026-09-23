@@ -223,14 +223,19 @@ flowchart LR
   Profile[Drug profile graph<br/>Identifiers, structures<br/>enzymes, transporters<br/>targets, pathways<br/>events, toxicities, labels]:::profile
   Reasoning{Pair / N-drug<br/>reasoning layer}:::reasoning
   Hypotheses[Known status + hypotheses<br/>PK overlap, PD overlap<br/>toxicity convergence<br/>uncertainty and gaps]:::hypothesis
-  Agent[Agentic LLM layer<br/>tool outputs only<br/>role-specific explanation]:::agent
-  Critic{Critic / safety gate<br/>dose support<br/>causality overclaim<br/>hypothesis scope}:::critic
+  Enrichment[Bounded gap retrieval<br/>exact identifiers only<br/>enabled sources + deadlines]:::context
+  Decision[Evidence-linked decision<br/>risk, patient modifiers<br/>limitations and scope]:::reasoning
+  Agent[Evidence-grounded LLM<br/>orchestrated tool results<br/>role-specific explanation]:::agent
+  Critic{Automated review checks<br/>citation and scope checks<br/>contradictions and caveats<br/>unresolved claims flagged}:::critic
   UI[Evidence-first UI<br/>answer beside cards<br/>profile gaps + sources]:::ui
 
   Sources --> Profile
   Profile --> Reasoning
+  Profile -. one bounded pass .-> Enrichment
+  Enrichment -. rebuild profiles .-> Profile
   Reasoning --> Hypotheses
-  Hypotheses --> Agent
+  Hypotheses --> Decision
+  Decision --> Agent
   Sources --> Agent
   Agent --> Critic
   Critic --> UI
@@ -673,7 +678,7 @@ function SkeletonLoader({ progress, answer }: { progress: ProgressTurn[]; answer
           ))}
           </ol>
         </div>
-        {answer ? <div className="streaming-assessment narrative-body" aria-label="Provisional assessment" aria-busy="true">{renderMarkdownBody(answer)}</div> :
+        {answer ? <div className="streaming-assessment narrative-body" aria-label="Provisional assessment" aria-busy="true"><p><strong>Draft - verification pending</strong></p>{renderMarkdownBody(answer)}</div> :
           <div className="streaming-assessment" aria-hidden="true">{[90,75,60].map(w => <div key={w} className="skeleton-block" style={{height:14, width:`${w}%`, marginBottom:10}} />)}</div>}
       </div>
       <div className="evidence-panel">
@@ -1134,7 +1139,7 @@ function AboutPage({ onAnalyze }: { onAnalyze: () => void }) {
             <h3>Built to reason about known and unknown combinations</h3>
           </div>
           <p>
-            INFERMed first builds drug profiles, then compares those profiles across pairs or future
+            INFERMed first builds drug profiles, then compares those profiles across pairs or
             N-drug sets before any LLM writes the final explanation.
           </p>
         </div>
@@ -1596,6 +1601,14 @@ export default function App() {
               </div>
 
               <NDrugReasoningPanel result={result} />
+              <section className="verification-status" aria-label="Evidence verification">
+                <strong>{result.verification?.status === 'checks_passed' ? 'Automated checks passed' : result.verification ? 'Review required' : 'Unverified assessment'}</strong>
+                <p>Automated checks do not establish clinical correctness.</p>
+                {result.verification?.claims?.some(c => c.status !== 'supported') && <details>
+                  <summary>Inspect evidence checks</summary>
+                  <ul>{result.verification.claims.filter(c => c.status !== 'supported').map((c, i) => <li key={i}><strong>{c.status}: </strong>{c.text}<p>{c.reasons.join(' ')} {c.evidence_ids.join(', ')}</p></li>)}</ul>
+                </details>}
+              </section>
 
               {/* Narrative sections */}
               <div className="narrative">

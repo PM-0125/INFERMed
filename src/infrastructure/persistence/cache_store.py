@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +41,9 @@ class SQLiteToolCacheStore:
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_tool_cache_tool ON tool_result_cache(tool_name, source_name)"
             )
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS tool_result_history (cache_key TEXT NOT NULL, output_hash TEXT NOT NULL, payload_json TEXT NOT NULL, observed_at TEXT NOT NULL, PRIMARY KEY(cache_key, output_hash))"
+            )
 
     def key_for(
         self, *, tool_name: str, tool_version: str, input_payload: dict[str, Any]
@@ -49,9 +53,18 @@ class SQLiteToolCacheStore:
     def get(self, cache_key: str) -> dict[str, Any] | None:
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT payload_json FROM tool_result_cache WHERE cache_key = ?",
+                "SELECT payload_json, expires_at FROM tool_result_cache WHERE cache_key = ?",
                 (cache_key,),
             ).fetchone()
+        if row and row[1]:
+            try:
+                expires = datetime.fromisoformat(row[1])
+                if expires.tzinfo is None:
+                    expires = expires.replace(tzinfo=timezone.utc)
+                if expires <= datetime.now(timezone.utc):
+                    return None
+            except ValueError:
+                return None
         return json.loads(row[0]) if row else None
 
     def put(
@@ -69,6 +82,14 @@ class SQLiteToolCacheStore:
             payload, sort_keys=True, ensure_ascii=False, default=str
         )
         with self._connect() as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO tool_result_history SELECT cache_key, output_hash, payload_json, created_at FROM tool_result_cache WHERE cache_key = ?",
+                (cache_key,),
+            )
+            conn.execute(
+                "INSERT OR IGNORE INTO tool_result_history VALUES (?, ?, ?, ?)",
+                (cache_key, stable_hash(payload), payload_json, utc_now()),
+            )
             conn.execute(
                 """
                 INSERT OR REPLACE INTO tool_result_cache

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from itertools import combinations
+from copy import deepcopy
 from typing import Any, Callable
 
 from src.application.ports import (
@@ -144,10 +145,30 @@ class AnswerFollowUpUseCase:
 def _context_with_patient_context(
     context: dict[str, Any], patient_context: dict[str, Any]
 ) -> dict[str, Any]:
-    out = dict(context)
+    out = deepcopy(context)
     medset = dict(out.get("medication_set") or {})
-    medset["patient_context"] = patient_context
+    updated_patient = {**(medset.get("patient_context") or {}), **patient_context}
+    medset["patient_context"] = updated_patient
     out["medication_set"] = medset
+    if out.get("reasoning_input"):
+        from src.domain.patient.services import normalize_patient_context
+        from src.domain.decision.rules import (
+            patient_amplifiers,
+            missing_patient_factors_for_decision,
+        )
+
+        patient = normalize_patient_context(updated_patient)
+        reasoning = out["reasoning_input"]
+        decision = reasoning.get("decision") or {}
+        decision["patient_amplifiers"] = patient_amplifiers(patient)
+        decision["missing_patient_factors"] = missing_patient_factors_for_decision(
+            patient
+        )
+        reasoning["decision"] = decision
+        reasoning["patient_context"] = patient.to_dict()
+        reasoning["patient_update_note"] = (
+            "Patient modifiers recomputed; interaction risk remains evidence-based, not a validated patient-specific risk prediction."
+        )
     return out
 
 

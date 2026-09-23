@@ -309,6 +309,15 @@
   width: 100%;
 }
 
+.verification-status {
+  margin: 12px 20px;
+  padding: 12px 0;
+  border-block: 1px solid var(--line-strong);
+  overflow-wrap: anywhere;
+}
+.verification-status p { margin: 6px 0; }
+.verification-status summary { cursor: pointer; }
+
 .drug-token-field {
   flex: 1 1 auto;
   display: flex;

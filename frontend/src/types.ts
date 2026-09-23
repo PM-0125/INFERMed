@@ -64,6 +64,11 @@ export interface AssessmentSection {
 }
 
 export interface InteractionResult {
+  verification?: {
+    status: 'checks_passed' | 'review_required' | 'failed'
+    claims?: Array<{text: string; evidence_ids: string[]; status: string; reasons: string[]}>
+    notes?: string[]
+  }
   evidenceFreshness?: Array<{pair: string[]; assembledAt?: string; cacheStatus: string}>
   drugs: DrugIdentity[]
   risk: RiskSummary

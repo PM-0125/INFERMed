@@ -12,7 +12,7 @@ _DOSE_LANGUAGE_RE = re.compile(
 )
 _PERCENT_RE = re.compile(r"\b\d{1,3}\s*(?:-|to)?\s*\d{0,3}\s*%")
 _CAUSAL_OVERCLAIM_RE = re.compile(
-    r"\b(?:faers|prr|twosides|offsides|spontaneous reports?)\b.{0,80}"
+    r"\b(?:faers|prr|twosides|offsides|spontaneous reports?)\b(?:(?!\b(?:not|never|cannot)\b|[.!?]).){0,80}"
     r"\b(?:proves?|confirms?|establishes?|demonstrates?)\b",
     re.IGNORECASE | re.DOTALL,
 )

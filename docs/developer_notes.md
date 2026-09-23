@@ -356,3 +356,63 @@ production build on pushes and pull requests. It does not currently run backend
 tests or clinical evaluations. Run backend tests locally before pushing.
 Black is a formatter, not a clinical checker or Python static analyzer. Ruff is
 not yet configured. Code-quality checks do not establish medical correctness.
+
+## 13. Graph-First Explanation Lifecycle
+
+The production API retrieves pair contexts, optionally enriches actionable gaps,
+builds the combined drug-profile graph and scoped hypotheses, and computes the
+decision before generating the explanation. `context.reasoning_input` is a
+versioned, deep-copied contract containing profiles, reasoning, decision, patient
+context, and evidence cards. The input hash is recorded in an
+`ExplanationInputPrepared` event; the context is saved with the analysis snapshot.
+Standard, compact, and follow-up prompts receive the contract. The legacy injected
+`rag_runner` compatibility path can still contain an already-generated answer;
+production uses separate retrieval and generation callbacks.
+
+Optional YAML configuration (defaults shown):
+
+```yaml
+runtime:
+  enrichment:
+    max_calls: 4
+    deadline_s: 30
+    source_timeout_s: 10
+```
+
+Enrichment is one application-controlled pass, not autonomous model browsing.
+Only enabled, policy-allowed ChEMBL target and UniProt pathway tools with exact
+identifiers are currently mapped to profile gaps. Other sources still participate
+through the existing retrieval pipeline. Unavailable identifiers and budget skips
+remain explicit. HTTP requests enforce remaining time and response-size limits;
+SQLite lock waits are separate and may add latency. ChEMBL pagination is not
+followed, and its truncation flag is retained in the cached source result.
+
+Successful tool results retain evidence/provenance and raw hashes in SQLite,
+expire after 24 hours, and preserve distinct historical payloads on refresh.
+Failed results are not cached. Refresh does not turn contradictory records into
+clinical truth. Existing non-tool caches retain their own policies.
+
+Streamed text is provisional. Final responses carry claim-level review findings;
+provider failure after partial output produces an error, not a successful fallback
+assessment. Exact cited text with matching medication scope can pass narrow
+support checks. Unknown IDs, wrong scope, decision conflicts, and unsupported
+quantitative actions are flagged; paraphrases remain unresolved. These checks do
+not establish clinical correctness. Follow-up patient updates recompute modifiers
+and missing factors, not a validated patient-specific risk prediction.
+
+### Validation and Remaining Work
+
+- Regression coverage: empty/malformed overlaps, pair/N-drug scope, generation
+  ordering, immutable snapshots, prompt inclusion, source identity, cache
+  round-trip/expiry, retrieval budgets, claim checks, and stream failures.
+- Synthetic-context live Ollama tests are engineering checks, not a clinical
+  benchmark or verification of live upstream source availability. GPT-OSS 20B
+  still produced unsupported monitoring intervals and copied a legacy negative
+  overlap phrase despite graph evidence. Review-required status must remain visible.
+- The complete reasoning contract is not silently truncated. Provider-aware input
+  token budgeting/explicit over-context rejection is still outstanding; very large
+  medication sets can exceed the model context. Output token settings are unchanged.
+- Additional source-to-gap mappings, semantic claim entailment, independent
+  clinical evaluation, and mobile visual checks of all result states remain work.
+- Local Ollama access requires the VM SSH tunnel. No backend restart is performed
+  automatically; restart it to load these Python changes.

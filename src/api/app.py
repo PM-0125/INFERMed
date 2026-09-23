@@ -295,6 +295,8 @@ def _execute_analysis(
     progress_callback: Any | None = None,
     token_callback: Any | None = None,
 ) -> Any:
+    from src.infrastructure.tools.graph_enrichment import enrich_pair_results
+
     def answer_generator(context, mode, **kwargs):
         if token_callback is not None:
             kwargs["on_text"] = token_callback
@@ -305,6 +307,7 @@ def _execute_analysis(
         context_runner=_retrieve_pair_context,
         answer_generator=answer_generator,
         progress_callback=progress_callback,
+        evidence_enricher=enrich_pair_results,
     ).execute(command)
 
 
