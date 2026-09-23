@@ -31,6 +31,7 @@ data/raw/
 data/private/
 data/duckdb/
 data/cache/
+data/response/
 data/reference/
 data/openfda/
 data/pubchem/
@@ -44,6 +45,7 @@ data/qlever/
 qlever-index/
 models/
 scripts/deferred/
+scripts/build_offline_mode_samples.py
 *.bin
 *.pt
 *.ckpt

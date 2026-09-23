@@ -1,9 +1,49 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import type { FormEvent, KeyboardEvent, ReactNode } from 'react'
 import type { Group, Vector3 } from 'three'
 import './App.css'
+import { Check, LoaderCircle, CircleAlert, ArrowRight, RotateCcw, SlidersHorizontal, Pill, Moon, Sun, FlaskConical, Network, BookOpen, Info } from 'lucide-react'
 import { analyzeInteractionStream, askFollowUp } from './api'
 import type { AudienceMode, EvidenceBundle, EvidenceMetric, EvidenceRow, InteractionResult } from './types'
+
+function ContextHelp({ title, children }: { title: string; children: ReactNode }) {
+  const id = useId()
+  const trigger = useRef<HTMLButtonElement>(null)
+  const hideTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const [position, setPosition] = useState<{ left: number; top: number } | null>(null)
+  const show = () => {
+    clearTimeout(hideTimer.current)
+    const rect = trigger.current?.getBoundingClientRect()
+    if (rect) setPosition({ left: Math.max(16, Math.min(rect.left, window.innerWidth - 296)), top: Math.max(16, Math.min(rect.bottom + 8, window.innerHeight - 220)) })
+  }
+  const hide = () => { hideTimer.current = setTimeout(() => setPosition(null), 180) }
+  useEffect(() => () => clearTimeout(hideTimer.current), [])
+  useEffect(() => {
+    if (!position) return
+    const close = () => setPosition(null)
+    const escape = (event: globalThis.KeyboardEvent) => { if (event.key === 'Escape') close() }
+    window.addEventListener('keydown', escape)
+    window.addEventListener('resize', close)
+    window.addEventListener('scroll', close, true)
+    return () => {
+      window.removeEventListener('keydown', escape)
+      window.removeEventListener('resize', close)
+      window.removeEventListener('scroll', close, true)
+    }
+  }, [position])
+  return <span className="context-help" onMouseEnter={show} onMouseLeave={hide}>
+    <button ref={trigger} type="button" className="context-help-trigger" aria-label={`About ${title}`}
+      aria-describedby={position ? id : undefined} onFocus={show} onBlur={() => setPosition(null)} onClick={show}>
+      <Info size={14} aria-hidden="true" />
+    </button>
+    {position && createPortal(<span id={id} role="tooltip" className="context-help-card" style={position}
+      onMouseEnter={() => clearTimeout(hideTimer.current)} onMouseLeave={hide}>
+      <strong>{title}</strong><span>{children}</span>
+      <small>If this information is not known, leave it Unknown. Unknown does not mean normal.</small>
+    </span>, document.body)}
+  </span>
+}
 
 /* ─── Inline markdown renderer ────────────────────────────────────────────── */
 function parseInline(text: string): ReactNode {
@@ -93,7 +133,7 @@ const SUGGESTIONS = [
 const MAX_FOLLOWUPS = 3
 
 type ThreadTurn = { role: 'user'|'assistant'; text: string; cards?: string[] }
-type ProgressTurn = { stage: string; message: string }
+type ProgressTurn = { stage: string; message: string; status: 'active' | 'complete' | 'error' }
 type PatientContextDraft = {
   age: string
   renal_function: string
@@ -617,28 +657,24 @@ function InfermedRelayBackdrop() {
   )
 }
 
-function SkeletonLoader({ progress }: { progress: ProgressTurn[] }) {
+function SkeletonLoader({ progress, answer }: { progress: ProgressTurn[]; answer: string }) {
   return (
     <div className="workspace-grid">
       <div className="answer-panel">
-        <div className="skeleton-block" style={{ height: 60,  marginBottom: 14 }} />
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:14 }}>
-          <div className="skeleton-block" style={{ height: 78 }} />
-          <div className="skeleton-block" style={{ height: 78 }} />
-        </div>
-        {[100,85,72,90,68].map(w => (
-          <div key={w} className="skeleton-block" style={{ height:15, width:`${w}%`, marginBottom:10 }} />
-        ))}
-        <div className="skeleton-block" style={{ height:15, width:'55%' }} />
         <div className="analysis-progress" aria-live="polite">
-          <span className="section-eyebrow">Analysis progress</span>
-          {(progress.length ? progress : [{ stage: 'starting', message: 'Preparing medication-set analysis.' }]).map((item, index) => (
-            <div className="analysis-progress-row" key={`${item.stage}-${index}`}>
-              <span>{index + 1}</span>
+          <span className="section-eyebrow">{answer ? 'Generating assessment' : 'Analysis progress'}</span>
+          <p role="status">{answer ? 'Draft response. Final evidence checks are pending.' : progress.at(-1)?.message || 'Preparing medication-set analysis.'}</p>
+          <ol className="analysis-stepper" aria-label="Analysis stages">
+          {(progress.length ? progress : [{ stage: 'starting', message: 'Preparing medication-set analysis.', status: 'active' }]).map(item => (
+            <li className={`analysis-step ${item.status}`} key={item.stage} aria-current={item.status === 'active' ? 'step' : undefined}>
+              <span className="step-marker" aria-label={item.status}>{item.status === 'complete' ? <Check size={14} /> : item.status === 'error' ? <CircleAlert size={14} /> : <LoaderCircle size={14} className="step-spinner" />}</span>
               <p>{item.message}</p>
-            </div>
+            </li>
           ))}
+          </ol>
         </div>
+        {answer ? <div className="streaming-assessment narrative-body" aria-label="Provisional assessment" aria-busy="true">{renderMarkdownBody(answer)}</div> :
+          <div className="streaming-assessment" aria-hidden="true">{[90,75,60].map(w => <div key={w} className="skeleton-block" style={{height:14, width:`${w}%`, marginBottom:10}} />)}</div>}
       </div>
       <div className="evidence-panel">
         <div className="skeleton-block" style={{ height:40, marginBottom:12 }} />
@@ -690,11 +726,6 @@ function NDrugReasoningPanel({ result }: { result: InteractionResult }) {
       </div>
     </div>
   )
-}
-
-/* ─── Source activity indicator ─── */
-function SourceDot() {
-  return <span className="source-live-dot" aria-hidden="true" />
 }
 
 function ChemicalStructure({ cid, name }: { cid?: string; name: string }) {
@@ -1209,6 +1240,7 @@ export default function App() {
   const [followUp, setFollowUp] = useState('')
   const [thread, setThread]     = useState<ThreadTurn[]>([])
   const [progress, setProgress] = useState<ProgressTurn[]>([])
+  const [streamedAnswer, setStreamedAnswer] = useState('')
   const [darkMode, setDarkMode] = useState(false)
   const [page, setPage]         = useState<PageView>('analyze')
   const [patientCtx, setPatientCtx] = useState<PatientContextDraft>({
@@ -1250,34 +1282,44 @@ export default function App() {
     if (e.key==='Enter'||e.key===',') { e.preventDefault(); addDrug(draft) }
     if (e.key==='Backspace' && !draft && drugs.length) removeDrug(drugs.length-1)
   }
-  function clearAll() { setDrugs([]); setResult(null); setThread([]); setError('') }
+  function clearAll() { setDrugs([]); setResult(null); setThread([]); setError(''); setProgress([]); setStreamedAnswer('') }
 
   /* ── analyze ── */
   async function analyze() {
     if (!canAnalyze) return
-    setLoading(true); setError(''); setThread([]); setProgress([])
+    setLoading(true); setError(''); setThread([]); setProgress([]); setStreamedAnswer(''); setResult(null)
     try {
       const r = await analyzeInteractionStream(
         { drugs, mode, refreshEvidence: doRefresh, patient_context: patientContextPayload(patientCtx) },
         event => {
+          if (event.type === 'token') {
+            setStreamedAnswer(text => text + (event.text || ''))
+            return
+          }
           if (event.type !== 'progress' || !event.message) return
           if (event.stage === 'answer_generation_waiting') return
-          const next = { stage: event.stage || 'progress', message: event.message || '' }
+          const rawStage = event.stage || 'progress'
+          const pair = Array.isArray(event.payload?.pair) ? event.payload.pair.join('|') : ''
+          const stage = rawStage.replace(/_(started|completed|failed)$/, '') + (pair ? `:${pair}` : '')
+          const status: ProgressTurn['status'] = rawStage.endsWith('_failed') ? 'error' : rawStage.endsWith('_started') || rawStage === 'queued' ? 'active' : 'complete'
+          const next = { stage, message: event.message, status }
           setProgress(rows => {
-            const existing = rows.findIndex(row => row.stage === next.stage)
+            const updated = rows.map(row => row.stage === 'queued' && rawStage === 'analysis_requested' ? { ...row, status: 'complete' as const } : row)
+            const existing = updated.findIndex(row => row.stage === next.stage)
             if (existing >= 0) {
-              const updated = [...rows]
               updated[existing] = next
-              return updated.slice(-8)
+              return updated
             }
-            return [...rows.slice(-8), next]
+            return [...updated, next]
           })
         },
       )
       setResult(r); setTab('overview')
     } catch(e) {
       setError(e instanceof Error ? e.message : 'Analysis failed.')
-    } finally { setLoading(false); setProgress([]) }
+      setProgress(rows => [...rows.map(row => row.status === 'active' ? { ...row, status: 'error' as const } : row), {stage: 'analysis_error', message: 'Analysis did not complete.', status: 'error'}])
+      setStreamedAnswer('')
+    } finally { setLoading(false) }
   }
 
   /* ── follow-up ── */
@@ -1327,7 +1369,7 @@ export default function App() {
         <div className="brand">
           <BrandMark />
           <div>
-            <span className="brand-name">INFERMed</span>
+            <span className="brand-name">INFER<span>Med</span></span>
             <span className="brand-tagline">Intelligent Navigator for Evidence-based Retrieval in Medicine</span>
           </div>
         </div>
@@ -1336,31 +1378,34 @@ export default function App() {
           <button
             type="button"
             className={page === 'analyze' ? 'active' : ''}
+            aria-current={page === 'analyze' ? 'page' : undefined}
             onClick={() => openPage('analyze')}
           >
-            Analyze
+            <Network size={16} aria-hidden="true" /> Analyze
           </button>
           <button
             type="button"
             className={page === 'about' ? 'active' : ''}
+            aria-current={page === 'about' ? 'page' : undefined}
             onClick={() => openPage('about')}
           >
-            About
+            <BookOpen size={16} aria-hidden="true" /> About
           </button>
         </nav>
 
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, position: 'relative', zIndex: 1 }}>
-          <div className="topbar-status">
-            <SourceDot />
-            <span>{page === 'analyze' ? `Live - ${currentMode.short}` : 'Research platform'}</span>
+        <div className="header-tools">
+          <div className="research-status">
+            <FlaskConical size={17} aria-hidden="true" />
+            <div><strong>Research preview</strong><span>{page === 'analyze' ? `${currentMode.short} workspace` : 'Platform & evidence'}</span></div>
           </div>
           <button
             className="theme-toggle"
             onClick={toggleDark}
             title={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
             aria-label="Toggle dark mode"
+            aria-pressed={darkMode}
           >
-            {darkMode ? 'Light' : 'Dark'}
+            {darkMode ? <Sun size={18} /> : <Moon size={18} />}
           </button>
         </div>
       </header>
@@ -1370,7 +1415,15 @@ export default function App() {
         <>
       <section className="search-hero" id="search" aria-label="Drug search">
         <div className="search-hero-inner">
-
+          <div className="review-toolbar">
+            <div className="review-title"><Pill size={17} aria-hidden="true" /><h2>Medication review</h2>
+              {drugs.length > 0 && <span className="review-count">{drugs.length} {drugs.length === 1 ? 'medicine' : 'medicines'}{drugs.length > 1 ? ` / ${drugs.length * (drugs.length - 1) / 2} ${drugs.length === 2 ? 'pair' : 'pairs'}` : ''}</span>}
+            </div>
+            <label className="refresh-toggle" title="Bypass cache and re-fetch evidence sources">
+              <input type="checkbox" checked={doRefresh} onChange={e=>setRefresh(e.target.checked)} />
+              <span>Refresh source knowledge</span>
+            </label>
+          </div>
           {/* One-line search bar with inline mode selector */}
           <div className="search-bar-wrap">
             <div className="search-input-group">
@@ -1416,17 +1469,13 @@ export default function App() {
 
             <div className="search-actions">
               {error && <span className="search-error" role="alert" title={error}>!</span>}
-              <label className="refresh-toggle" title="Bypass cache and re-fetch all evidence sources">
-                <input type="checkbox" checked={doRefresh} onChange={e=>setRefresh(e.target.checked)} />
-                <span>Refresh source knowledge</span>
-              </label>
-              <button className="btn-clear" type="button" onClick={clearAll} disabled={!drugs.length&&!result}>
-                Clear
+              <button className="btn-clear" type="button" onClick={clearAll} disabled={!drugs.length&&!result} aria-label="Clear medicines" title="Clear medicines">
+                <RotateCcw size={18} aria-hidden="true" />
               </button>
               <button className="btn-analyze" type="button" onClick={analyze} disabled={!canAnalyze}>
                 {loading
                   ? <><span className="spinner" aria-hidden="true"/>Analyzing...</>
-                  : <>Analyze interaction</>}
+                  : <>Analyze interaction <ArrowRight size={17} aria-hidden="true" /></>}
               </button>
             </div>
           </div>
@@ -1437,15 +1486,19 @@ export default function App() {
             </p>
           )}
           <div className="patient-context-panel" aria-label="Optional patient context">
-            <span className="patient-context-label">Patient context</span>
+            <span className="patient-context-label"><SlidersHorizontal size={15} aria-hidden="true" />Patient context<small>Optional</small></span>
+            <label className="context-field"><span>Age</span>
             <input
               inputMode="numeric"
               value={patientCtx.age}
               onChange={e => setPatientCtx(v => ({ ...v, age: e.target.value.replace(/[^\d]/g, '').slice(0, 3) }))}
-              placeholder="Age"
+              placeholder="Unknown"
               aria-label="Age"
             />
+            </label>
+            <div className="context-field"><span className="context-field-heading"><label htmlFor="patient-renal">Renal function</label><ContextHelp title="Renal function">How well the kidneys filter blood and remove waste and some medicines.</ContextHelp></span>
             <select
+              id="patient-renal"
               value={patientCtx.renal_function}
               onChange={e => setPatientCtx(v => ({ ...v, renal_function: e.target.value }))}
               aria-label="Renal function"
@@ -1455,7 +1508,10 @@ export default function App() {
               <option value="moderate_impairment">Moderate renal impairment</option>
               <option value="severe_impairment">Severe renal impairment</option>
             </select>
+            </div>
+            <div className="context-field"><span className="context-field-heading"><label htmlFor="patient-hepatic">Hepatic function</label><ContextHelp title="Hepatic function">How well the liver works, including processing many medicines.</ContextHelp></span>
             <select
+              id="patient-hepatic"
               value={patientCtx.hepatic_function}
               onChange={e => setPatientCtx(v => ({ ...v, hepatic_function: e.target.value }))}
               aria-label="Hepatic function"
@@ -1465,7 +1521,10 @@ export default function App() {
               <option value="moderate_impairment">Moderate hepatic impairment</option>
               <option value="severe_impairment">Severe hepatic impairment</option>
             </select>
+            </div>
+            <div className="context-field"><span className="context-field-heading"><label htmlFor="patient-qt">QT risk</label><ContextHelp title="QT risk">Risk of a prolonged QT interval, the heart's electrical recovery time measured on an ECG.</ContextHelp></span>
             <select
+              id="patient-qt"
               value={patientCtx.qt_risk}
               onChange={e => setPatientCtx(v => ({ ...v, qt_risk: e.target.value }))}
               aria-label="QT risk"
@@ -1475,13 +1534,17 @@ export default function App() {
               <option value="possible_qt_risk">Possible QT risk</option>
               <option value="known_long_qt">Known long QT</option>
             </select>
+            </div>
+            <div className="context-field"><span className="context-field-heading"><label htmlFor="patient-inr">Current INR</label><ContextHelp title="Current INR">International Normalized Ratio, a blood-clotting test commonly used to monitor warfarin.</ContextHelp></span>
             <input
+              id="patient-inr"
               inputMode="decimal"
               value={patientCtx.current_inr}
               onChange={e => setPatientCtx(v => ({ ...v, current_inr: e.target.value.replace(/[^\d.]/g, '').slice(0, 5) }))}
-              placeholder="INR"
+              placeholder="Unknown"
               aria-label="Current INR"
             />
+            </div>
           </div>
         </div>
       </section>
@@ -1489,8 +1552,8 @@ export default function App() {
       {/* ══════════ WORKSPACE ══════════ */}
       <div className={`workspace-wrap ${result ? 'has-result' : loading ? 'is-loading' : 'is-empty'}`}>
         <InfermedRelayBackdrop />
-        {loading ? (
-          <SkeletonLoader progress={progress} />
+        {loading || (error && progress.length > 0) ? (
+          <SkeletonLoader progress={progress} answer={streamedAnswer} />
         ) : result ? (
           <div className="workspace-grid">
 
@@ -1599,6 +1662,14 @@ export default function App() {
               <div className="evidence-header">
                 <span className="section-eyebrow">Evidence basis</span>
                 <h2 className="evidence-title">Why this answer?</h2>
+                {result.evidenceFreshness?.length ? <details className="evidence-freshness">
+                  <summary>Evidence freshness</summary>
+                  {result.evidenceFreshness.map(item => <p key={item.pair.join('|')}>
+                    <strong>{item.pair.join(' + ')}</strong><br />
+                    Context {item.cacheStatus}; assembled {item.assembledAt ? new Date(item.assembledAt).toLocaleString() : 'at an unknown time'}.
+                  </p>)}
+                  <p>Assembly time is not the source publication date. Individual sources may be cached or unavailable.</p>
+                </details> : null}
               </div>
               <div className="tab-strip" role="tablist">
                 {evidenceTabs.map(t => (
@@ -1627,11 +1698,6 @@ export default function App() {
         ) : (
           /* ── Empty state ── */
           <div className="empty-shell" aria-label="Ready for analysis">
-            <div className="empty-hero">
-              <p className="empty-lead">
-                Enter medicines above to generate an AI assessment backed by OpenFDA FAERS signals, pharmacokinetic enzyme data, and curated PK/PD mechanisms.
-              </p>
-            </div>
           </div>
         )}
 

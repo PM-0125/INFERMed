@@ -43,6 +43,13 @@ class SQLiteCache:
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_cache_entries_kind ON cache_entries(kind)"
             )
+            conn.execute('''CREATE TABLE IF NOT EXISTS cache_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                cache_key TEXT NOT NULL, payload TEXT NOT NULL,
+                metadata_json TEXT NOT NULL, retrieved_at REAL NOT NULL,
+                superseded_at REAL NOT NULL
+            )''')
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_cache_history_key ON cache_history(cache_key)')
 
     def get_json(self, key: str, *, ttl: int | None = None) -> Any | None:
         row = self._get_row(key)
@@ -69,6 +76,13 @@ class SQLiteCache:
         metadata_json = json.dumps(metadata or {}, sort_keys=True)
         payload = json.dumps(obj, ensure_ascii=False, sort_keys=True)
         with self._connect() as conn:
+            # Archive changed evidence in the same transaction as updating current data.
+            conn.execute('BEGIN IMMEDIATE')
+            conn.execute('''INSERT INTO cache_history
+                (cache_key, payload, metadata_json, retrieved_at, superseded_at)
+                SELECT cache_key, payload, metadata_json, updated_at, ?
+                FROM cache_entries WHERE cache_key = ? AND payload != ?''',
+                         (now, key, payload))
             conn.execute(
                 """
                 INSERT INTO cache_entries
@@ -100,9 +114,11 @@ class SQLiteCache:
     def delete(self, key: str) -> None:
         with self._connect() as conn:
             conn.execute("DELETE FROM cache_entries WHERE cache_key = ?", (key,))
+            conn.execute("DELETE FROM cache_history WHERE cache_key = ?", (key,))
 
     def clear_prefix(self, prefix: str) -> int:
         with self._connect() as conn:
+            conn.execute("DELETE FROM cache_history WHERE cache_key LIKE ?", (f"{prefix}%",))
             cursor = conn.execute(
                 "DELETE FROM cache_entries WHERE cache_key LIKE ?",
                 (f"{prefix}%",),

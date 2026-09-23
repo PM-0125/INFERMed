@@ -85,7 +85,12 @@ def test_medication_set_stream_returns_progress_and_result(monkeypatch):
         }
 
     monkeypatch.setattr("src.api.app._retrieve_pair_context", fake_retrieve_pair_context)
-    monkeypatch.setattr("src.api.app._generate_final_answer", lambda context, mode, **kwargs: {"text": "## Bottom Line\nUse caution."})
+    def stream_answer(context, mode, **kwargs):
+        kwargs['on_text']('## Bottom Line\n')
+        kwargs['on_text']('Use caution.')
+        return {"text": "## Bottom Line\nUse caution."}
+
+    monkeypatch.setattr("src.api.app._generate_final_answer", stream_answer)
     client = TestClient(app)
     response = client.post(
         "/api/medication-sets/analyze/stream",
@@ -100,6 +105,8 @@ def test_medication_set_stream_returns_progress_and_result(monkeypatch):
     text = response.text
     assert '"type": "progress"' in text
     assert '"type": "result"' in text
+    assert text.index('"type": "token"') < text.index('"type": "result"')
+    assert response.headers['x-accel-buffering'] == 'no'
     assert '"assessment"' in text
     assert '"risk"' in text
     assert '"evidence"' in text

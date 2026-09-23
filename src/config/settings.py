@@ -166,6 +166,7 @@ class Settings:
     sqlite_cache_path: str = "data/cache/infermed_cache.sqlite"
     enable_event_store: bool = False
     openfda_ttl_days: int = 30
+    evidence_cache_ttl_hours: int = 24
     chembl_timeout_s: int = 10
 
     enable_duckdb: bool = True
@@ -197,11 +198,18 @@ class Settings:
     nvidia_api_key: str = field(default="", repr=False)
     nvidia_base_url: str = "https://integrate.api.nvidia.com/v1"
     nvidia_model: str = ""
+    nvidia_gemma_api_key: str = field(default="", repr=False)
+    nvidia_gemma_model: str = ""
+    nvidia_prefer_gemma: bool = False
+    nvidia_compact_prompt: bool = False
     nvidia_reasoning_effort: str = ""
     ollama_host: str = "http://localhost:11434"
     ollama_model: str = "gpt-oss"
     ollama_timeout_s: float = 5000.0
     ollama_num_predict: int = -1
+    ollama_num_ctx: int = 8192
+    ollama_reasoning_effort: str = ""
+    ollama_keep_alive: str = "30m"
     string_caller_identity: str = "infermed-research"
     biogrid_access_key: str = field(default="", repr=False)
     llm_temperature: float = 1.0
@@ -238,6 +246,7 @@ def get_settings() -> Settings:
         sqlite_cache_path=_config_str(config, "runtime.cache.sqlite_cache_path", "data/cache/infermed_cache.sqlite", env_name="SQLITE_CACHE_PATH"),
         enable_event_store=_config_bool(config, "runtime.cache.enable_event_store", cache_backend == "sqlite", env_name="ENABLE_EVENT_STORE"),
         openfda_ttl_days=_config_int(config, "runtime.source_settings.openfda_ttl_days", 30, env_name="OPENFDA_TTL_DAYS"),
+        evidence_cache_ttl_hours=_config_int(config, "runtime.cache.evidence_ttl_hours", 24),
         chembl_timeout_s=_config_int(config, "runtime.source_settings.chembl_timeout_s", 10, env_name="CHEMBL_TIMEOUT"),
         enable_duckdb=_config_bool(config, "runtime.sources.duckdb", True, env_name="ENABLE_DUCKDB"),
         enable_drugbank=enable_drugbank,
@@ -267,11 +276,18 @@ def get_settings() -> Settings:
         nvidia_api_key=os.getenv("NVIDIA_API_KEY", ""),
         nvidia_base_url=_env_str("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1"),
         nvidia_model=_env_str("NVIDIA_MODEL", ""),
+        nvidia_gemma_api_key=os.getenv("NVIDIA_GEMMA_API_KEY", ""),
+        nvidia_gemma_model=_env_str("NVIDIA_GEMMA_MODEL", ""),
+        nvidia_prefer_gemma=_env_bool("NVIDIA_PREFER_GEMMA", False),
+        nvidia_compact_prompt=_env_bool("NVIDIA_COMPACT_PROMPT", False),
         nvidia_reasoning_effort=_env_str("NVIDIA_REASONING_EFFORT", "").lower(),
         ollama_host=_env_str("OLLAMA_HOST", "http://localhost:11434"),
         ollama_model=_env_str("OLLAMA_MODEL", "gpt-oss"),
         ollama_timeout_s=_env_float("OLLAMA_TIMEOUT_S", _env_float("LLM_TIMEOUT_S", 5000.0)),
         ollama_num_predict=_env_int("OLLAMA_NUM_PREDICT", -1),
+        ollama_num_ctx=_env_int("OLLAMA_NUM_CTX", 8192),
+        ollama_reasoning_effort=_env_str("OLLAMA_REASONING_EFFORT", "").lower(),
+        ollama_keep_alive=_env_str("OLLAMA_KEEP_ALIVE", "30m"),
         string_caller_identity=_env_str("STRING_CALLER_IDENTITY", "infermed-research"),
         biogrid_access_key=os.getenv("BIOGRID_ACCESS_KEY", ""),
         llm_temperature=_env_float("LLM_TEMPERATURE", _env_float("NVIDIA_TEMPERATURE", 1.0)),

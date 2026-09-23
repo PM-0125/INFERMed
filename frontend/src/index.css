@@ -11,14 +11,14 @@
   --navy-light:     #1E4F74;
 
   /* Primary actions */
-  --blue:           #1565A8;
+  --blue:           #10558F;
   --blue-hover:     #1272BE;
   --blue-pale:      #EBF4FB;
   --blue-mid:       #C0DDEF;
 
   /* Cyan accent (PubChem-inspired) */
-  --cyan:           #0798C5;
-  --cyan-hover:     #0AADDF;
+  --cyan:           #006D89;
+  --cyan-hover:     #00566E;
   --cyan-pale:      #E0F5FC;
   --cyan-mid:       #B3E4F5;
 
@@ -40,10 +40,10 @@
   --amber-mid:      #FDD5A0;
 
   /* Typography */
-  --ink:            #0D1E2B;
-  --ink-mid:        #2C4255;
-  --muted:          #576E80;
-  --muted-light:    #8DA5B4;
+  --ink:            #091B27;
+  --ink-mid:        #20394C;
+  --muted:          #40576A;
+  --muted-light:    #536A7B;
 
   /* Surfaces */
   --surface:        #EFF3F7;
@@ -52,9 +52,9 @@
   --surface-raised: #FAFCFD;
 
   /* Borders */
-  --line:           #C5D4DE;
-  --line-light:     #DDE8EE;
-  --line-strong:    #A8BFC9;
+  --line:           #9AAEBC;
+  --line-light:     #BFCDD6;
+  --line-strong:    #71899C;
 
   /* Elevation */
   --shadow-xs:  0 1px 2px rgba(13, 30, 43, 0.06);

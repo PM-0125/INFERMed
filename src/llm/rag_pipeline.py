@@ -7,9 +7,13 @@ import hashlib
 import logging
 import re
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout, as_completed
+from contextvars import copy_context
+import time
+import tempfile
+from datetime import datetime, timezone
+from src.utils.caching import source_cache_policy
 from dataclasses import asdict
 from typing import Any, Callable, Dict, Tuple, Optional, List
-from datetime import datetime, timezone
 from collections.abc import Mapping  # <-- for _jsonify_sets
 
 LOG = logging.getLogger(__name__)
@@ -128,6 +132,23 @@ def _context_cache_version_ok(ctx: Dict[str, Any]) -> bool:
     return (ctx.get("meta") or {}).get("version") == VERSION
 
 
+def _context_cache_fresh(ctx, path):
+    stamp = (ctx.get('meta') or {}).get('evidence_assembled_at')
+    try:
+        created = datetime.fromisoformat(stamp).timestamp() if stamp else os.path.getmtime(path)
+        age = time.time() - created
+        return 0 <= age < max(0, get_settings().evidence_cache_ttl_hours) * 3600
+    except (OSError, ValueError, TypeError):
+        return False
+
+
+def _cached_context(ctx, path):
+    meta = ctx.setdefault('meta', {})
+    meta.setdefault('evidence_assembled_at', datetime.fromtimestamp(os.path.getmtime(path), timezone.utc).isoformat())
+    meta['evidence_cache_status'] = 'cached'
+    return ctx
+
+
 def _find_context_cache_by_pair(drugA: str, drugB: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     pair_key = _pair_key(drugA, drugB)
     if not os.path.isdir(CTX_DIR):
@@ -142,8 +163,8 @@ def _find_context_cache_by_pair(drugA: str, drugB: str) -> Tuple[Optional[Dict[s
         except Exception:
             continue
         meta = ctx.get("meta") or {}
-        if meta.get("pair_key") == pair_key and _context_cache_version_ok(ctx):
-            return ctx, os.path.splitext(name)[0]
+        if meta.get("pair_key") == pair_key and _context_cache_version_ok(ctx) and _context_cache_fresh(ctx, path):
+            return _cached_context(ctx, path), os.path.splitext(name)[0]
     return None, None
 
 
@@ -384,7 +405,7 @@ def _run_parallel_source_tasks(
     results: Dict[str, Any] = {}
     worker_count = max(1, min(max_workers, len(tasks)))
     executor = ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="infermed-source")
-    futures = {executor.submit(fn): name for name, fn in tasks.items()}
+    futures = {executor.submit(copy_context().run, fn): name for name, fn in tasks.items()}
 
     try:
         for future in as_completed(futures, timeout=max(0.1, timeout_s)):
@@ -1675,15 +1696,22 @@ def get_context_cached(
     """
     key = _context_cache_key(drugA, drugB)
     path = _ctx_path(key)
+    reverse_key = _context_cache_key(drugB, drugA)
+    if not os.path.exists(path) and os.path.exists(_ctx_path(reverse_key)):
+        key, path = reverse_key, _ctx_path(reverse_key)
     if not force_refresh:
         for candidate in _context_cache_candidates(drugA, drugB):
             candidate_path = _ctx_path(candidate)
             if not os.path.exists(candidate_path):
                 continue
-            with open(candidate_path, "r", encoding="utf-8") as f:
-                cached_ctx = json.load(f)
-            if not _context_cache_version_ok(cached_ctx):
+            try:
+                with open(candidate_path, "r", encoding="utf-8") as f:
+                    cached_ctx = json.load(f)
+            except (OSError, ValueError):
                 continue
+            if not _context_cache_version_ok(cached_ctx) or not _context_cache_fresh(cached_ctx, candidate_path):
+                continue
+            cached_ctx = _cached_context(cached_ctx, candidate_path)
             if candidate != key:
                 if candidate == _legacy_context_cache_key(drugA, drugB):
                     with open(path, "w", encoding="utf-8") as f:
@@ -1702,18 +1730,38 @@ def get_context_cached(
                     json.dump(cached_ctx, f, ensure_ascii=False, indent=2)
             return cached_ctx, key
 
-    ctx = retrieve_and_normalize(
-        drugA,
-        drugB,
-        parquet_dir=parquet_dir,
-        openfda_cache=openfda_cache,
-        topk_side_effects=topk_side_effects,
-        topk_faers=topk_faers,
-        topk_targets=topk_targets,
-        topk_pathways=topk_pathways,
+    with source_cache_policy(force_refresh=force_refresh,
+                             max_age_s=max(0, get_settings().evidence_cache_ttl_hours) * 3600):
+        ctx = retrieve_and_normalize(
+            drugA, drugB, parquet_dir=parquet_dir, openfda_cache=openfda_cache,
+            topk_side_effects=topk_side_effects, topk_faers=topk_faers,
+            topk_targets=topk_targets, topk_pathways=topk_pathways,
+        )
+    ctx.setdefault('meta', {}).update(
+        evidence_assembled_at=datetime.now(timezone.utc).isoformat(),
+        evidence_cache_status='refreshed' if force_refresh else 'rebuilt',
     )
-    with open(path, "w", encoding="utf-8") as f:
+    settings = get_settings()
+    if settings.cache_backend == 'sqlite':
+        from src.utils.sqlite_cache import SQLiteCache
+        store = SQLiteCache(settings.sqlite_cache_path)
+        snapshot_key = 'context:' + key
+        # Preserve a pre-existing file snapshot before the first SQLite revision.
+        if store.get_json(snapshot_key) is None and os.path.exists(path):
+            try:
+                with open(path, encoding='utf-8') as previous:
+                    store.set_json(snapshot_key, json.load(previous), kind='context')
+            except (ValueError, OSError):
+                pass
+        store.set_json(snapshot_key, ctx, kind='context')
+    with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=CTX_DIR, suffix='.tmp', delete=False) as f:
+        temp_path = f.name
         json.dump(ctx, f, ensure_ascii=False, indent=2)
+    try:
+        os.replace(temp_path, path)
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
     return ctx, key
 
 

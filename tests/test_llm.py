@@ -4,6 +4,7 @@ import types
 import pytest
 
 from src.llm.llm_interface import (
+    build_compact_analysis_prompt,
     build_prompt,
     generate_response,
     _collect_openai_stream,
@@ -48,6 +49,18 @@ def test_build_prompt_is_deterministic_same_input():
     p1 = build_prompt(MINIMAL_CTX, "Pharma")
     p2 = build_prompt(MINIMAL_CTX, "Pharma")
     assert p1 == p2
+
+
+def test_compact_analysis_prompt_preserves_evidence_policy_without_raw_json():
+    prompt = build_compact_analysis_prompt(MINIMAL_CTX, "Doctor")
+
+    assert "Bottom line" in prompt
+    assert "Evidence-supported interaction mechanisms" in prompt
+    assert "FAERS/PRR" in prompt
+    assert "associative, not causal" in prompt
+    assert "numeric dose changes" in prompt
+    assert "RAW_CONTEXT_JSON" not in prompt
+    assert len(prompt) < len(build_prompt(MINIMAL_CTX, "Doctor"))
 
 
 def test_generate_response_error_path_disclaimer(monkeypatch):
@@ -192,6 +205,91 @@ def test_nvidia_retries_transient_gateway_error(monkeypatch):
     assert out["meta"]["provider"] == "nvidia"
     assert out["meta"]["retry_attempts"] == 2
     assert "OK" in out["text"]
+
+
+def test_nvidia_uses_gemma_secondary_after_primary_gateway_error(monkeypatch):
+    monkeypatch.setenv("LLM_PROVIDER", "nvidia")
+    monkeypatch.setenv("NVIDIA_API_KEY", "primary-key")
+    monkeypatch.setenv("NVIDIA_MODEL", "openai/gpt-oss-120b")
+    monkeypatch.setenv("NVIDIA_GEMMA_API_KEY", "gemma-key")
+    monkeypatch.setenv("NVIDIA_GEMMA_MODEL", "google/gemma-4-31b-it")
+    monkeypatch.setenv("NVIDIA_REASONING_EFFORT", "low")
+    monkeypatch.setenv("NVIDIA_RETRY_ATTEMPTS", "1")
+    monkeypatch.setenv("LLM_STREAM", "false")
+
+    import requests
+
+    seen = []
+
+    class GatewayResp:
+        status_code = 504
+        text = ""
+
+        def json(self):
+            raise ValueError("not json")
+
+    class OkResp:
+        status_code = 200
+        text = ""
+
+        def json(self):
+            return {"choices": [{"message": {"content": "Gemma answer"}}], "usage": {}}
+
+    def fake_post(url, **kwargs):
+        seen.append({"auth": kwargs["headers"]["Authorization"], "payload": kwargs["json"]})
+        return GatewayResp() if len(seen) == 1 else OkResp()
+
+    monkeypatch.setattr(requests, "post", fake_post, raising=True)
+
+    out = generate_response(MINIMAL_CTX, "Doctor", seed=123)
+
+    assert [call["payload"]["model"] for call in seen] == [
+        "openai/gpt-oss-120b",
+        "google/gemma-4-31b-it",
+    ]
+    assert [call["auth"] for call in seen] == ["Bearer primary-key", "Bearer gemma-key"]
+    assert seen[0]["payload"]["reasoning_effort"] == "low"
+    assert "reasoning_effort" not in seen[1]["payload"]
+    assert out["meta"]["provider_variant"] == "gemma_secondary"
+    assert "Gemma answer" in out["text"]
+
+
+def test_nvidia_can_prefer_gemma_and_skip_primary_when_gemma_succeeds(monkeypatch):
+    monkeypatch.setenv("LLM_PROVIDER", "nvidia")
+    monkeypatch.setenv("NVIDIA_API_KEY", "primary-key")
+    monkeypatch.setenv("NVIDIA_MODEL", "openai/gpt-oss-120b")
+    monkeypatch.setenv("NVIDIA_GEMMA_API_KEY", "gemma-key")
+    monkeypatch.setenv("NVIDIA_GEMMA_MODEL", "google/gemma-4-31b-it")
+    monkeypatch.setenv("NVIDIA_PREFER_GEMMA", "true")
+    monkeypatch.setenv("NVIDIA_REASONING_EFFORT", "low")
+    monkeypatch.setenv("NVIDIA_RETRY_ATTEMPTS", "1")
+    monkeypatch.setenv("LLM_STREAM", "false")
+
+    import requests
+
+    seen = []
+
+    class OkResp:
+        status_code = 200
+        text = ""
+
+        def json(self):
+            return {"choices": [{"message": {"content": "Gemma first"}}], "usage": {}}
+
+    def fake_post(url, **kwargs):
+        seen.append(kwargs)
+        return OkResp()
+
+    monkeypatch.setattr(requests, "post", fake_post, raising=True)
+
+    out = generate_response(MINIMAL_CTX, "Doctor", seed=123)
+
+    assert len(seen) == 1
+    assert seen[0]["json"]["model"] == "google/gemma-4-31b-it"
+    assert seen[0]["headers"]["Authorization"] == "Bearer gemma-key"
+    assert "reasoning_effort" not in seen[0]["json"]
+    assert out["meta"]["provider_variant"] == "gemma_primary"
+    assert "Gemma first" in out["text"]
 
 
 def test_nvidia_uses_dedicated_timeout_and_non_stream_default(monkeypatch):

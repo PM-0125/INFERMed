@@ -117,6 +117,7 @@ def analyze_medication_set_stream(request: MedicationSetAnalyzeRequest) -> Strea
                     analysis_depth=request.analysis_depth,
                 ),
                 progress_callback=progress,
+                token_callback=lambda text: events.put({"type": "token", "text": text}),
             )
             log.info("INFERMed analysis completed: analysis_id=%s", analysis.analysis_id)
             events.put({"type": "result", "result": _medication_set_response(analysis)})
@@ -145,12 +146,14 @@ def analyze_medication_set_stream(request: MedicationSetAnalyzeRequest) -> Strea
                     elapsed,
                     heartbeat,
                 )
+                yield ": keep-alive\n\n"
                 continue
             if item is None:
                 break
             yield _sse(item)
 
-    return StreamingResponse(stream(), media_type="text/event-stream")
+    return StreamingResponse(stream(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 def _medication_set_response(analysis: Any) -> dict[str, Any]:
@@ -174,6 +177,12 @@ def _medication_set_response(analysis: Any) -> dict[str, Any]:
         "evidencePanels": legacy["evidence"],
         "source_status": legacy["evidence"].get("sources", []),
         "sourceStatus": legacy["evidence"].get("sources", []),
+        "evidenceFreshness": [
+            {"pair": list(item.pair),
+             "assembledAt": (item.context.get("meta") or {}).get("evidence_assembled_at"),
+             "cacheStatus": (item.context.get("meta") or {}).get("evidence_cache_status", "unknown")}
+            for item in analysis.pair_results
+        ],
         "limitations": analysis.decision.source_limitations,
         "compatibility": legacy,
     }
@@ -238,11 +247,17 @@ def _execute_analysis(
     command: AnalyzeMedicationSetCommand,
     *,
     progress_callback: Any | None = None,
+    token_callback: Any | None = None,
 ) -> Any:
+    def answer_generator(context, mode, **kwargs):
+        if token_callback is not None:
+            kwargs["on_text"] = token_callback
+        return _generate_final_answer(context, mode, **kwargs)
+
     return AnalyzeMedicationSetUseCase(
         rag_runner=run_rag,
         context_runner=_retrieve_pair_context,
-        answer_generator=_generate_final_answer,
+        answer_generator=answer_generator,
         progress_callback=progress_callback,
     ).execute(command)
 
@@ -250,19 +265,13 @@ def _execute_analysis(
 def _retrieve_pair_context(drug_a: str, drug_b: str, **kwargs: Any) -> dict[str, Any]:
     settings = get_settings()
     force_refresh = bool(kwargs.get("force_refresh"))
-    if force_refresh:
-        return retrieve_and_normalize(
-            drug_a,
-            drug_b,
-            parquet_dir=settings.duckdb_dir,
-            openfda_cache=settings.openfda_cache_dir,
-        )
     try:
         context, _cache_key = get_context_cached(
             drug_a,
             drug_b,
             parquet_dir=settings.duckdb_dir,
             openfda_cache=settings.openfda_cache_dir,
+            force_refresh=force_refresh,
         )
     except TypeError as exc:
         if "unexpected keyword" not in str(exc):
@@ -279,23 +288,41 @@ def _generate_final_answer(context: dict[str, Any], mode: str, **kwargs: Any) ->
         medication_set["patient_context"] = patient_context
         context["medication_set"] = medication_set
     settings = get_settings()
+    gemma_configured = bool(settings.nvidia_gemma_api_key and settings.nvidia_gemma_model)
+    gemma_primary = settings.llm_provider == "nvidia" and settings.nvidia_prefer_gemma and gemma_configured
+    if settings.llm_provider == "nvidia":
+        primary_model = settings.nvidia_gemma_model if gemma_primary else settings.nvidia_model
+        route = "gemma-first" if gemma_primary else ("default-first-with-gemma-failover" if gemma_configured else "single-model")
+        reasoning = "n/a" if gemma_primary else settings.nvidia_reasoning_effort
+    else:
+        primary_model = settings.ollama_model
+        route = "single-model"
+        reasoning = settings.ollama_reasoning_effort
     log.info(
-        "INFERMed final LLM call started: provider=%s model=%s reasoning=%s stream=%s max_tokens=%s timeout_s=%s",
+        "INFERMed final LLM call started: provider=%s route=%s primary_model=%s reasoning=%s stream=%s max_tokens=%s timeout_s=%s",
         settings.llm_provider,
-        settings.nvidia_model if settings.llm_provider == "nvidia" else settings.ollama_model,
-        settings.nvidia_reasoning_effort,
+        route,
+        primary_model,
+        reasoning,
         settings.llm_stream,
-        settings.llm_max_tokens,
-        settings.llm_timeout_s,
+        settings.ollama_num_predict if settings.llm_provider == "ollama" else settings.llm_max_tokens,
+        settings.ollama_timeout_s if settings.llm_provider == "ollama" else settings.llm_timeout_s,
     )
     started = time.monotonic()
-    answer = generate_response(context, mode, seed=42, temperature=settings.llm_temperature, model_name=None)
+    stream_options = {"on_text": kwargs["on_text"]} if kwargs.get("on_text") else {}
+    answer = generate_response(context, mode, seed=42, temperature=settings.llm_temperature, model_name=None, **stream_options)
+    answer_meta = answer.get("meta") or {}
     log.info(
-        "INFERMed final LLM call completed: elapsed_s=%.1f answer_chars=%s provider=%s",
+        "INFERMed final LLM call completed: elapsed_s=%.1f answer_chars=%s provider=%s model=%s route_variant=%s",
         time.monotonic() - started,
         len(str(answer.get("text") or "")),
-        (answer.get("meta") or {}).get("provider"),
+        answer_meta.get("provider"),
+        answer_meta.get("model"),
+        answer_meta.get("provider_variant"),
     )
+    if answer_meta.get("provider") is None:
+        error_preview = " ".join(str(answer.get("text") or "").split())[:320]
+        log.warning("INFERMed final LLM call produced no provider result: %s", error_preview)
     return answer
 
 

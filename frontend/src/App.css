@@ -4,6 +4,51 @@
    ============================================================ */
 
 /* ── Shell ── */
+.app-shell > .topbar {
+  height: auto;
+  min-height: 76px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 28px;
+  padding: 0 28px;
+  background: var(--surface-card);
+  border-bottom: 1px solid var(--line);
+  box-shadow: none;
+}
+.app-shell > .topbar::after { display: none; }
+.topbar .brand { min-width: 0; gap: 10px; }
+.topbar .brand-mark { width: 40px; height: 40px; background: var(--cyan-pale); border-radius: 8px; }
+.topbar .brand-name { font-size: 25px; color: var(--ink); letter-spacing: 0; font-weight: 800; }
+.topbar .brand-name > span { color: #168a89; font-weight: 600; }
+[data-theme="dark"] .topbar .brand-name > span { color: #70d6c3; }
+.topbar .brand-mark svg line { stroke: #168a89; }
+.topbar .brand-tagline { color: var(--muted); font-size: 10px; font-weight: 500; margin-top: 5px; line-height: 1.4; white-space: normal; max-width: 340px; letter-spacing: 0; }
+.topbar .topbar-nav { display: flex; align-self: stretch; align-items: stretch; gap: 24px; margin: 0; }
+.topbar .topbar-nav button { height: auto; padding: 0 2px; gap: 8px; border: 0; border-bottom: 3px solid transparent; border-radius: 0; background: transparent; color: var(--muted); font-size: 13px; font-weight: 650; }
+.topbar .topbar-nav button.active { background: transparent; color: var(--ink); border-bottom-color: #168a89; }
+.topbar .topbar-nav button:hover { background: transparent; color: #168a89; }
+[data-theme="dark"] .topbar .topbar-nav button.active { border-bottom-color: #70d6c3; }
+[data-theme="dark"] .topbar .topbar-nav button:hover { color: #70d6c3; }
+.header-tools { display: flex; align-items: center; justify-content: flex-end; gap: 22px; min-width: 0; }
+.research-status { display: flex; align-items: center; gap: 9px; color: var(--muted); }
+.research-status > div { display: flex; flex-direction: column; gap: 3px; }
+.research-status strong { font-size: 11px; color: var(--ink); font-weight: 650; }
+.research-status span { font-size: 11px; }
+.topbar .theme-toggle { min-width: 36px; width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--line); color: var(--ink); background: var(--surface); }
+.topbar .theme-toggle:hover { background: var(--cyan-pale); color: var(--blue); }
+.topbar button:focus-visible { outline: 2px solid var(--cyan); outline-offset: 4px; }
+@media (max-width: 800px) {
+  .app-shell > .topbar { gap: 18px; grid-template-columns: minmax(0,1fr) auto auto; }
+  .research-status { display: none; }
+  .topbar .brand-tagline { max-width: 260px; }
+}
+@media (max-width: 520px) {
+  .app-shell > .topbar { grid-template-columns: 1fr auto; padding: 14px 16px 0; gap: 10px; }
+  .topbar .brand-name { font-size: 23px; }
+  .topbar .brand-tagline { display: none; }
+  .topbar .topbar-nav { grid-column: 1 / -1; grid-row: 2; gap: 28px; min-height: 40px; }
+  .header-tools { grid-column: 2; grid-row: 1; }
+}
 .app-shell {
   display: flex;
   flex-direction: column;
@@ -3228,13 +3273,13 @@
   --surface-card:   #0F2030;
   --surface-hover:  #152840;
   --surface-raised: #132535;
-  --line:           #1C364A;
-  --line-light:     #172E42;
-  --line-strong:    #244560;
-  --ink:            #E4F0F8;
-  --ink-mid:        #B8D4E8;
-  --muted:          #6B9AB8;
-  --muted-light:    #4E7A96;
+  --line:           #567186;
+  --line-light:     #3B5468;
+  --line-strong:    #819BAE;
+  --ink:            #F1F7FB;
+  --ink-mid:        #D0E2EE;
+  --muted:          #A9C3D5;
+  --muted-light:    #95B2C7;
   --shadow-xs:  0 1px 2px rgba(0,0,0,.25);
   --shadow-sm:  0 2px 6px rgba(0,0,0,.35);
   --shadow-md:  0 4px 16px rgba(0,0,0,.45);
@@ -3550,4 +3595,88 @@
 [data-theme="dark"] .product-use-copy h2,
 [data-theme="dark"] .product-use-card strong {
   color: #fff;
+}
+.streaming-assessment {
+  padding: 20px 24px;
+  overflow-wrap: anywhere;
+}
+.analysis-progress details summary {
+  cursor: pointer;
+  padding: 8px 0;
+  font-weight: 600;
+}
+.analysis-stepper { list-style: none; margin: 0; padding: 0; }
+.analysis-step { position: relative; display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 12px; padding: 0 0 16px; color: var(--muted); }
+.analysis-step:not(:last-child)::before { content: ''; position: absolute; left: 12px; top: 26px; bottom: 0; border-left: 2px solid var(--line); }
+.step-marker { display: grid; place-items: center; width: 26px; height: 26px; border: 1px solid var(--line); border-radius: 50%; background: var(--cyan-pale); }
+.analysis-step.complete .step-marker { color: #16835e; border-color: #80bfa6; }
+.analysis-step.active { color: var(--blue); }
+.analysis-step.error { color: #c43237; }
+.analysis-step p { margin: 3px 0 0; overflow-wrap: anywhere; }
+.analysis-progress { padding: 20px 24px; margin-top: 0; }
+.step-spinner { animation: step-spin 1.2s linear infinite; }
+@keyframes step-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .step-spinner { animation: none; } }
+.evidence-freshness { margin-top: 12px; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.evidence-freshness summary { cursor: pointer; font-weight: 600; }
+
+/* Compact medication composer; selectors stay separate from medicine entry. */
+#search.search-hero {
+  background: var(--surface-card);
+  border: 1px solid var(--line);
+  border-top: 3px solid #168a89;
+  border-radius: 8px;
+  box-shadow: 0 5px 20px rgba(22, 54, 66, .06);
+  padding: 18px 20px 0;
+}
+#search .search-hero-inner { gap: 14px; }
+.review-toolbar, .review-title { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.review-toolbar { justify-content: space-between; flex-wrap: wrap; }
+.review-title { color: #168a89; flex-wrap: wrap; }
+.review-title h2 { margin: 0; font-size: 14px; font-weight: 750; color: var(--ink); letter-spacing: 0; }
+.review-count { color: var(--muted); font-size: 12px; border-left: 1px solid var(--line); padding-left: 10px; }
+#search .refresh-toggle { font-size: 12px; font-weight: 500; gap: 8px; margin: 0; }
+#search .refresh-toggle input { accent-color: #168a89; width: 15px; height: 15px; }
+#search .search-bar-wrap { grid-template-columns: minmax(0, 1fr) auto; gap: 12px; }
+#search .search-input-group { grid-template-columns: 156px minmax(0, 1fr); gap: 10px; }
+#search .mode-select { width: 100%; border: 1px solid var(--line); border-radius: 8px; background-color: var(--surface-card); min-height: 48px; }
+#search .drug-token-field { border-radius: 8px; background: var(--surface-card); border: 1px solid var(--line); min-height: 48px; }
+#search .drug-token-field:focus-within { border-color: #168a89; box-shadow: 0 0 0 3px rgba(22,138,137,.12); }
+#search .drug-token { background: var(--cyan-pale); border-color: var(--cyan-mid); }
+#search .search-actions { gap: 8px; }
+#search .btn-clear { width: 44px; min-width: 44px; padding: 0; display: grid; place-items: center; border-radius: 8px; flex: none; }
+#search .btn-analyze { display: flex; align-items: center; justify-content: center; gap: 10px; border-radius: 8px; box-shadow: none; padding: 0 20px; min-height: 48px; }
+#search .patient-context-panel { display: grid; grid-template-columns: 150px minmax(70px,.55fr) minmax(0,1.4fr) minmax(0,1.4fr) minmax(0,1fr) minmax(80px,.6fr); gap: 12px; align-items: end; margin: 0 -20px; padding: 14px 20px 16px; border: 0; border-top: 1px solid var(--line); border-radius: 0 0 8px 8px; box-shadow: none; background: var(--surface); }
+#search .patient-context-label { display: flex; flex-wrap: wrap; align-self: center; align-items: center; gap: 6px; color: var(--ink); letter-spacing: 0; text-transform: none; font-size: 12px; font-weight: 650; }
+#search .patient-context-label small { width: 100%; padding-left: 21px; font-size: 11px; color: var(--muted); font-weight: 400; }
+.context-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; color: var(--muted); font-size: 11px; font-weight: 600; }
+.context-field-heading { display: flex; align-items: center; gap: 5px; min-height: 20px; }
+.context-help { display: inline-flex; }
+.context-help-trigger { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--muted); cursor: help; }
+.context-help-trigger:hover, .context-help-trigger:focus-visible { color: var(--ink); background: var(--surface); }
+.context-help-card { position: fixed; z-index: 1000; display: flex; flex-direction: column; gap: 8px; width: 280px; max-width: calc(100vw - 32px); box-sizing: border-box; padding: 14px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface-card); color: var(--ink-mid); box-shadow: 0 6px 24px rgba(0,0,0,.18); font-size: 13px; line-height: 1.5; font-weight: 400; }
+.context-help-card strong { color: var(--ink); font-size: 13px; }
+.context-help-card small { border-top: 1px solid var(--line); padding-top: 8px; color: var(--muted); font-size: 12px; }
+#search .context-field input, #search .context-field select { width: 100%; max-width: none; min-width: 0; height: 36px; border: 1px solid var(--line); border-radius: 6px; font-weight: 500; }
+#search .context-field input, #search .context-field select,
+#search .mode-select, #search .drug-token-field { border-color: var(--line-strong); }
+.app-shell input::placeholder, .app-shell textarea::placeholder,
+.app-shell .drug-token-field input::placeholder { color: var(--muted); opacity: 1; }
+.app-shell .btn-analyze:disabled { opacity: 1; background: var(--surface); color: var(--muted); border: 1px solid var(--line); box-shadow: none; }
+.app-shell .btn-clear:disabled { opacity: 1; color: var(--muted-light); background: var(--surface); border-color: var(--line); }
+[data-theme="dark"] .section-eyebrow { color: #75D4EB; }
+.app-shell :is(button, input, select, textarea, a):focus-visible { outline: 3px solid var(--blue); outline-offset: 3px; }
+[data-theme="dark"] .app-shell :is(button, input, select, textarea, a):focus-visible { outline-color: #75D4EB; }
+@media (max-width: 1000px) {
+  #search .patient-context-panel { grid-template-columns: repeat(5, minmax(0,1fr)); }
+  #search .patient-context-label { grid-column: 1 / -1; }
+  #search .patient-context-label small { width: auto; padding-left: 4px; }
+}
+@media (max-width: 680px) {
+  #search.search-hero { margin: 12px; padding: 14px 14px 0; }
+  #search .search-bar-wrap { grid-template-columns: 1fr; }
+  #search .search-input-group { grid-template-columns: 1fr; }
+  #search .search-actions { justify-content: flex-end; }
+  #search .btn-analyze { flex: 1; }
+  #search .patient-context-panel { grid-template-columns: repeat(2,minmax(0,1fr)); margin: 0 -14px; padding: 14px; }
 }

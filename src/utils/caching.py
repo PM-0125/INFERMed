@@ -7,11 +7,29 @@ import re
 import time
 from pathlib import Path
 from typing import Any, Optional
+from contextlib import contextmanager
+from contextvars import ContextVar
 
 from src.utils.sqlite_cache import SQLiteCache
 
 # allow only safe chars in filenames; normalize to lowercase
 _SAFE = re.compile(r"[^a-z0-9._-]+")
+_source_policy = ContextVar('source_cache_policy', default=(False, None))
+
+
+@contextmanager
+def source_cache_policy(*, force_refresh=False, max_age_s=None):
+    """Request-local cache policy; copy context when dispatching source workers."""
+    token = _source_policy.set((force_refresh, max_age_s))
+    try:
+        yield
+    finally:
+        _source_policy.reset(token)
+
+
+def _effective_ttl(ttl):
+    _, max_age = _source_policy.get()
+    return ttl if max_age is None else min(ttl, max_age) if ttl is not None else max_age
 
 def sanitize_key(key: str) -> str:
     return _SAFE.sub("_", key.lower())
@@ -57,6 +75,9 @@ def load_json(root: str | Path, key: str, *, ttl: Optional[int] = None, ext: str
     Load JSON from cache, optionally enforcing a TTL (in seconds).
     Returns None on cache miss, expired entry, or corrupt JSON (corrupt file is removed).
     """
+    if _source_policy.get()[0]:
+        return None
+    ttl = _effective_ttl(ttl)
     sqlite_cache = _sqlite_cache()
     if sqlite_cache is not None:
         cached = sqlite_cache.get_json(_sqlite_key(root, key, ext, "json"), ttl=ttl)
@@ -104,6 +125,9 @@ def save_json(root: str | Path, key: str, obj: Any, *, ext: str = "json") -> Pat
 # -------- TEXT (for small summaries or blobs) --------
 
 def load_text(root: str | Path, key: str, *, ttl: Optional[int] = None, ext: str = "json") -> Optional[str]:
+    if _source_policy.get()[0]:
+        return None
+    ttl = _effective_ttl(ttl)
     sqlite_cache = _sqlite_cache()
     if sqlite_cache is not None:
         return sqlite_cache.get_text(_sqlite_key(root, key, ext, "text"), ttl=ttl)

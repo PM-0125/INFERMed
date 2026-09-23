@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import time
@@ -8,6 +9,8 @@ from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlsplit, urlunsplit
 
 from src.config.settings import get_settings
+
+LOG = logging.getLogger("infermed.llm")
 
 # Sensitive local .env files are opt-in. Codex/test runs should use process
 # environment variables or example env files rather than reading secrets.
@@ -156,9 +159,13 @@ def generate_response(
     history: Optional[List[Dict[str, str]]] = None,
     model_name: Optional[str] = None,
     stream: Optional[bool] = None,
+    on_text=None,
 ) -> Dict[str, Any]:
-    prompt = build_prompt(context or {}, mode, history=history)
     settings = get_settings()
+    if settings.llm_provider == "nvidia" and settings.nvidia_compact_prompt:
+        prompt = build_compact_analysis_prompt(context or {}, mode)
+    else:
+        prompt = build_prompt(context or {}, mode, history=history)
 
     selected_model = model_name or settings.ollama_model or MODEL_NAME
     num_predict = int(max_tokens) if (max_tokens is not None) else int(settings.ollama_num_predict)
@@ -178,43 +185,11 @@ def generate_response(
             seed=seed,
         )
 
-    payload_options = {
-        **DECODE_DEFAULTS,
-        "temperature": float(temperature),
-        "num_predict": num_predict,
-        **({"seed": int(seed)} if seed is not None else {}),
-    }
-    payload = {
-        "model": selected_model,
-        "prompt": prompt,
-        "options": payload_options,
-        "stream": False,
-    }
+    return _generate_ollama_response(
+        prompt, mode, model=selected_model, num_predict=num_predict,
+        seed=seed, stream=stream, on_text=on_text,
+    )
 
-    try:
-        import requests
-        r = requests.post(f"{settings.ollama_host}/api/generate", json=payload, timeout=settings.ollama_timeout_s)
-        if r.status_code != 200:
-            return _fallback(f"Ollama error {r.status_code}: {r.text[:200]}")
-
-        data = r.json()
-        text = (data.get("response") or "").strip()
-        text = _strip_template_safety(text)
-        return {
-            "text": _append_disclaimer(text, mode),
-            "usage": {
-                "eval_count": data.get("eval_count"),
-                "prompt_eval_count": data.get("prompt_eval_count"),
-            },
-            "meta": {
-                "model": selected_model,
-                "temperature": temperature,
-                "seed": seed,
-                "ts": int(time.time()),
-            },
-        }
-    except Exception as e:
-        return _fallback(f"Ollama exception: {e}")
 
 
 def generate_followup_response(
@@ -268,44 +243,92 @@ def generate_followup_response(
             seed=seed,
         )
 
-    payload_options = {
+    return _generate_ollama_response(
+        prompt, mode, model=selected_model, num_predict=num_predict,
+        seed=seed, stream=stream,
+    )
+
+
+
+def _generate_ollama_response(prompt, mode, *, model, num_predict, seed=None, stream=None, on_text=None):
+    """Consume Ollama NDJSON, retaining visible text and completion metrics only."""
+    import requests
+
+    settings = get_settings()
+    use_stream = settings.llm_stream if stream is None else bool(stream)
+    options = {
         **DECODE_DEFAULTS,
-        "temperature": float(temperature),
+        "temperature": settings.llm_temperature,
+        "top_p": settings.llm_top_p,
+        "num_ctx": settings.ollama_num_ctx,
         "num_predict": num_predict,
-        **({"seed": int(seed)} if seed is not None else {}),
     }
-    payload = {
-        "model": selected_model,
-        "prompt": prompt,
-        "options": payload_options,
-        "stream": False,
-    }
-
+    if seed is not None:
+        options["seed"] = int(seed)
+    payload = {"model": model, "prompt": prompt, "options": options, "stream": use_stream}
+    payload["keep_alive"] = settings.ollama_keep_alive
+    effort = settings.ollama_reasoning_effort
+    if effort in {"low", "medium", "high"}:
+        payload["think"] = effort
+    started = time.monotonic()
+    response = None
+    LOG.info("Ollama request: model=%s reasoning=%s context=%s output_tokens=%s stream=%s prompt_chars=%s",
+             model, effort, settings.ollama_num_ctx, num_predict, use_stream, len(prompt))
     try:
-        import requests
-        r = requests.post(f"{settings.ollama_host}/api/generate", json=payload, timeout=settings.ollama_timeout_s)
-        if r.status_code != 200:
-            return _fallback(f"Ollama error {r.status_code}: {r.text[:200]}")
-
-        data = r.json()
-        text = (data.get("response") or "").strip()
-        text = _strip_template_safety(text)
+        response = requests.post(
+            f"{settings.ollama_host.rstrip('/')}/api/generate", json=payload,
+            timeout=settings.ollama_timeout_s, stream=use_stream,
+        )
+        if response.status_code != 200:
+            raise RuntimeError(f"Ollama HTTP {response.status_code}")
+        if use_stream:
+            parts, data = [], {}
+            for line in response.iter_lines(chunk_size=1):
+                if not line:
+                    continue
+                event = json.loads(line)
+                if event.get("error"):
+                    raise RuntimeError(str(event["error"]))
+                if event.get("response"):
+                    if not parts:
+                        LOG.info("Ollama first visible text: elapsed_s=%.2f", time.monotonic() - started)
+                    parts.append(event["response"])
+                    if on_text:
+                        on_text(event["response"])
+                if event.get("done"):
+                    data = event
+                    break
+            if not data:
+                raise RuntimeError("Ollama stream ended without a completion event")
+            text = "".join(parts).strip()
+        else:
+            data = response.json()
+            if data.get("error"):
+                raise RuntimeError(str(data["error"]))
+            text = (data.get("response") or "").strip()
+        if data.get("done_reason") == "length":
+            raise RuntimeError("Ollama exhausted its token budget before completing the answer")
+        if not text:
+            raise RuntimeError("Ollama returned no visible answer")
+        elapsed = time.monotonic() - started
+        LOG.info("Ollama completed: elapsed_s=%.2f generated_tokens=%s", elapsed, data.get("eval_count"))
+        LOG.info("Ollama prefill: tokens=%s cached_tokens=%s duration_ns=%s load_ns=%s",
+                 data.get("prompt_eval_count"), data.get("prompt_eval_cached_count"),
+                 data.get("prompt_eval_duration"), data.get("load_duration"))
         return {
-            "text": _append_disclaimer(text, mode),
-            "usage": {
-                "eval_count": data.get("eval_count"),
-                "prompt_eval_count": data.get("prompt_eval_count"),
-            },
-            "meta": {
-                "model": selected_model,
-                "temperature": temperature,
-                "seed": seed,
-                "followup": True,
-                "ts": int(time.time()),
-            },
+            "text": _append_disclaimer(_strip_template_safety(text), mode),
+            "usage": {key: data.get(key) for key in (
+                "eval_count", "prompt_eval_count", "prompt_eval_cached_count", "eval_duration", "prompt_eval_duration", "load_duration")},
+            "meta": {"provider": "ollama", "model": model, "reasoning_effort": effort,
+                     "temperature": settings.llm_temperature, "seed": seed,
+                     "elapsed_s": elapsed, "ts": int(time.time())},
         }
-    except Exception as e:
-        return _fallback(f"Ollama exception: {e}")
+    except Exception as exc:
+        LOG.warning("Ollama request failed: %s", exc)
+        return _fallback(f"Ollama error: {exc}")
+    finally:
+        if response is not None and hasattr(response, "close"):
+            response.close()
 
 
 def _mock_response(
@@ -400,11 +423,101 @@ def _generate_nvidia_response(
     seed: Optional[int],
 ) -> Dict[str, Any]:
     settings = get_settings()
-    if not settings.nvidia_api_key:
-        return _fallback("NVIDIA provider selected but NVIDIA_API_KEY is not configured.")
-    if not model_name:
-        return _fallback("NVIDIA provider selected but NVIDIA_MODEL is not configured.")
+    primary_configured = bool(settings.nvidia_api_key and model_name)
+    gemma_configured = bool(settings.nvidia_gemma_api_key and settings.nvidia_gemma_model)
+    if not primary_configured and not gemma_configured:
+        return _fallback("NVIDIA provider selected but no configured NVIDIA model credentials were found.")
 
+    gemma_attempted = False
+    gemma_primary_error = ""
+    if settings.nvidia_prefer_gemma and gemma_configured:
+        result, gemma_primary_error, _ = _request_nvidia_model(
+            prompt,
+            mode,
+            api_key=settings.nvidia_gemma_api_key,
+            model_name=settings.nvidia_gemma_model,
+            temperature=temperature,
+            top_p=top_p,
+            max_tokens=max_tokens,
+            stream=stream,
+            seed=seed,
+            reasoning_effort="",
+            provider_variant="gemma_primary",
+        )
+        gemma_attempted = True
+        if result is not None:
+            return result
+
+    primary_error = ""
+    if primary_configured:
+        result, primary_error, try_secondary = _request_nvidia_model(
+            prompt,
+            mode,
+            api_key=settings.nvidia_api_key,
+            model_name=model_name,
+            temperature=temperature,
+            top_p=top_p,
+            max_tokens=max_tokens,
+            stream=stream,
+            seed=seed,
+            reasoning_effort=settings.nvidia_reasoning_effort,
+            provider_variant="primary",
+        )
+        if result is not None:
+            if gemma_primary_error:
+                result["meta"]["gemma_primary_error"] = gemma_primary_error
+            return result
+        if not try_secondary:
+            combined = (
+                f"Gemma primary failed: {gemma_primary_error} GPT-OSS secondary failed: {primary_error}"
+                if gemma_primary_error
+                else primary_error
+            )
+            return _fallback(combined)
+
+    if gemma_configured and not gemma_attempted and settings.nvidia_gemma_model != model_name:
+        LOG.warning(
+            "NVIDIA primary generation unavailable; switching to secondary model=%s",
+            settings.nvidia_gemma_model,
+        )
+        result, gemma_error, _ = _request_nvidia_model(
+            prompt,
+            mode,
+            api_key=settings.nvidia_gemma_api_key,
+            model_name=settings.nvidia_gemma_model,
+            temperature=temperature,
+            top_p=top_p,
+            max_tokens=max_tokens,
+            stream=stream,
+            seed=seed,
+            reasoning_effort="",
+            provider_variant="gemma_secondary",
+        )
+        if result is not None:
+            result["meta"]["primary_error"] = primary_error
+            return result
+        combined = f"Primary NVIDIA model failed: {primary_error} Secondary NVIDIA model failed: {gemma_error}"
+        return _fallback(combined)
+
+    errors = " ".join(error for error in (gemma_primary_error, primary_error) if error)
+    return _fallback(errors or "NVIDIA provider failed after retries.")
+
+
+def _request_nvidia_model(
+    prompt: str,
+    mode: str,
+    *,
+    api_key: str,
+    model_name: str,
+    temperature: float,
+    top_p: float,
+    max_tokens: Optional[int],
+    stream: bool,
+    seed: Optional[int],
+    reasoning_effort: str,
+    provider_variant: str,
+) -> Tuple[Optional[Dict[str, Any]], str, bool]:
+    settings = get_settings()
     payload = {
         "model": model_name,
         "messages": [{"role": "user", "content": prompt}],
@@ -416,8 +529,8 @@ def _generate_nvidia_response(
         payload["max_tokens"] = int(max_tokens)
     if seed is not None:
         payload["seed"] = int(seed)
-    if settings.nvidia_reasoning_effort in {"low", "medium", "high"}:
-        payload["reasoning_effort"] = settings.nvidia_reasoning_effort
+    if reasoning_effort in {"low", "medium", "high"}:
+        payload["reasoning_effort"] = reasoning_effort
 
     import requests
     from requests import exceptions as request_exceptions
@@ -426,13 +539,21 @@ def _generate_nvidia_response(
     endpoint_url = _nvidia_chat_completions_url(settings.nvidia_base_url)
     attempts = _nvidia_retry_attempts()
     last_error = ""
+    LOG.info(
+        "NVIDIA completion request prepared: prompt_chars=%s max_tokens=%s reasoning=%s stream=%s attempts=%s",
+        len(prompt),
+        max_tokens,
+        reasoning_effort or "not-sent",
+        stream,
+        attempts,
+    )
 
     for attempt in range(attempts):
         try:
             response = requests.post(
                 endpoint_url,
                 headers={
-                    "Authorization": f"Bearer {settings.nvidia_api_key}",
+                    "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json",
                     "Accept": "text/event-stream" if stream else "application/json",
                 },
@@ -442,11 +563,18 @@ def _generate_nvidia_response(
             )
             if response.status_code != 200:
                 last_error = _format_nvidia_error(response, endpoint_url)
+                LOG.warning(
+                    "NVIDIA completion attempt failed: attempt=%s/%s status=%s elapsed_s=%.1f",
+                    attempt + 1,
+                    attempts,
+                    response.status_code,
+                    time.time() - start,
+                )
                 if _should_retry_nvidia_response(response.status_code, attempt, attempts):
                     _close_response(response)
                     _sleep_before_nvidia_retry(attempt)
                     continue
-                return _fallback(last_error)
+                return None, last_error, response.status_code in {408, 429, 500, 502, 503, 504}
 
             usage = {}
             if stream:
@@ -465,14 +593,21 @@ def _generate_nvidia_response(
                     "LLM_MAX_TOKENS or set NVIDIA_REASONING_EFFORT=low in .env."
                 )
                 if attempt < attempts - 1:
+                    LOG.warning(
+                        "NVIDIA completion returned no visible text: attempt=%s/%s elapsed_s=%.1f",
+                        attempt + 1,
+                        attempts,
+                        time.time() - start,
+                    )
                     _sleep_before_nvidia_retry(attempt)
                     continue
-                return _fallback(last_error)
+                return None, last_error, True
             return {
                 "text": _append_disclaimer(text, mode),
                 "usage": usage,
                 "meta": {
                     "provider": "nvidia",
+                    "provider_variant": provider_variant,
                     "model": model_name,
                     "temperature": temperature,
                     "top_p": top_p,
@@ -483,7 +618,7 @@ def _generate_nvidia_response(
                     "retry_attempts": attempt + 1,
                     "ts": int(time.time()),
                 },
-            }
+            }, "", False
         except request_exceptions.Timeout:
             last_error = (
                 "NVIDIA provider timed out before returning a completion. The endpoint and key may be configured, "
@@ -491,23 +626,29 @@ def _generate_nvidia_response(
                 "a smaller LLM_MAX_TOKENS value, or retry after checking NVIDIA service status."
             )
             if attempt < attempts - 1:
+                LOG.warning(
+                    "NVIDIA completion timed out: attempt=%s/%s elapsed_s=%.1f",
+                    attempt + 1,
+                    attempts,
+                    time.time() - start,
+                )
                 _sleep_before_nvidia_retry(attempt)
                 continue
-            return _fallback(last_error)
+            return None, last_error, True
         except request_exceptions.RequestException as exc:
             last_error = f"NVIDIA provider request exception: {exc}"
             if attempt < attempts - 1:
                 _sleep_before_nvidia_retry(attempt)
                 continue
-            return _fallback(last_error)
+            return None, last_error, True
         except ValueError as exc:
             last_error = f"NVIDIA provider returned an invalid JSON response: {exc}"
             if attempt < attempts - 1:
                 _sleep_before_nvidia_retry(attempt)
                 continue
-            return _fallback(last_error)
+            return None, last_error, True
 
-    return _fallback(last_error or "NVIDIA provider failed after retries.")
+    return None, last_error or "NVIDIA provider failed after retries.", True
 
 
 def _nvidia_retry_attempts() -> int:
@@ -648,6 +789,12 @@ def build_prompt(
 ) -> str:
     history = history or []
     tpl = _select_template(mode)
+    # Stable instructions precede all patient/evidence content for prefix reuse.
+    stable_instructions, separator, request_template = tpl.partition("\nUSER:")
+    if separator and "{{" not in stable_instructions:
+        tpl = "USER:" + request_template
+    else:
+        stable_instructions = ""
     hist_block, hist_flag = _format_history(history, budget_chars=1200)
 
     blocks = _summarize_context(context or {}, mode)
@@ -747,12 +894,71 @@ def build_prompt(
         "  these data. If external knowledge suggests a mechanism, clearly separate 'not demonstrated in retrieved data' from\n"
         "  'suggested by general pharmacology knowledge'.\n"
     )
-    prompt += policy
+    prompt = stable_instructions + policy + "\n\n" + prompt
 
     if blocks.get("__TRUNCATED__") or hist_flag:
         prompt += "\n\n[Note: some context was truncated for length.]"
 
     return prompt
+
+
+def build_compact_analysis_prompt(context: Dict[str, Any], mode: str) -> str:
+    """Build a non-duplicative evidence prompt for latency-constrained hosted models."""
+    blocks = _summarize_context(context or {}, mode)
+    question = _extract_user_question(context or {}, [])
+    if not question:
+        medication_set = (context or {}).get("medication_set") or {}
+        drugs = medication_set.get("drugs") or []
+        if len(drugs) > 2:
+            question = f"Evaluate potential interactions across this medication set: {', '.join(str(d) for d in drugs)}."
+        else:
+            question = (
+                f"Evaluate potential interactions between {blocks.get('DRUG_A', 'drug A')} and "
+                f"{blocks.get('DRUG_B', 'drug B')} for a clinician."
+            )
+
+    evidence_rows = [
+        ("Medication set", blocks.get("MEDICATION_SET_SUMMARY")),
+        ("PK evidence", blocks.get("PK_SUMMARY")),
+        ("PK properties", blocks.get("PK_META")),
+        ("PD evidence", blocks.get("PD_SUMMARY")),
+        ("FAERS evidence", blocks.get("FAERS_SUMMARY")),
+        ("Clinical references", blocks.get("CLINICAL_REFERENCE")),
+        ("Research enrichment", blocks.get("RESEARCH_ENRICHMENT")),
+        ("Risk flags", blocks.get("RISK_FLAGS")),
+        ("Evidence table", blocks.get("EVIDENCE_TABLE")),
+        ("Sources", blocks.get("SOURCES")),
+        ("Caveats", blocks.get("CAVEATS")),
+    ]
+    evidence = "\n".join(
+        f"- {label}: {value}"
+        for label, value in evidence_rows
+        if value and value not in {"(no data)", "(truncated or missing)"}
+    )
+
+    return f"""You are INFERMed's evidence-grounded clinical interaction analyst.
+
+Question: {question}
+
+Normalized evidence:
+{evidence}
+
+Write a concise clinician-facing report using these headings:
+1. Bottom line
+2. Evidence-supported interaction mechanisms
+3. Clinical concerns
+4. Monitoring and actions
+5. Evidence limitations and uncertainty
+
+Requirements:
+- Distinguish established evidence, plausible hypotheses, and missing evidence.
+- Treat FAERS/PRR and observational signals as associative, not causal.
+- Do not invent studies, guideline claims, mechanisms, targets, pathways, or patient facts.
+- Do not provide numeric dose changes, thresholds, or monitoring intervals unless those exact values appear above.
+- If evidence is sparse, say so directly; do not convert absence of evidence into proof of safety.
+- Separate retrieved evidence from general pharmacology knowledge and label the latter explicitly.
+- Keep the report focused and non-repetitive while retaining clinically important caveats.
+""".strip()
 
 
 def build_followup_prompt(

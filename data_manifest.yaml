@@ -1,4 +1,5 @@
 runtime:
+  # The app and retrieval remain local. VM Ollama is selected in .env only.
   # Data/runtime controls live here. Keep secrets, provider keys, LLM decode
   # parameters, and QLever endpoints in .env.
   data_mode: local_dev
@@ -9,6 +10,8 @@ runtime:
     openfda_cache_dir: data/cache/openfda
 
   cache:
+    # Maximum reuse age for assembled contexts and shared API source caches.
+    evidence_ttl_hours: 24
     backend: sqlite
     sqlite_cache_path: data/cache/infermed_cache.sqlite
     enable_event_store: true

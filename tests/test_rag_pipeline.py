@@ -435,7 +435,10 @@ def test_context_cache_key_is_unordered(monkeypatch, tmp_path):
     assert k1 == k2
     assert k1 == "a_b"
     # Should load from cache on second call
-    assert c1 == c2
+    assert c1['meta']['evidence_cache_status'] == 'rebuilt'
+    assert c2['meta']['evidence_cache_status'] == 'cached'
+    assert c1['meta']['evidence_assembled_at'] == c2['meta']['evidence_assembled_at']
+    assert {k: v for k, v in c1.items() if k != 'meta'} == {k: v for k, v in c2.items() if k != 'meta'}
 
 
 def test_run_rag_uses_llm_and_history(monkeypatch):

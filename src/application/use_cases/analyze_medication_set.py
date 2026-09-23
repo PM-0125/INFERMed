@@ -245,6 +245,7 @@ class AnalyzeMedicationSetUseCase:
             fallback_answer=pair_results[0].answer or {},
         )
         rag_output = {"context": aggregate_context, "answer": answer}
+        self._progress('finalization_started', 'Checking the explanation and preparing evidence cards.', {})
         context = aggregate_context
         answer_text = str(answer.get("text") or "").strip()
 
@@ -422,6 +423,7 @@ class AnalyzeMedicationSetUseCase:
         if self.event_store is not None:
             self.event_store.update_analysis_status(analysis_id, "completed")
 
+        self._progress('finalization_completed', 'Final checks and evidence cards completed.', {})
         return MedicationSetAnalysis(
             analysis_id=analysis_id,
             request_id=request_id,

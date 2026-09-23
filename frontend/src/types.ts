@@ -64,6 +64,7 @@ export interface AssessmentSection {
 }
 
 export interface InteractionResult {
+  evidenceFreshness?: Array<{pair: string[]; assembledAt?: string; cacheStatus: string}>
   drugs: DrugIdentity[]
   risk: RiskSummary
   generatedAt: string
@@ -115,7 +116,8 @@ export interface FollowUpResponse {
 }
 
 export interface AnalysisProgressEvent {
-  type: 'progress' | 'result' | 'error'
+  type: 'progress' | 'token' | 'result' | 'error'
+  text?: string
   stage?: string
   message?: string
   payload?: Record<string, unknown>
