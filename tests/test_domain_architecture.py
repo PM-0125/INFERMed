@@ -50,7 +50,8 @@ def test_event_store_persists_analysis_events_and_evidence(tmp_path):
     assert "MedicationSetAnalysisRequested" in event_types
     assert "EvidencePlanCreated" in event_types
     assert "ClinicalDecisionCreated" in event_types
-    assert result.decision.risk_level == "major"
+    # This fixture provides overlap/reporting signals, not clinical severity evidence.
+    assert result.decision.risk_level == "theoretical"
     assert result.evidence_cards
     assert result.mechanism_graph.nodes
     assert result.profile_graph.nodes

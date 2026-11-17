@@ -19,32 +19,68 @@ _REQUIRED_CONTEXT_FIELDS = (
     "current_inr",
 )
 
+_ALIASES = {
+    "age_years": "age",
+    "pregnancy_status": "pregnancy",
+    "renal_function": "renal",
+    "hepatic_function": "hepatic",
+    "qt_risk": "qtc",
+    "current_inr": "inr",
+    "conditions": "comorbidities",
+    "genotypes": "pgx",
+}
+
+
+def _canonical_payload(raw: dict[str, Any] | None) -> dict[str, Any]:
+    payload = dict(raw or {})
+    snapshot_raw = payload.pop("raw", None)
+    # Preserve supplied facts without modeled fields (e.g. bleeding history),
+    # while normalized snapshot fields and explicit updates take precedence.
+    return {
+        **_canonical_fields(snapshot_raw if isinstance(snapshot_raw, dict) else {}),
+        **_canonical_fields(payload),
+    }
+
+
+def _canonical_fields(raw: dict[str, Any]) -> dict[str, Any]:
+    payload = dict(raw)
+    payload.pop("raw", None)
+    payload.pop("missing_fields", None)
+    for canonical, alias in _ALIASES.items():
+        if canonical not in payload and alias in payload:
+            payload[canonical] = payload[alias]
+        payload.pop(alias, None)
+    return payload
+
+
+def merge_patient_context(
+    existing: dict[str, Any] | None, updates: dict[str, Any]
+) -> PatientContext:
+    """Apply only supplied fields, including explicit unknowns, before normalization."""
+    return normalize_patient_context(
+        {**_canonical_payload(existing), **_canonical_payload(updates)}
+    )
+
 
 def normalize_patient_context(raw: dict[str, Any] | None) -> PatientContext:
-    payload = dict(raw or {})
+    payload = _canonical_payload(raw)
     labs = [_lab(item) for item in _list(payload.get("labs"))]
-    conditions = [
-        _condition(item)
-        for item in _list(payload.get("conditions") or payload.get("comorbidities"))
-    ]
-    genotypes = [
-        _genotype(item)
-        for item in _list(payload.get("genotypes") or payload.get("pgx"))
-    ]
+    conditions = [_condition(item) for item in _list(payload.get("conditions"))]
+    genotypes = [_genotype(item) for item in _list(payload.get("genotypes"))]
     monitoring = [_monitoring(item) for item in _list(payload.get("monitoring"))]
 
     context = PatientContext(
-        age_years=_int_or_none(payload.get("age_years") or payload.get("age")),
+        age_years=_int_or_none(payload.get("age_years")),
         sex=_choice(
             payload.get("sex"), {"female", "male", "intersex"}, default="unknown"
         ),
         pregnancy_status=_choice(
-            payload.get("pregnancy_status") or payload.get("pregnancy"),
+            payload.get("pregnancy_status"),
             {"pregnant", "not_pregnant", "possible"},
             default="unknown",
         ),
         renal_function=_choice(
-            payload.get("renal_function") or payload.get("renal"),
+            payload.get("renal_function"),
             {
                 "normal",
                 "mild_impairment",
@@ -55,16 +91,16 @@ def normalize_patient_context(raw: dict[str, Any] | None) -> PatientContext:
             default="unknown",
         ),
         hepatic_function=_choice(
-            payload.get("hepatic_function") or payload.get("hepatic"),
+            payload.get("hepatic_function"),
             {"normal", "mild_impairment", "moderate_impairment", "severe_impairment"},
             default="unknown",
         ),
         qt_risk=_choice(
-            payload.get("qt_risk") or payload.get("qtc"),
+            payload.get("qt_risk"),
             {"known_long_qt", "possible_qt_risk", "low_risk"},
             default="unknown",
         ),
-        current_inr=_float_or_none(payload.get("current_inr") or payload.get("inr")),
+        current_inr=_float_or_none(payload.get("current_inr")),
         labs=labs,
         conditions=conditions,
         genotypes=genotypes,

@@ -539,7 +539,7 @@ def test_strip_template_safety_and_single_disclaimer(monkeypatch):
 
     monkeypatch.setattr(requests, "post", lambda *a, **k: FakeResp(), raising=True)
 
-    out = generate_response(MINIMAL_CTX, "Doctor", seed=1)
+    out = generate_response(MINIMAL_CTX, "Doctor", seed=1, stream=False)
     # The template safety line should be gone
     assert '"This is research software' not in out["text"]
     # Our code-appended disclaimer should be present exactly once

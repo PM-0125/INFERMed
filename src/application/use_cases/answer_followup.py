@@ -4,6 +4,7 @@ from dataclasses import asdict, dataclass, field
 from itertools import combinations
 from copy import deepcopy
 from typing import Any, Callable
+import uuid
 
 from src.application.ports import (
     AnalysisSnapshotStore,
@@ -18,6 +19,10 @@ from src.application.use_cases.analyze_medication_set import (
 )
 from src.config.settings import Settings, get_settings
 from src.domain.explanation.entities import FollowUpSession
+from src.domain.patient.services import merge_patient_context
+from src.domain.evidence.entities import EvidenceCard
+from src.domain.explanation.action_support import enforce_action_support
+from src.domain.explanation.presentation import render_citations
 
 
 @dataclass(frozen=True)
@@ -41,6 +46,7 @@ class FollowUpAnswer:
     cited_cards: list[str]
     session: FollowUpSession
     context_source: str
+    publication: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -49,6 +55,7 @@ class FollowUpAnswer:
             "citedCards": self.cited_cards,
             "session": self.session.to_dict(),
             "context_source": self.context_source,
+            "publication": self.publication,
         }
 
 
@@ -60,12 +67,14 @@ class AnswerFollowUpUseCase:
         context_runner: PairContextRunner,
         cited_cards_from_context: Callable[[dict[str, Any]], list[str]],
         snapshot_store: AnalysisSnapshotStore | None = None,
+        explanation_recorder: Callable[..., None] | None = None,
         settings: Settings | None = None,
     ):
         self.followup_generator = followup_generator
         self.context_runner = context_runner
         self.cited_cards_from_context = cited_cards_from_context
         self.snapshot_store = snapshot_store
+        self.explanation_recorder = explanation_recorder
         self.settings = settings or get_settings()
 
     def execute(self, command: AnswerFollowUpCommand) -> FollowUpAnswer:
@@ -76,6 +85,22 @@ class AnswerFollowUpUseCase:
         context, context_source = self._context_for_followup(command)
         if command.patient_context:
             context = _context_with_patient_context(context, command.patient_context)
+        # Rebuilt/legacy contexts receive the same source contract as analyses.
+        if command.mode.lower() in {"doctor", "clinician"} and not context.get(
+            "reasoning_input"
+        ):
+            cards = evidence_cards_from_context(
+                command.context_id or "followup", context, command.drugs
+            )
+            context["reasoning_input"] = {
+                "schema_version": 1,
+                "evidence": [c.to_dict() for c in cards],
+                "decision": {"drugs": command.drugs},
+                "patient_context": (context.get("medication_set") or {}).get(
+                    "patient_context"
+                )
+                or {},
+            }
         answer = self.followup_generator(
             context,
             command.mode,
@@ -84,6 +109,44 @@ class AnswerFollowUpUseCase:
             prior_assessment=command.prior_assessment,
             model_name=None,
         )
+        text = str(answer.get("text") or "").strip()
+        if (
+            not text
+            or (answer.get("meta") or {}).get("error")
+            or text.startswith(
+                ("Unable to generate", "No answer was generated", "No generated answer")
+            )
+        ):
+            raise RuntimeError(
+                "Follow-up generation failed; no clinical answer was produced."
+            )
+        raw_cards = (context.get("reasoning_input") or {}).get("evidence") or []
+        cards = [EvidenceCard(**item) for item in raw_cards]
+        if not cards and len(command.drugs) == 2:
+            cards = evidence_cards_from_context(
+                command.context_id or "followup", context, command.drugs
+            )
+        publication = enforce_action_support(
+            text if answer.get("doctor_contract") else _compact_scoped_followup(text),
+            cards,
+            command.drugs,
+            review_status=(answer.get("review") or {}).get("status"),
+            patient_context=(context.get("medication_set") or {}).get(
+                "patient_context"
+            ),
+        )
+        if self.explanation_recorder is not None:
+            self.explanation_recorder(
+                explanation_id="followup_" + uuid.uuid4().hex,
+                analysis_id=command.context_id or "ad_hoc_followup",
+                answer_text=text,
+                verification={
+                    "publication": publication.summary(),
+                    "findings": publication.findings,
+                    "doctor_contract": answer.get("doctor_contract"),
+                },
+                model_name=(answer.get("meta") or {}).get("model"),
+            )
         session = FollowUpSession(
             analysis_id=command.context_id or "ad_hoc_followup",
             audience=command.mode,
@@ -91,12 +154,14 @@ class AnswerFollowUpUseCase:
             follow_up_count=command.follow_up_count + 1,
         )
         return FollowUpAnswer(
-            answer=_compact_scoped_followup(
-                str(answer.get("text") or "").strip() or "No answer was generated."
-            ),
+            answer=render_citations(publication.text, cards, command.mode),
             cited_cards=self.cited_cards_from_context(context),
             session=session,
             context_source=context_source,
+            publication={
+                **publication.summary(),
+                "doctor_contract": answer.get("doctor_contract"),
+            },
         )
 
     def _context_for_followup(
@@ -147,17 +212,15 @@ def _context_with_patient_context(
 ) -> dict[str, Any]:
     out = deepcopy(context)
     medset = dict(out.get("medication_set") or {})
-    updated_patient = {**(medset.get("patient_context") or {}), **patient_context}
-    medset["patient_context"] = updated_patient
+    patient = merge_patient_context(medset.get("patient_context"), patient_context)
+    medset["patient_context"] = patient.to_dict()
     out["medication_set"] = medset
     if out.get("reasoning_input"):
-        from src.domain.patient.services import normalize_patient_context
         from src.domain.decision.rules import (
             patient_amplifiers,
             missing_patient_factors_for_decision,
         )
 
-        patient = normalize_patient_context(updated_patient)
         reasoning = out["reasoning_input"]
         decision = reasoning.get("decision") or {}
         decision["patient_amplifiers"] = patient_amplifiers(patient)

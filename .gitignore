@@ -44,6 +44,10 @@ data/qlever/
 /cache/
 qlever-index/
 models/
+/.codex/
+/Internal/
+/AGENTS.md
+/frontend/tests/markdown-preview.html
 scripts/deferred/
 scripts/build_offline_mode_samples.py
 *.bin

@@ -64,7 +64,7 @@ def test_decision_scoring_and_mechanism_engines_are_domain_owned():
         "pkpd": {
             "pk_summary": "inhibits CYP2C9",
             "pk_detail": {
-                "canonical_interaction": {"rule": "x"},
+                "canonical_interaction": {"rule": "x", "severity": "major"},
                 "overlaps": {"inhibition": ["CYP2C9"]},
             },
             "pd_detail": {"overlap_targets": ["PTGS1"]},

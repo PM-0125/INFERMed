@@ -327,7 +327,10 @@ class OpenFDAClient:
         self, drug1: str, drug2: str, top_k: int = 5
     ) -> List[Tuple[str, int]]:
         """
-        Top reactions for a combination. Tries a true combo filter first; if empty, returns intersection of singles.
+        Top reactions from reports matching both drugs.
+
+        An empty result supplies no combination evidence. Shared reactions in
+        separate single-drug queries cannot establish observed co-exposure.
         """
         # combo search (verbatim; use .exact for precision)
         search = (
@@ -341,21 +344,7 @@ class OpenFDAClient:
             suffix="combo",
         )
         data = self._fetch_and_cache_counts(q)
-        if data:
-            return Counter(data).most_common(int(top_k))
-
-        # fallback: intersection of top reactions from each single
-        c1 = Counter(
-            self._fetch_and_cache_counts(
-                FaersQuery(drug1, "patient.reaction.reactionmeddrapt.exact")
-            )
-        )
-        c2 = Counter(
-            self._fetch_and_cache_counts(
-                FaersQuery(drug2, "patient.reaction.reactionmeddrapt.exact")
-            )
-        )
-        return (c1 & c2).most_common(int(top_k))
+        return Counter(data).most_common(int(top_k))
 
     def get_drug_reaction_evidence(
         self, drug: str, top_k: int = 10

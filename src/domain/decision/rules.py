@@ -48,6 +48,6 @@ def patient_amplifiers(patient_context: PatientContext | None = None) -> list[st
         out.append("hepatic impairment")
     if patient_context.qt_risk in {"known_long_qt", "possible_qt_risk"}:
         out.append("baseline QT risk")
-    if patient_context.current_inr is not None:
-        out.append("known INR context")
+    # A supplied INR is an observation, not an abnormality or risk amplifier.
+    # Interpretation needs treatment indication, target and clinical context.
     return out

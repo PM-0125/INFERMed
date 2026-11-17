@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlsplit, urlunsplit
 
 from src.config.settings import get_settings
+from src.llm.audience import audience_contract
 
 LOG = logging.getLogger("infermed.llm")
 
@@ -157,6 +158,10 @@ TEMPLATES = (
 
 
 # ========== Public API ==========
+from src.application.execution import bounded_execution
+
+
+@bounded_execution
 def generate_response(
     context: Dict[str, Any],
     mode: str,
@@ -168,9 +173,15 @@ def generate_response(
     model_name: Optional[str] = None,
     stream: Optional[bool] = None,
     on_text=None,
+    on_stage=None,
 ) -> Dict[str, Any]:
     settings = get_settings()
-    if settings.llm_provider == "nvidia" and settings.nvidia_compact_prompt:
+    doctor_contract = (mode or "").lower() in {"doctor", "clinician"} and bool(
+        (context or {}).get("reasoning_input")
+    )
+    if doctor_contract:
+        prompt = ""  # Structured Doctor contract is built once below.
+    elif settings.llm_provider == "nvidia" and settings.nvidia_compact_prompt:
         prompt = build_compact_analysis_prompt(context or {}, mode)
     else:
         prompt = build_prompt(context or {}, mode, history=history)
@@ -191,31 +202,100 @@ def generate_response(
             seed=seed,
         )
 
-    if settings.llm_provider == "nvidia":
-        return _generate_nvidia_response(
-            prompt,
+    needs_review = bool((context or {}).get("reasoning_input"))
+
+    def request_model(request_prompt, text_callback=None, *, review=False):
+        if settings.llm_provider == "nvidia":
+            result = _generate_nvidia_response(
+                request_prompt,
+                mode,
+                model_name=model_name or settings.nvidia_model,
+                temperature=settings.llm_temperature,
+                top_p=settings.llm_top_p,
+                max_tokens=(
+                    max_tokens if max_tokens is not None else settings.llm_max_tokens
+                ),
+                stream=settings.llm_stream if stream is None else bool(stream),
+                seed=seed,
+            )
+            if review:
+                result["text"] = _strip_template_safety(result.get("text") or "")
+            return result
+        return _generate_ollama_response(
+            request_prompt,
             mode,
-            model_name=model_name or settings.nvidia_model,
-            temperature=settings.llm_temperature,
-            top_p=settings.llm_top_p,
-            max_tokens=(
-                max_tokens if max_tokens is not None else settings.llm_max_tokens
-            ),
-            stream=settings.llm_stream if stream is None else bool(stream),
+            model=selected_model,
+            num_predict=num_predict,
             seed=seed,
+            stream=stream,
+            on_text=text_callback,
+            raw_output=review,
         )
 
-    return _generate_ollama_response(
-        prompt,
-        mode,
-        model=selected_model,
-        num_predict=num_predict,
-        seed=seed,
-        stream=stream,
-        on_text=on_text,
+    if doctor_contract:
+        from src.application.doctor_contract import generate_doctor_answer
+
+        return generate_doctor_answer(
+            context,
+            lambda p: request_model(p, review=True),
+            question=context.get("doctor_question"),
+        )
+
+    draft = request_model(prompt, None if needs_review else on_text)
+    if not needs_review or (draft.get("meta") or {}).get("error"):
+        return draft
+    from src.llm.review import review_response
+
+    if on_stage:
+        on_stage(
+            "audience_review_started",
+            "Reviewing evidence claims and audience-specific explanation.",
+            {},
+        )
+    started = time.monotonic()
+    answer = review_response(
+        draft, context, mode, lambda text: request_model(text, review=True)
     )
+    answer["text"] = _append_disclaimer(_strip_template_safety(answer["text"]), mode)
+    answer["meta"] = {
+        **(draft.get("meta") or {}),
+        "review_elapsed_s": time.monotonic() - started,
+    }
+    answer["meta"]["total_llm_elapsed_s"] = (
+        float((draft.get("meta") or {}).get("elapsed_s") or 0)
+        + answer["meta"]["review_elapsed_s"]
+    )
+    answer["usage_by_stage"] = {
+        "draft": draft.get("usage") or {},
+        "review": (answer["review"].get("review_result") or {}).get("usage") or {},
+    }
+    LOG.info(
+        "Audience review completed: mode=%s status=%s elapsed_s=%.2f",
+        mode,
+        answer["review"]["status"],
+        answer["meta"]["review_elapsed_s"],
+    )
+    if on_stage:
+        on_stage(
+            (
+                "audience_review_failed"
+                if answer["review"]["status"] == "review_failed"
+                else "audience_review_completed"
+            ),
+            (
+                "Audience review could not complete; the draft requires review."
+                if answer["review"]["status"] == "review_failed"
+                else "Audience review completed; evidence checks follow."
+            ),
+            {"status": answer["review"]["status"]},
+        )
+    # Deliver the checked revision as one event, not fake token-by-token streaming.
+    if on_text and answer["review"]["status"] != "review_failed":
+        on_text(answer["text"])
+    return answer
 
 
+@bounded_execution
 def generate_followup_response(
     context: Dict[str, Any],
     mode: str,
@@ -230,6 +310,18 @@ def generate_followup_response(
     stream: Optional[bool] = None,
 ) -> Dict[str, Any]:
     """Generate a compact answer to a scenario-specific follow-up question."""
+    if (mode or "").lower() in {"doctor", "clinician"} and (context or {}).get(
+        "reasoning_input"
+    ):
+        return generate_response(
+            {**context, "doctor_question": question},
+            mode,
+            seed=seed,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            model_name=model_name,
+            stream=stream,
+        )
     prompt = build_followup_prompt(
         context or {},
         mode,
@@ -282,10 +374,25 @@ def generate_followup_response(
 
 
 def _generate_ollama_response(
-    prompt, mode, *, model, num_predict, seed=None, stream=None, on_text=None
+    prompt,
+    mode,
+    *,
+    model,
+    num_predict,
+    seed=None,
+    stream=None,
+    on_text=None,
+    raw_output=False,
 ):
     """Consume Ollama NDJSON, retaining visible text and completion metrics only."""
     import requests
+    from contextlib import ExitStack
+    from src.application.execution import current_execution, interrupt_response
+
+    scope = current_execution()
+    guard = ExitStack()
+    if scope:
+        scope.check()
 
     settings = get_settings()
     use_stream = settings.llm_stream if stream is None else bool(stream)
@@ -323,14 +430,24 @@ def _generate_ollama_response(
         response = requests.post(
             f"{settings.ollama_host.rstrip('/')}/api/generate",
             json=payload,
-            timeout=settings.ollama_timeout_s,
+            timeout=(
+                min(settings.ollama_timeout_s, scope.remaining())
+                if scope
+                else settings.ollama_timeout_s
+            ),
             stream=use_stream,
         )
+        if scope:
+            guard.enter_context(
+                scope.interrupt_on_stop(lambda: interrupt_response(response))
+            )
         if response.status_code != 200:
             raise RuntimeError(f"Ollama HTTP {response.status_code}")
         if use_stream:
             parts, data = [], {}
             for line in response.iter_lines(chunk_size=1):
+                if scope:
+                    scope.check()
                 if not line:
                     continue
                 event = json.loads(line)
@@ -362,6 +479,8 @@ def _generate_ollama_response(
             )
         if not text:
             raise RuntimeError("Ollama returned no visible answer")
+        if scope:
+            scope.check()
         elapsed = time.monotonic() - started
         LOG.info(
             "Ollama completed: elapsed_s=%.2f generated_tokens=%s",
@@ -375,8 +494,16 @@ def _generate_ollama_response(
             data.get("prompt_eval_duration"),
             data.get("load_duration"),
         )
+        if (data.get("prompt_eval_count") or 0) >= settings.ollama_num_ctx * 0.9:
+            LOG.warning(
+                "Ollama input is near the requested context window; context retention is not verified"
+            )
         return {
-            "text": _append_disclaimer(_strip_template_safety(text), mode),
+            "text": (
+                text
+                if raw_output
+                else _append_disclaimer(_strip_template_safety(text), mode)
+            ),
             "usage": {
                 key: data.get(key)
                 for key in (
@@ -390,6 +517,14 @@ def _generate_ollama_response(
             },
             "meta": {
                 "provider": "ollama",
+                "prompt_characters": len(prompt),
+                "requested_context_tokens": settings.ollama_num_ctx,
+                "context_retention": "not_verified",
+                "context_near_limit": bool(
+                    data.get("prompt_eval_count")
+                    and data["prompt_eval_count"] >= settings.ollama_num_ctx * 0.9
+                ),
+                "done_reason": data.get("done_reason"),
                 "model": model,
                 "reasoning_effort": effort,
                 "temperature": settings.llm_temperature,
@@ -402,6 +537,7 @@ def _generate_ollama_response(
         LOG.warning("Ollama request failed: %s", exc)
         return _fallback(f"Ollama error: {exc}")
     finally:
+        guard.close()
         if response is not None and hasattr(response, "close"):
             response.close()
 
@@ -625,6 +761,10 @@ def _request_nvidia_model(
 
     import requests
     from requests import exceptions as request_exceptions
+    from contextlib import ExitStack
+    from src.application.execution import current_execution, interrupt_response
+
+    scope = current_execution()
 
     start = time.time()
     endpoint_url = _nvidia_chat_completions_url(settings.nvidia_base_url)
@@ -640,6 +780,10 @@ def _request_nvidia_model(
     )
 
     for attempt in range(attempts):
+        guard = ExitStack()
+        response = None
+        if scope:
+            scope.check()
         try:
             response = requests.post(
                 endpoint_url,
@@ -650,8 +794,16 @@ def _request_nvidia_model(
                 },
                 json=payload,
                 stream=bool(stream),
-                timeout=settings.llm_timeout_s,
+                timeout=(
+                    min(settings.llm_timeout_s, scope.remaining())
+                    if scope
+                    else settings.llm_timeout_s
+                ),
             )
+            if scope:
+                guard.enter_context(
+                    scope.interrupt_on_stop(lambda: interrupt_response(response))
+                )
             if response.status_code != 200:
                 last_error = _format_nvidia_error(response, endpoint_url)
                 LOG.warning(
@@ -699,6 +851,8 @@ def _request_nvidia_model(
                     _sleep_before_nvidia_retry(attempt)
                     continue
                 return None, last_error, True
+            if scope:
+                scope.check()
             return (
                 {
                     "text": _append_disclaimer(text, mode),
@@ -748,6 +902,10 @@ def _request_nvidia_model(
                 _sleep_before_nvidia_retry(attempt)
                 continue
             return None, last_error, True
+        finally:
+            guard.close()
+            if response is not None:
+                _close_response(response)
 
     return None, last_error or "NVIDIA provider failed after retries.", True
 
@@ -1017,7 +1175,7 @@ def build_prompt(
         "- Do NOT invent specific study results or guideline statements that are not supported by CONTEXT.\n"
         "- Do NOT name specific alternative medicines unless they are explicitly provided in CONTEXT or Sources. You MAY describe\n"
         "  drug CLASSES (e.g., 'a PPI with lower interaction potential') without naming individual agents.\n"
-        "- If PK summary says 'No strong PK overlap detected', then the retrieved mechanistic data do not show a PK interaction.\n"
+        "- Cross-check PK summaries against scoped graph roles. Missing overlap in a summary is not proof of no interaction.\n"
         "  You may still state well-known PK mechanisms from general pharmacology knowledge, but you MUST phrase them as such and\n"
         "  avoid asserting that the dataset itself demonstrates them.\n"
         "- For structural target IDs (e.g., PDB-like IDs), you MAY provide human-readable labels and broad biological roles when\n"
@@ -1028,14 +1186,22 @@ def build_prompt(
         "  these data. If external knowledge suggests a mechanism, clearly separate 'not demonstrated in retrieved data' from\n"
         "  'suggested by general pharmacology knowledge'.\n"
     )
-    prompt = stable_instructions + policy + "\n\n" + prompt
+    if (mode or "").strip().lower() in {"patient", "pt"}:
+        policy = policy.replace(
+            "general pharmacology knowledge, not directly observed in the retrieved datasets",
+            "how these medicines usually work, rather than a finding confirmed by this search",
+        )
+    prompt = (
+        stable_instructions + "\n" + audience_contract(mode) + policy + "\n\n" + prompt
+    )
 
     if blocks.get("__TRUNCATED__") or hist_flag:
         prompt += "\n\n[Note: some context was truncated for length.]"
 
     from src.application.reasoning_input import render_reasoning_input
 
-    prompt += render_reasoning_input((context or {}).get("reasoning_input") or {})
+    prompt += render_reasoning_input((context or {}).get("reasoning_input") or {}, mode)
+    prompt += "\n\n" + audience_contract(mode)
     return prompt
 
 
@@ -1051,7 +1217,7 @@ def build_compact_analysis_prompt(context: Dict[str, Any], mode: str) -> str:
         else:
             question = (
                 f"Evaluate potential interactions between {blocks.get('DRUG_A', 'drug A')} and "
-                f"{blocks.get('DRUG_B', 'drug B')} for a clinician."
+                f"{blocks.get('DRUG_B', 'drug B')} for the selected audience."
             )
 
     evidence_rows = [
@@ -1075,7 +1241,9 @@ def build_compact_analysis_prompt(context: Dict[str, Any], mode: str) -> str:
 
     from src.application.reasoning_input import render_reasoning_input
 
-    evidence += render_reasoning_input((context or {}).get("reasoning_input") or {})
+    evidence += render_reasoning_input(
+        (context or {}).get("reasoning_input") or {}, mode
+    )
 
     return f"""You are INFERMed's evidence-grounded clinical interaction analyst.
 
@@ -1084,7 +1252,7 @@ Question: {question}
 Normalized evidence:
 {evidence}
 
-Write a concise clinician-facing report using these headings:
+Write a report for the selected audience using these headings:
 1. Bottom line
 2. Evidence-supported interaction mechanisms
 3. Clinical concerns
@@ -1099,6 +1267,7 @@ Requirements:
 - If evidence is sparse, say so directly; do not convert absence of evidence into proof of safety.
 - Separate retrieved evidence from general pharmacology knowledge and label the latter explicitly.
 - Keep the report focused and non-repetitive while retaining clinically important caveats.
+{audience_contract(mode)}
 """.strip()
 
 
@@ -1851,7 +2020,7 @@ def _format_pk(ctx: Dict[str, Any]) -> Tuple[str, int, int]:
         key_line = f"DATA-DRIVEN PK OVERLAP: Key PK overlap in retrieved mechanistic data: {overlap_txt}"
         prio = 0
     else:
-        key_line = "DATA-DRIVEN PK OVERLAP: No strong PK overlap detected in the retrieved mechanistic data."
+        key_line = "No directional enzyme-role overlap was identified in this evidence block; this does not establish absence of an interaction."
         prio = 3
 
     txt = f"{a_str}. {b_str}. {key_line}"
@@ -2214,13 +2383,18 @@ def _format_chembl_enrichment(value: Any) -> str:
             matches = _as_str_list(validation.get("matches", []))[:5]
             mismatches = _as_str_list(validation.get("mismatches", []))[:5]
             if matches:
-                side_parts.append("validated " + ", ".join(matches))
+                side_parts.append(
+                    "assay-role concordance (not clinical validation): "
+                    + ", ".join(matches)
+                )
             if mismatches:
                 side_parts.append("additional " + ", ".join(mismatches))
-        for strength in ("strong", "moderate", "weak"):
-            values = _as_str_list(strengths.get(strength, []))[:5]
-            if values:
-                side_parts.append(f"{strength} {', '.join(values)}")
+        for assay in (data.get("bioactivities") or [])[:5]:
+            side_parts.append(
+                f"{assay.get('enzyme', 'target')} {assay.get('potency_type', 'endpoint')} "
+                f"{assay.get('potency_relation') or ''}{assay.get('potency_value', '?')} "
+                f"{assay.get('potency_units', 'units unknown')}; clinical relevance not established"
+            )
         if side_parts:
             parts.append(f"{label}: " + "; ".join(side_parts))
     return " / ".join(parts)
@@ -2280,7 +2454,8 @@ def _append_disclaimer(text: str, mode: str) -> str:
         d = "\n\nDisclaimer: Research prototype. Use alongside clinical judgment and approved labeling."
     else:
         d = "\n\nDisclaimer: Informational, non-regulatory summary; defer to internal PV/labeling."
-    return (text or "").rstrip() + d
+    clean = (text or "").rstrip()
+    return clean if clean.endswith(d.strip()) else clean + d
 
 
 def _fallback(msg: str) -> Dict[str, Any]:

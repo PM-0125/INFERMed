@@ -3,8 +3,10 @@ from __future__ import annotations
 import logging
 import os
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlencode
 
 import requests
 
@@ -16,6 +18,7 @@ DEFAULT_CACHE_DIR = "data/cache/openfda_label"
 DEFAULT_TTL_SECONDS = 30 * 24 * 3600
 DEFAULT_TIMEOUT = 10
 BASE_URL = "https://api.fda.gov/drug/label.json"
+CACHE_SCHEMA_VERSION = 2
 
 SECTION_FIELDS = (
     "boxed_warning",
@@ -27,6 +30,16 @@ SECTION_FIELDS = (
     "pharmacokinetics",
     "pharmacodynamics",
     "adverse_reactions",
+    "dosage_and_administration",
+    "use_in_specific_populations",
+    "precautions",
+    "pregnancy",
+    "nursing_mothers",
+    "pediatric_use",
+    "geriatric_use",
+    "laboratory_tests",
+    "drug_and_or_laboratory_test_interactions",
+    "mechanism_of_action",
 )
 
 
@@ -53,11 +66,20 @@ class OpenFDALabelClient:
 
         key = f"openfda_label__{name}"
         cached = load_json(self.cache_dir, key, ttl=self.ttl_seconds)
-        if cached is not None:
+        if (
+            isinstance(cached, dict)
+            and cached.get("cache_schema_version") == CACHE_SCHEMA_VERSION
+            and (
+                not cached.get("found") or isinstance(cached.get("raw_response"), dict)
+            )
+        ):
             return cached
 
-        raw = self._fetch_first(name)
+        response = self._fetch_first(name)
+        results = (response or {}).get("results") or []
+        raw = results[0] if results and isinstance(results[0], dict) else None
         payload = self._normalize(name, raw)
+        payload["raw_response"] = response
         save_json(self.cache_dir, key, payload)
         return payload
 
@@ -74,8 +96,7 @@ class OpenFDALabelClient:
             payload = self._request({"search": query, "limit": "1"})
             results = (payload or {}).get("results") or []
             if results:
-                first = results[0]
-                return first if isinstance(first, dict) else None
+                return payload if isinstance(results[0], dict) else None
         return None
 
     def _request(self, params: dict[str, str]) -> dict[str, Any] | None:
@@ -102,14 +123,17 @@ class OpenFDALabelClient:
         return None
 
     def _normalize(self, drug_name: str, raw: dict[str, Any] | None) -> dict[str, Any]:
+        retrieved_at = datetime.now(timezone.utc).isoformat()
         if not raw:
             return {
+                "cache_schema_version": CACHE_SCHEMA_VERSION,
                 "query": drug_name,
                 "found": False,
                 "sections": {},
                 "provenance": {
                     "source": "openFDA Drug Label API",
                     "source_url": "https://open.fda.gov/apis/drug/label/",
+                    "retrieved_at": retrieved_at,
                 },
             }
 
@@ -121,11 +145,13 @@ class OpenFDALabelClient:
                 sections[field] = text
 
         return {
+            "cache_schema_version": CACHE_SCHEMA_VERSION,
             "query": drug_name,
             "found": True,
             "label_id": raw.get("id"),
             "set_id": raw.get("set_id"),
             "effective_time": raw.get("effective_time"),
+            "version": raw.get("version"),
             "brand_names": _string_list(openfda.get("brand_name")),
             "generic_names": _string_list(openfda.get("generic_name")),
             "substance_names": _string_list(openfda.get("substance_name")),
@@ -134,8 +160,20 @@ class OpenFDALabelClient:
             "sections": sections,
             "provenance": {
                 "source": "openFDA Drug Label API",
-                "source_url": "https://open.fda.gov/apis/drug/label/",
+                "source_url": (
+                    BASE_URL
+                    + "?"
+                    + urlencode({"search": f'id:"{raw["id"]}"', "limit": 1})
+                    if raw.get("id")
+                    else "https://open.fda.gov/apis/drug/label/"
+                ),
                 "api_endpoint": BASE_URL,
+                "label_id": raw.get("id"),
+                "set_id": raw.get("set_id"),
+                "version": raw.get("version"),
+                "effective_time": raw.get("effective_time"),
+                "retrieved_at": retrieved_at,
+                "cache_schema_version": CACHE_SCHEMA_VERSION,
             },
             "limitations": [
                 "Label content is product/version specific and may not match every marketed product.",
@@ -153,10 +191,6 @@ def _string_list(value: Any) -> list[str]:
     return [text] if text else []
 
 
-def _collapse_section(value: Any, *, max_chars: int = 1400) -> str:
-    parts = _string_list(value)
-    text = " ".join(parts)
-    text = " ".join(text.split())
-    if len(text) > max_chars:
-        text = text[: max_chars - 1].rstrip() + "..."
-    return text
+def _collapse_section(value: Any) -> str:
+    """Normalize whitespace without discarding text or array paragraph boundaries."""
+    return "\n\n".join(" ".join(part.split()) for part in _string_list(value))

@@ -1,0 +1,8 @@
+<text xmlns="urn:hl7-org:v3">
+<paragraph>Project-authored parser example. These are fictional findings.</paragraph>
+<paragraph><content styleCode="Italics">Alpha:</content> Alpha observation belongs only to this section.</paragraph>
+<paragraph><content styleCode="Italics">Beta</content><content styleCode="Italics">:</content> Beta observation must not leak into Alpha.</paragraph>
+<paragraph><content styleCode="Bold">Example group:</content> Group findings concern only the simulated study population.</paragraph>
+<paragraph><content styleCode="Italics">Gamma:</content> Gamma observation inherits the group qualification.</paragraph>
+<paragraph><content styleCode="Italics">Delta:</content> Delta observation also inherits the group qualification.</paragraph>
+</text>

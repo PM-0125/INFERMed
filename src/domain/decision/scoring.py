@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from src.domain.decision.entities import RiskLevel
+from src.domain.reasoning.interpretation import biological_terms
 
 
 def score_pair_context(context: dict[str, Any]) -> tuple[RiskLevel, str, int]:
@@ -11,11 +12,26 @@ def score_pair_context(context: dict[str, Any]) -> tuple[RiskLevel, str, int]:
     faers = signals.get("faers") or {}
     pkpd = context.get("pkpd") or {}
     pk_detail = pkpd.get("pk_detail") or {}
+    canonical = pk_detail.get("canonical_interaction") or {}
+    if isinstance(canonical, dict):
+        severity = str(canonical.get("severity") or "").lower()
+        levels = {
+            "high": "major",
+            "severe": "major",
+            "major": "major",
+            "contraindicated": "contraindicated",
+            "avoid": "avoid",
+            "moderate": "moderate",
+            "minor": "minor",
+            "low": "minor",
+        }
+        if severity in levels:
+            return levels[severity], "high", risk_rank(levels[severity])
 
     score = 0
     if pk_detail.get("canonical_interaction"):
         score += 3
-    if any((pk_detail.get("overlaps") or {}).values()):
+    if biological_terms(pk_detail.get("overlaps")):
         score += 2
     if faers.get("combo_reactions"):
         score += 1
@@ -28,12 +44,13 @@ def score_pair_context(context: dict[str, Any]) -> tuple[RiskLevel, str, int]:
     except Exception:
         pass
 
-    if score >= 4:
-        return "major", "high", score
-    if score >= 2:
-        return "moderate", "medium", score
-    if score > 0:
-        return "theoretical", "low", score
+    # Associative signals and shared proteins cannot establish clinical severity.
+    if not pk_detail.get("canonical_interaction"):
+        if score:
+            return "theoretical", "low", score
+        return "insufficient_evidence", "low", score
+    # The source may establish a mechanism without specifying clinical severity.
+    # Signal counts cannot supply that missing severity, even alongside a rule.
     return "insufficient_evidence", "low", score
 
 

@@ -4,7 +4,7 @@ import plotly.graph_objs as go
 
 from src.retrieval import openfda_api
 from src.retrieval.openfda_api import OpenFDAClient, FaersQuery
-from src.utils.caching import load_text
+from src.utils.caching import load_json, load_text
 
 CACHE_SUBDIR = "openfda"
 
@@ -52,15 +52,16 @@ def test_get_top_reactions_real(client):
     for term, count in reactions:
         assert isinstance(term, str)
         assert isinstance(count, int)
-    # Optionally verify cache file created
+    # Verify persistence through the configured cache backend (file or SQLite).
     q = FaersQuery(
         drug="aspirin",
         count_field="patient.reaction.reactionmeddrapt.exact",
         suffix="reactions",
     )
-    cache_file = Path(client.cache_dir) / f"{q.cache_key}.json"
     if reactions:
-        assert cache_file.exists()
+        cached = load_json(client.cache_dir, q.cache_key, ttl=client.ttl_seconds)
+        assert isinstance(cached, dict)
+        assert all(cached.get(term) == count for term, count in reactions)
 
 
 def test_get_top_reactions_unknown(client):

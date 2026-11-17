@@ -70,7 +70,7 @@ from src.llm.llm_interface import generate_response, MODEL_NAME as LLM_MODEL_NAM
 #             for FDA PGx, Europe PMC, Open Targets, STRING, and optional BioGRID.
 # Version 10: Adds openFDA label, DailyMed, RxNorm/RxClass, and FDA CYP/transporter
 #             reference evidence under signals.clinical_reference.
-VERSION = 12  # bump when schema/logic changes to invalidate old cached contexts
+VERSION = 19  # reviewed unnumbered SPL boundaries and typed table retention
 # Version 9: OpenFDA cache moved under data/cache; public REST enrichment schema
 #            now includes required PubChem IDs and source-specific enrichment slots.
 # Version 8: FORCED ENABLEMENT of all RAG features - semantic search, reranking, query expansion,
@@ -939,8 +939,8 @@ def _collect_public_clinical_reference(
 
             client = DailyMedClient()
             return {
-                "a": client.get_spl_metadata(drugA),
-                "b": client.get_spl_metadata(drugB),
+                "a": client.get_label(drugA),
+                "b": client.get_label(drugB),
             }
 
         tasks["DailyMed SPL API"] = _dailymed_lookup

@@ -2,7 +2,7 @@
 ChEMBL REST API client for enriching PK/PD data.
 
 ChEMBL provides:
-- Enzyme interactions with potency (Ki, IC50) for strength classification
+- Enzyme assay measurements with endpoint, units, and assay context
 - Transporter data (P-gp, OATP, etc.)
 - Pathway information
 - Cross-validation of DrugBank enzyme data
@@ -21,6 +21,39 @@ LOG = logging.getLogger(__name__)
 
 # ChEMBL REST API base URL
 CHEMBL_API_BASE = "https://www.ebi.ac.uk/chembl/api/data"
+
+
+def _assay_evidence(activity: Dict[str, Any]) -> Dict[str, Any]:
+    """Retain measurements without deriving clinical roles or strength.
+
+    Only an explicit action annotation can describe an assay role. Ki, IC50,
+    and EC50 endpoints alone do not establish that role or clinical relevance.
+    """
+    action_type = activity.get("action_type")
+    if isinstance(action_type, dict):
+        action_type = action_type.get("action_type")
+    action = str(action_type or "").strip().lower()
+    if action not in {"inhibitor", "substrate", "inducer"}:
+        action = "unknown"
+    return {
+        "action": action,
+        "action_basis": (
+            "explicit_assay_action_type" if action != "unknown" else "not_established"
+        ),
+        "potency_type": activity.get("standard_type"),
+        "potency_value": activity.get("standard_value"),
+        "potency_units": activity.get("standard_units"),
+        "potency_relation": activity.get("standard_relation"),
+        "activity_id": activity.get("activity_id"),
+        "assay_chembl_id": activity.get("assay_chembl_id"),
+        "assay_description": activity.get("assay_description"),
+        "assay_type": activity.get("assay_type"),
+        "target_chembl_id": activity.get("target_chembl_id"),
+        "target_organism": activity.get("target_organism"),
+        "document_chembl_id": activity.get("document_chembl_id"),
+        "clinical_relevance": "not_established",
+        "raw": dict(activity),
+    }
 
 
 def _chembl_timeout() -> int:
@@ -65,7 +98,8 @@ def get_enzyme_interactions(
         enzyme_name: Optional filter for specific enzyme (e.g., "CYP3A4")
 
     Returns:
-        List of dicts with keys: enzyme, action, potency_type (Ki/IC50), potency_value, potency_units
+        Assay records with enzyme, explicit action (or unknown), potency
+        endpoint/value/units/relation and source context; no clinical strength.
     """
     molecule = _get_compound_by_name(compound_name)
     if not molecule:
@@ -106,10 +140,7 @@ def get_enzyme_interactions(
         interactions = []
 
         for act in activities:
-            target_pref_name = act.get("target_pref_name", "")
-            standard_type = act.get("standard_type", "")
-            standard_value = act.get("standard_value")
-            standard_units = act.get("standard_units", "")
+            target_pref_name = act.get("target_pref_name") or ""
 
             # Extract enzyme name from target
             enzyme_match = None
@@ -126,32 +157,10 @@ def get_enzyme_interactions(
                     enzyme_match = f"cyp{m.group(1).lower()}"
 
             if enzyme_match or enzyme_name:
-                # Infer action from activity type and value
-                # Low Ki/IC50 suggests inhibition; high suggests substrate
-                action = "unknown"
-                if standard_value:
-                    try:
-                        val = float(standard_value)
-                        if standard_type in ("Ki", "IC50"):
-                            # < 1 μM = strong inhibitor, 1-10 μM = moderate, > 10 μM = weak
-                            if val < 1.0:
-                                action = "strong_inhibitor"
-                            elif val < 10.0:
-                                action = "moderate_inhibitor"
-                            else:
-                                action = "weak_inhibitor"
-                        elif standard_type == "EC50":
-                            action = "substrate"
-                    except (ValueError, TypeError):
-                        pass
-
                 interactions.append(
                     {
+                        **_assay_evidence(act),
                         "enzyme": enzyme_match or target_pref_name.lower(),
-                        "action": action,
-                        "potency_type": standard_type,
-                        "potency_value": standard_value,
-                        "potency_units": standard_units,
                         "target_name": target_pref_name,
                     }
                 )
@@ -162,12 +171,12 @@ def get_enzyme_interactions(
         return []
 
 
-def get_transporter_data(compound_name: str) -> List[Dict[str, str]]:
+def get_transporter_data(compound_name: str) -> List[Dict[str, Any]]:
     """
     Get transporter interactions from ChEMBL.
 
     Returns:
-        List of dicts with keys: transporter, action (substrate/inhibitor)
+        Transporter assays with explicit action (or unknown) and assay context.
     """
     molecule = _get_compound_by_name(compound_name)
     if not molecule:
@@ -206,29 +215,17 @@ def get_transporter_data(compound_name: str) -> List[Dict[str, str]]:
         transporter_data = []
 
         for act in activities:
-            target_pref_name = act.get("target_pref_name", "").lower()
-            standard_type = act.get("standard_type", "")
-            standard_value = act.get("standard_value")
+            target_pref_name = (act.get("target_pref_name") or "").lower()
 
             # Check if this is a transporter
             is_transporter = any(t.lower() in target_pref_name for t in transporters)
             if not is_transporter:
                 continue
 
-            # Infer action
-            action = "substrate"  # Default
-            if standard_type in ("Ki", "IC50") and standard_value:
-                try:
-                    val = float(standard_value)
-                    if val < 10.0:  # Low Ki/IC50 suggests inhibition
-                        action = "inhibitor"
-                except (ValueError, TypeError):
-                    pass
-
             transporter_data.append(
                 {
+                    **_assay_evidence(act),
                     "transporter": target_pref_name,
-                    "action": action,
                 }
             )
 
@@ -284,16 +281,19 @@ def enrich_mechanistic_data(
         enzymes: Dict with 'substrate', 'inhibitor', 'inducer' lists
 
     Returns:
-        Enriched dict with strength classifications and ChEMBL cross-validation
+        Assay evidence and explicit role concordance. Legacy strength lists
+        remain empty because assay potency cannot classify clinical inhibition.
     """
     enriched = {
         "enzymes": enzymes.copy(),
         "enzyme_strength": {"strong": [], "moderate": [], "weak": []},
         "chembl_validation": {"found": False, "matches": [], "mismatches": []},
+        "bioactivities": [],
     }
 
     # Get ChEMBL enzyme interactions
     chembl_interactions = get_enzyme_interactions(drug_name)
+    enriched["bioactivities"] = chembl_interactions
 
     if chembl_interactions:
         enriched["chembl_validation"]["found"] = True
@@ -302,18 +302,14 @@ def enrich_mechanistic_data(
         for interaction in chembl_interactions:
             enzyme = interaction["enzyme"]
             action = interaction["action"]
-            potency_value = interaction.get("potency_value")
 
-            # Classify strength
-            if "strong" in action:
-                enriched["enzyme_strength"]["strong"].append(enzyme)
-            elif "moderate" in action:
-                enriched["enzyme_strength"]["moderate"].append(enzyme)
-            elif "weak" in action:
-                enriched["enzyme_strength"]["weak"].append(enzyme)
-
-            # Cross-validate with DrugBank
-            if enzyme in enzymes.get("inhibitor", []):
+            # Concordance requires the same explicitly annotated assay role;
+            # a target association alone cannot validate an inhibitor label.
+            if interaction.get("action_basis") != "explicit_assay_action_type":
+                continue
+            if action not in {"substrate", "inhibitor", "inducer"}:
+                continue
+            if enzyme in enzymes.get(action, []):
                 enriched["chembl_validation"]["matches"].append(enzyme)
             elif enzyme not in sum(enzymes.values(), []):
                 enriched["chembl_validation"]["mismatches"].append(enzyme)

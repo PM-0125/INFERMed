@@ -1,6 +1,30 @@
 from fastapi.testclient import TestClient
+import pytest
 
 from src.api.app import app
+
+
+@pytest.fixture(autouse=True)
+def inline_worker_boundary(monkeypatch):
+    # These API/use-case tests replace retrieval/provider dependencies locally.
+    # Real spawn/kill behavior is tested in test_process_supervisor.py.
+    monkeypatch.setattr(
+        "src.api.app.run_isolated",
+        lambda function, argument, scope, **kw: function(argument, **kw),
+    )
+
+
+def test_enabled_snapshot_store_is_available_for_followups(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from src.api.app import _event_store_or_none
+
+    monkeypatch.setattr(
+        "src.api.app.get_settings",
+        lambda: SimpleNamespace(
+            enable_event_store=True, sqlite_cache_path=str(tmp_path / "audit.sqlite")
+        ),
+    )
+    assert _event_store_or_none() is not None
 
 
 def test_health_endpoint():
@@ -47,7 +71,7 @@ def test_analyze_endpoint_uses_uncached_llm_response(monkeypatch):
     assert calls["contexts"][0]["kwargs"]["mode"] == "doctor"
     assert calls["contexts"][0]["kwargs"]["force_refresh"] is False
     assert calls["answer_mode"] == "doctor"
-    assert response.json()["assessment"][0]["title"] == "Bottom Line"
+    assert response.json()["assessment"][0]["title"] == "Clinical Summary"
     assert response.json()["analysisId"].startswith("ana_")
     assert response.json()["decision"]["analysis_id"] == response.json()["analysisId"]
 
@@ -80,7 +104,7 @@ def test_medication_set_endpoint_returns_future_read_model(monkeypatch):
     assert response.status_code == 200
     payload = response.json()
     assert payload["analysisId"].startswith("ana_")
-    assert payload["assessment"][0]["title"] == "Bottom Line"
+    assert payload["assessment"][0]["title"] == "Clinical Summary"
     assert payload["risk"]["label"]
     assert payload["drugs"][0]["name"] == "warfarin"
     assert "overview" in payload["evidence"]

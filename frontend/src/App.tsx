@@ -3,6 +3,8 @@ import { createPortal } from 'react-dom'
 import type { FormEvent, KeyboardEvent, ReactNode } from 'react'
 import type { Group, Vector3 } from 'three'
 import './App.css'
+import { MarkdownBody } from './MarkdownBody'
+import { EvidenceChecks } from './EvidenceChecks'
 import { Check, LoaderCircle, CircleAlert, ArrowRight, RotateCcw, SlidersHorizontal, Pill, Moon, Sun, FlaskConical, Network, BookOpen, Info } from 'lucide-react'
 import { analyzeInteractionStream, askFollowUp } from './api'
 import type { AudienceMode, EvidenceBundle, EvidenceMetric, EvidenceRow, InteractionResult } from './types'
@@ -46,60 +48,8 @@ function ContextHelp({ title, children }: { title: string; children: ReactNode }
 }
 
 /* ─── Inline markdown renderer ────────────────────────────────────────────── */
-function parseInline(text: string): ReactNode {
-  const parts: ReactNode[] = []
-  const re = /\*\*(.+?)\*\*|\*(.+?)\*/g
-  let last = 0; let m: RegExpExecArray | null
-  while ((m = re.exec(text)) !== null) {
-    if (m.index > last) parts.push(text.slice(last, m.index))
-    if (m[0].startsWith('**')) parts.push(<strong key={m.index}>{m[1]}</strong>)
-    else parts.push(<em key={m.index}>{m[2]}</em>)
-    last = m.index + m[0].length
-  }
-  if (last < text.length) parts.push(text.slice(last))
-  return parts.length === 1 && typeof parts[0] === 'string' ? parts[0] : <>{parts}</>
-}
-
 function renderMarkdownBody(text: string): ReactNode {
-  if (!text) return null
-  const paras = text.split(/\n\n+/)
-  const elements: ReactNode[] = []
-  for (const [pi, para] of paras.entries()) {
-    const lines = para.split('\n').map(l => l.trim()).filter(Boolean)
-    if (!lines.length) continue
-    const heading = lines[0].match(/^#{2,4}\s+(.+)$/)
-    const contentLines = heading ? lines.slice(1) : lines
-    if (heading) {
-      elements.push(<h4 className="markdown-heading" key={`${pi}-heading`}>{parseInline(heading[1])}</h4>)
-      if (!contentLines.length) continue
-    }
-    const allBullets = contentLines.length > 1 && contentLines.every(l => l.startsWith('- ') || l.startsWith('* '))
-    if (allBullets) {
-      elements.push(
-        <ul key={pi}>
-          {contentLines.map((l, li) => <li key={li}>{parseInline(l.replace(/^[-*]\s+/, ''))}</li>)}
-        </ul>
-      )
-    } else if (contentLines.length === 1 && contentLines[0].startsWith('- ')) {
-      // Single line with potential inline " - " bullet separators from LLM
-      const raw = contentLines[0]
-      const items = raw.split(/ - (?=\*\*|[A-Z*])/)
-      if (items.length > 1) {
-        elements.push(
-          <ul key={pi}>
-            {items.map((item, ii) => (
-              <li key={ii}>{parseInline(item.replace(/^-\s+/, ''))}</li>
-            ))}
-          </ul>
-        )
-      } else {
-        elements.push(<p key={pi}>{parseInline(raw.replace(/^-\s+/, ''))}</p>)
-      }
-    } else {
-      elements.push(<p key={pi}>{parseInline(contentLines.join(' '))}</p>)
-    }
-  }
-  return <>{elements}</>
+  return text ? <MarkdownBody text={text} /> : null
 }
 
 type EvidenceTab = 'overview' | 'openfda' | 'internal' | 'mechanisms' | 'sources' | 'references'
@@ -1602,19 +1552,16 @@ export default function App() {
 
               <NDrugReasoningPanel result={result} />
               <section className="verification-status" aria-label="Evidence verification">
-                <strong>{result.verification?.status === 'checks_passed' ? 'Automated checks passed' : result.verification ? 'Review required' : 'Unverified assessment'}</strong>
-                <p>Automated checks do not establish clinical correctness.</p>
-                {result.verification?.claims?.some(c => c.status !== 'supported') && <details>
-                  <summary>Inspect evidence checks</summary>
-                  <ul>{result.verification.claims.filter(c => c.status !== 'supported').map((c, i) => <li key={i}><strong>{c.status}: </strong>{c.text}<p>{c.reasons.join(' ')} {c.evidence_ids.join(', ')}</p></li>)}</ul>
-                </details>}
+                <strong>{result.verification?.status === 'review_failed' ? 'Review failed — explanation withheld' : result.verification?.status === 'recommendations_withheld' ? 'Unsupported recommendations withheld' : result.verification?.status === 'checks_passed' ? 'Automated checks passed' : result.verification ? 'Review required' : 'Unverified assessment'}</strong>
+                {result.verification?.publication?.status === 'recommendations_withheld' && <p>Some recommendations could not be matched to directly applicable source statements and have been withheld. This does not mean no clinical action is needed.</p>}
+                <EvidenceChecks claims={result.verification?.claims} />
               </section>
 
               {/* Narrative sections */}
               <div className="narrative">
                 {result.assessment.map((s, i) => (
                   <div className="narrative-section" key={s.title} style={{ animationDelay: `${i*60}ms` }}>
-                    <h3>{s.title}</h3>
+                    <h3>{s.title.toLowerCase() === 'bottom line' ? 'Clinical Summary' : s.title}</h3>
                     <div className="narrative-body">{renderMarkdownBody(s.body)}</div>
                   </div>
                 ))}

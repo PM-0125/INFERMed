@@ -1,13 +1,25 @@
 # Streaming and prompt reuse
 
-The Ollama analysis path forwards visible response fragments through the medication-set SSE endpoint as `token` events. Provider `thinking` fields are never forwarded. The frontend shows a provisional assessment while generation and final processing run, and replaces it with the final result. Failed or incomplete generation is not a completed assessment. Follow-up responses still use their existing non-streaming HTTP endpoint.
+## API delivery
 
-Progress events describe actual application stages, not private model reasoning. SSE comment heartbeats keep connections alive without adding waiting messages to the UI. Reverse proxies must also allow streaming; the endpoint sends `X-Accel-Buffering: no` and `Cache-Control: no-cache`.
+The medication-set API uses server-sent events (SSE) for progress and results. In `src/api/app.py`, `_execute_analysis_impl` suppresses provisional provider text and invokes the text callback only after application publication checks and citation rendering. A `token` event therefore does not imply that the browser is receiving individual model tokens.
 
-Templates are loaded once per backend process. Stable audience instructions and the evidence policy precede changing evidence, history, and patient context. Every request still includes its instructions and its own context; no cross-patient conversation state is reused.
+Progress events describe application stages, not private model reasoning. Provider thinking fields are not user-facing explanations. Follow-ups use a separate non-streaming HTTP response.
 
-`OLLAMA_KEEP_ALIVE=30m` keeps the model resident between requests when resources permit. This is not permanent prompt storage or a guarantee of a cache hit. Restarts, eviction, concurrency, and prefix changes may require fresh processing. Restart the backend after template edits.
+SSE comment heartbeats keep connections alive. Reverse proxies must allow streaming; the endpoint supplies `X-Accel-Buffering: no` and `Cache-Control: no-cache`. Errors or interrupted generation must not be interpreted as a completed assessment.
 
-Ollama logs and returned usage include prompt evaluation duration, load duration, prompt token counts, and `prompt_eval_cached_count` when supported. Missing cache counts mean unknown, not zero. Compare repeated requests with the same instruction prefix to measure savings; do not infer savings from keep-alive alone.
+## Provider behavior
 
-The local setup uses the VM through `scripts/start_model_tunnel.ps1 -RemoteHost <host> -RemoteUser <user>` and `OLLAMA_HOST=http://127.0.0.1:11435`. Supply `-IdentityFile <path>` when the default SSH identity location is not appropriate. Keep the SSH tunnel running, then restart the local backend. `OLLAMA_NUM_CTX=131072` is the requested finite context window; `OLLAMA_NUM_PREDICT=-1` removes the application output-token cap, not the model's context or resource limits.
+Ollama and NVIDIA transport streaming is distinct from API publication. Provider callbacks may produce text internally while the application withholds that text. Doctor mode orders records; the model's ordering output is not a clinical narrative to stream. Other initial audiences can use draft/review generation before final checks. See [reasoning architecture](reasoning_architecture.md).
+
+Templates are loaded within the backend process. Restart after template edits. Each request supplies its own context; do not assume that earlier patient information remains valid for a new request.
+
+## Ollama reuse
+
+`OLLAMA_KEEP_ALIVE` requests model residency between calls. It is not permanent prompt storage or proof of a prompt-cache hit. Eviction, concurrency, model changes, and context changes can require fresh processing.
+
+Inspect returned provider usage and timing where available. Missing cache counters mean unknown, not zero. Measure repeated requests before claiming a latency improvement.
+
+`OLLAMA_NUM_CTX` configures the requested context window; the settings fallback is 8192. `OLLAMA_NUM_PREDICT` defaults to -1 in settings, removing the configured generation-token cap but not the model's context or resource limits. Actual environment values can override both. Choose values supported by the model and host rather than copying a previous experiment's settings.
+
+For optional SSH access to a remote Ollama host, use [start_model_tunnel.ps1](../scripts/start_model_tunnel.ps1). Inspect its parameters and keep the tunnel running. Configure `OLLAMA_HOST` to the local forwarded endpoint and restart the backend. A tunnel is unnecessary for an already reachable local or remote endpoint.

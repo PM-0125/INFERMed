@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import re
 import time
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -101,7 +102,7 @@ class EuropePMCClient:
         if not a or not b:
             return {"found": False, "articles": [], "query": ""}
 
-        key = f"europepmc__ddi__{a}__{b}__{limit}"
+        key = f"europepmc__abstract_v2__{a}__{b}__{limit}"
         cached = load_json(self.cache_dir, key, ttl=self.ttl_seconds)
         if cached is not None:
             return cached
@@ -149,6 +150,13 @@ class EuropePMCClient:
                     "pmcid": pmcid,
                     "doi": doi,
                     "url": url,
+                    "abstract": _abstract_text(row.get("abstractText")),
+                    "publication_types": (row.get("pubTypeList") or {}).get("pubType")
+                    or [],
+                    "is_open_access": row.get("isOpenAccess") == "Y",
+                    "is_retracted": row.get("isRetracted") == "Y",
+                    "source_id": str(row.get("id") or pmid or pmcid),
+                    "source_database": row.get("source"),
                 }
             )
         articles = _dedupe_rows(
@@ -165,11 +173,30 @@ class EuropePMCClient:
             },
             "limitations": [
                 "Literature metadata is not itself clinical proof; inspect the article before using a claim.",
+                "Abstracts are study descriptions, not prescribing guidance. Full text and its reuse license have not been retrieved.",
                 "Search results can include broad reviews, unrelated mentions, or non-DDI contexts.",
             ],
         }
         save_json(self.cache_dir, key, out)
         return out
+
+
+def _abstract_text(value):
+    class TextParser(HTMLParser):
+        def __init__(self):
+            super().__init__(convert_charrefs=True)
+            self.parts = []
+
+        def handle_data(self, data):
+            self.parts.append(data)
+
+        def handle_endtag(self, tag):
+            if tag in {"p", "div", "section", "title", "h4"}:
+                self.parts.append("\n\n")
+
+    parser = TextParser()
+    parser.feed(str(value or ""))
+    return re.sub(r"[ \t]+", " ", "".join(parser.parts)).strip()
 
 
 class StringDBClient:

@@ -111,6 +111,25 @@ def map_drug_identity(raw: Dict[str, Any], fallback_name: str) -> Dict[str, Any]
 
 
 def calculate_risk_summary(context: Dict[str, Any]) -> Tuple[RiskLevel, str, str]:
+    decision = (context.get("reasoning_input") or {}).get("decision") or {}
+    if decision:
+        display = {
+            "contraindicated": ("high", "Contraindicated"),
+            "avoid": ("high", "Avoid"),
+            "major": ("high", "High Risk"),
+            "moderate": ("moderate", "Moderate Risk"),
+            "minor": ("low", "Low Risk"),
+            "theoretical": ("unknown", "Clinical Severity Unestablished"),
+            "insufficient_evidence": ("unknown", "Insufficient Evidence"),
+            "no_clinically_significant_interaction_found": (
+                "low",
+                "No Significant Interaction Identified",
+            ),
+        }
+        level, label = display.get(
+            decision.get("risk_level"), ("unknown", "Unclassified")
+        )
+        return level, label, str(decision.get("confidence") or "low")
     if not has_decision_evidence(context):
         return (
             "unknown",
@@ -1101,18 +1120,20 @@ def _chembl_rows(value: Any) -> List[Dict[str, str]]:
             mismatches = _strings(validation.get("mismatches"))
             if matches:
                 parts.append(
-                    "validated enzymes: " + ", ".join(matches[:MAX_ENZYME_PER_ROLE])
+                    "assay-role concordance (not clinical validation): "
+                    + ", ".join(matches[:MAX_ENZYME_PER_ROLE])
                 )
             if mismatches:
                 parts.append(
                     "additional ChEMBL enzymes: "
                     + ", ".join(mismatches[:MAX_ENZYME_PER_ROLE])
                 )
-        strengths = data.get("enzyme_strength") or {}
-        for strength in ("strong", "moderate", "weak"):
-            values = _strings(strengths.get(strength))
-            if values:
-                parts.append(f"{strength}: {', '.join(values[:MAX_ENZYME_PER_ROLE])}")
+        for assay in (data.get("bioactivities") or [])[:5]:
+            parts.append(
+                f"{assay.get('enzyme', 'target')} {assay.get('potency_type', 'endpoint')} "
+                f"{assay.get('potency_relation') or ''}{assay.get('potency_value', '?')} "
+                f"{assay.get('potency_units', 'units unknown')}; clinical relevance not established"
+            )
         if parts:
             rows.append(
                 {"title": title, "description": "; ".join(parts), "meta": "ChEMBL"}

@@ -13,4 +13,4 @@ The frontend's Evidence freshness disclosure reports context assembly time and c
 
 History retention currently follows explicit cache deletion and prefix cleanup. A production retention/size policy should be defined before sustained public deployment. File-only source-cache mode does not preserve SQLite history. Local reference files are not refreshed by an API cache bypass.
 
-Progress uses actual events: started stages spin, completed stages receive a checkmark, and failed stages show an error. Pair identity is included in stage keys so N-drug collection does not overwrite previous pairs. No timed fake progress or private model reasoning is displayed.
+For API progress and answer delivery, see [streaming and prompt reuse](streaming_and_prompt_cache.md).

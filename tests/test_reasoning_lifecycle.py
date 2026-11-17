@@ -19,6 +19,9 @@ def test_reasoning_exists_before_generation_and_snapshot_is_isolated(tmp_path, d
 
     def generate(ctx, *args, **kwargs):
         assert ctx["reasoning_input"]["decision"]
+        interpretations = ctx["reasoning_input"]["pair_interpretations"]
+        assert len(interpretations) == len(drugs) * (len(drugs) - 1) // 2
+        assert all(len(row["drug_scope"]) == 2 for row in interpretations)
         assert ctx["reasoning_input"]["reasoning"]["hypotheses"]
         captured.append(deepcopy(ctx))
         ctx["reasoning_input"].clear()
@@ -69,6 +72,32 @@ def test_provider_failure_is_not_a_successful_assessment(tmp_path):
     )
     with pytest.raises(RuntimeError, match="generation"):
         use_case.execute(AnalyzeMedicationSetCommand(medications=["a", "b"]))
+
+
+def test_revision_audit_is_persisted_and_not_clinically_approved(tmp_path):
+    store = SQLiteEventStore(tmp_path / "events.sqlite")
+    review = {
+        "status": "reviewed_not_validated",
+        "attempts": 1,
+        "draft": {"text": "Original model draft"},
+        "findings": [],
+        "remaining_findings": [],
+    }
+    result = AnalyzeMedicationSetUseCase(
+        rag_runner=lambda *a, **k: {},
+        context_runner=lambda *a, **k: {},
+        answer_generator=lambda *a, **k: {
+            "text": "Revised model answer",
+            "review": review,
+        },
+        event_store=store,
+    ).execute(AnalyzeMedicationSetCommand(medications=["a", "b"]))
+    assert result.verification["status"] == "review_required"
+    assert result.verification["audience_review"]["status"] == "reviewed_not_validated"
+    saved = store.get_analysis_snapshot(result.analysis_id)["response_read_model"][
+        "answer"
+    ]
+    assert saved["review"]["draft"]["text"] == "Original model draft"
 
 
 def test_followup_patient_update_does_not_reuse_stale_amplifiers():

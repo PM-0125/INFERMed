@@ -6,6 +6,7 @@ import os
 import queue
 import threading
 import time
+import asyncio
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query
@@ -25,6 +26,15 @@ from src.config.data_policy import get_source_status
 from src.llm.llm_interface import generate_followup_response, generate_response
 from src.llm.rag_pipeline import get_context_cached, retrieve_and_normalize, run_rag
 from src.infrastructure.persistence.event_store import SQLiteEventStore
+from src.application.execution import (
+    ExecutionContext,
+    bind_execution,
+    current_execution,
+)
+from src.infrastructure.process_supervisor import run_isolated
+
+ANALYSIS_DEADLINE_S = 300
+_analysis_slots = threading.BoundedSemaphore(2)
 
 log = logging.getLogger("uvicorn.error")
 
@@ -108,10 +118,19 @@ def analyze_medication_set(request: MedicationSetAnalyzeRequest) -> dict[str, An
 def analyze_medication_set_stream(
     request: MedicationSetAnalyzeRequest,
 ) -> StreamingResponse:
-    events: queue.Queue[dict[str, Any] | None] = queue.Queue()
+    events: queue.Queue[dict[str, Any] | None] = queue.Queue(maxsize=128)
+    execution = ExecutionContext(ANALYSIS_DEADLINE_S)
+
+    def enqueue(item):
+        if execution.cancelled.is_set():
+            return
+        try:
+            events.put_nowait(item)
+        except queue.Full:
+            execution.cancel()
 
     def progress(stage: str, message: str, payload: dict[str, Any]) -> None:
-        events.put(
+        enqueue(
             {"type": "progress", "stage": stage, "message": message, "payload": payload}
         )
 
@@ -123,30 +142,33 @@ def analyze_medication_set_stream(
                 request.audience,
                 request.refresh_evidence,
             )
-            analysis = _execute_analysis(
-                AnalyzeMedicationSetCommand(
-                    medications=request.medication_texts,
-                    audience=request.audience,
-                    patient_context=request.patient_context,
-                    refresh_evidence=request.refresh_evidence,
-                    analysis_depth=request.analysis_depth,
-                ),
-                progress_callback=progress,
-                token_callback=lambda text: events.put({"type": "token", "text": text}),
-            )
+            with bind_execution(execution):
+                analysis = _execute_analysis(
+                    AnalyzeMedicationSetCommand(
+                        medications=request.medication_texts,
+                        audience=request.audience,
+                        patient_context=request.patient_context,
+                        refresh_evidence=request.refresh_evidence,
+                        analysis_depth=request.analysis_depth,
+                    ),
+                    progress_callback=progress,
+                    token_callback=lambda text: enqueue(
+                        {"type": "token", "text": text}
+                    ),
+                )
             log.info(
                 "INFERMed analysis completed: analysis_id=%s", analysis.analysis_id
             )
-            events.put({"type": "result", "result": _medication_set_response(analysis)})
+            enqueue({"type": "result", "result": _medication_set_response(analysis)})
         except Exception as exc:
             log.exception("INFERMed analysis failed")
-            events.put(
+            enqueue(
                 {"type": "error", "detail": f"Medication-set analysis failed: {exc}"}
             )
         finally:
-            events.put(None)
+            enqueue(None)
 
-    def stream() -> Any:
+    async def stream() -> Any:
         yield _sse(
             {
                 "type": "progress",
@@ -160,25 +182,30 @@ def analyze_medication_set_stream(
         )
         thread.start()
         started = time.monotonic()
-        heartbeat = 0
-        while True:
-            try:
-                item = events.get(timeout=15)
-            except queue.Empty:
-                if not thread.is_alive():
+        heartbeat = started
+        try:
+            while True:
+                try:
+                    execution.check()
+                except RuntimeError as exc:
+                    yield _sse({"type": "error", "detail": str(exc)})
+                    break
+                try:
+                    item = events.get_nowait()
+                except queue.Empty:
+                    if not thread.is_alive():
+                        break
+                    if time.monotonic() - heartbeat >= 15:
+                        heartbeat = time.monotonic()
+                        yield ": keep-alive\n\n"
+                    await asyncio.sleep(0.05)
                     continue
-                heartbeat += 1
-                elapsed = int(time.monotonic() - started)
-                log.info(
-                    "INFERMed analysis heartbeat: final LLM call still running; elapsed_s=%s heartbeat=%s",
-                    elapsed,
-                    heartbeat,
-                )
-                yield ": keep-alive\n\n"
-                continue
-            if item is None:
-                break
-            yield _sse(item)
+                if item is None:
+                    break
+                yield _sse(item)
+        finally:
+            # Async generator cancellation runs even when the browser disconnects.
+            execution.cancel()
 
     return StreamingResponse(
         stream(),
@@ -264,12 +291,8 @@ def interaction_followup(request: FollowUpRequest) -> dict[str, Any]:
         )
 
     try:
-        result = AnswerFollowUpUseCase(
-            followup_generator=generate_followup_response,
-            context_runner=_retrieve_pair_context,
-            cited_cards_from_context=cited_cards_from_context,
-            snapshot_store=_event_store_or_none(),
-        ).execute(
+        result = _run_request_job(
+            _execute_followup_impl,
             AnswerFollowUpCommand(
                 question=request.question,
                 drugs=request.drugs,
@@ -279,7 +302,7 @@ def interaction_followup(request: FollowUpRequest) -> dict[str, Any]:
                 history=[turn.model_dump() for turn in request.history],
                 prior_assessment=request.priorAssessment,
                 follow_up_count=request.followUpCount,
-            )
+            ),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -289,26 +312,96 @@ def interaction_followup(request: FollowUpRequest) -> dict[str, Any]:
     return result.to_dict()
 
 
+def _execute_followup_impl(command, *, progress_callback=None, token_callback=None):
+    store = _event_store_or_none()
+    return AnswerFollowUpUseCase(
+        followup_generator=generate_followup_response,
+        context_runner=_retrieve_pair_context,
+        cited_cards_from_context=cited_cards_from_context,
+        snapshot_store=store,
+        explanation_recorder=store.append_explanation_record if store else None,
+    ).execute(command)
+
+
 def _execute_analysis(
     command: AnalyzeMedicationSetCommand,
     *,
     progress_callback: Any | None = None,
     token_callback: Any | None = None,
 ) -> Any:
+    return _run_request_job(
+        _execute_analysis_impl,
+        command,
+        progress_callback=progress_callback,
+        token_callback=token_callback,
+    )
+
+
+def _run_request_job(function, command, *, progress_callback=None, token_callback=None):
+    scope = current_execution() or ExecutionContext(ANALYSIS_DEADLINE_S)
+    analysis_id = None
+
+    def progress(stage, message, payload):
+        nonlocal analysis_id
+        analysis_id = payload.get("analysis_id") or analysis_id
+        if progress_callback:
+            progress_callback(stage, message, payload)
+
+    if not _analysis_slots.acquire(blocking=False):
+        raise RuntimeError(
+            "Analysis capacity is busy; retry after the active request completes"
+        )
+    try:
+        with bind_execution(scope):
+            return run_isolated(
+                function,
+                command,
+                scope=scope,
+                progress_callback=progress,
+                token_callback=token_callback,
+            )
+    except Exception:
+        if analysis_id:
+            store = _event_store_or_none()
+            if store:
+                store.update_analysis_status(analysis_id, "failed")
+        raise
+    finally:
+        _analysis_slots.release()
+
+
+def _execute_analysis_impl(command, *, progress_callback=None, token_callback=None):
     from src.infrastructure.tools.graph_enrichment import enrich_pair_results
+
+    scope = current_execution()
+    original_progress = progress_callback
+
+    def checked_progress(*args):
+        scope.check()
+        if original_progress:
+            original_progress(*args)
+
+    progress_callback = checked_progress
 
     def answer_generator(context, mode, **kwargs):
         if token_callback is not None:
-            kwargs["on_text"] = token_callback
+            # Provider/reviewer prose is provisional. Only publish after the
+            # application action-support gate and audience citation rendering.
+            kwargs["on_text"] = lambda text: None
+        if progress_callback is not None:
+            kwargs["on_stage"] = progress_callback
         return _generate_final_answer(context, mode, **kwargs)
 
-    return AnalyzeMedicationSetUseCase(
+    analysis = AnalyzeMedicationSetUseCase(
         rag_runner=run_rag,
         context_runner=_retrieve_pair_context,
         answer_generator=answer_generator,
         progress_callback=progress_callback,
         evidence_enricher=enrich_pair_results,
     ).execute(command)
+    if token_callback is not None:
+        token_callback(analysis.rag_output["answer"]["text"])
+    return analysis
 
 
 def _retrieve_pair_context(drug_a: str, drug_b: str, **kwargs: Any) -> dict[str, Any]:
@@ -366,7 +459,7 @@ def _generate_final_answer(
         route = "single-model"
         reasoning = settings.ollama_reasoning_effort
     log.info(
-        "INFERMed final LLM call started: provider=%s route=%s primary_model=%s reasoning=%s stream=%s max_tokens=%s timeout_s=%s",
+        "INFERMed explanation pipeline started: provider=%s route=%s primary_model=%s reasoning=%s stream=%s max_tokens=%s timeout_s=%s",
         settings.llm_provider,
         route,
         primary_model,
@@ -385,6 +478,8 @@ def _generate_final_answer(
     )
     started = time.monotonic()
     stream_options = {"on_text": kwargs["on_text"]} if kwargs.get("on_text") else {}
+    if kwargs.get("on_stage"):
+        stream_options["on_stage"] = kwargs["on_stage"]
     answer = generate_response(
         context,
         mode,
@@ -395,7 +490,7 @@ def _generate_final_answer(
     )
     answer_meta = answer.get("meta") or {}
     log.info(
-        "INFERMed final LLM call completed: elapsed_s=%.1f answer_chars=%s provider=%s model=%s route_variant=%s",
+        "INFERMed explanation pipeline completed: elapsed_s=%.1f answer_chars=%s provider=%s model=%s route_variant=%s",
         time.monotonic() - started,
         len(str(answer.get("text") or "")),
         answer_meta.get("provider"),
@@ -413,6 +508,10 @@ def _generate_final_answer(
 def _event_store_or_none() -> SQLiteEventStore | None:
     settings = get_settings()
     if not settings.enable_event_store:
+        return None
+    try:
+        return SQLiteEventStore(settings.sqlite_cache_path)
+    except Exception:
         return None
 
 
@@ -552,10 +651,6 @@ def _nvidia_ping(settings: Any) -> dict[str, Any]:
         "detail": "NVIDIA ping succeeded",
         "latency_s": round(time.monotonic() - started, 2),
     }
-    try:
-        return SQLiteEventStore(settings.sqlite_cache_path)
-    except Exception:
-        return None
 
 
 def _sse(payload: dict[str, Any]) -> str:

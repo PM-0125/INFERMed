@@ -10,27 +10,13 @@ Published chapter: [INFERMed: A PK/PD-Aware Retrieval-Augmented System for Expla
 
 ## License And Use Boundary
 
-INFERMed is **source-available for non-commercial research, evaluation, and educational use** under the [PolyForm Noncommercial License 1.0.0](LICENSE).
+INFERMed is **source-available under the [PolyForm Noncommercial License 1.0.0](LICENSE)**. You may use, study, modify, and share it for purposes permitted by that license, including noncommercial research, education, evaluation, and development.
 
-This is intentionally not an OSI open-source license because commercial use is not permitted.
+The license also expressly permits use by charitable organizations, educational institutions, public research organizations, public safety or health organizations, environmental protection organizations, and government institutions, regardless of funding. The full license controls; this summary does not add restrictions to it.
 
-Permitted examples:
+Commercial use outside those permissions requires a separate written agreement covering the relevant rights. For commercial products, paid services, or business integration, describe the proposed use to [pranjul.mishra@proton.me](mailto:pranjul.mishra@proton.me) before proceeding if it is not covered by the license. A permission request does not itself grant rights.
 
-- Academic research and reproducibility review
-- Non-commercial evaluation by clinicians, pharmacovigilance reviewers, and biomedical researchers
-- Educational demonstrations
-- Non-commercial contributions back to this repository
-
-Not permitted without prior written permission:
-
-- Commercial products or services
-- Paid hosted access or SaaS use
-- Clinical deployment or operational medical decision support
-- Resale, sublicensing, or white-labeling
-- Use in proprietary commercial workflows
-- Commercial derivatives or competing commercial platforms
-
-Unauthorized use outside the license terminates the granted rights and may expose the user or organization to legal remedies.
+This is a source-available license, not an OSI open-source license. Permission to use the code does not establish clinical suitability or grant rights to third-party data. See the medical safety notice below and [NOTICE.md](NOTICE.md).
 
 ## Medical Safety Notice
 
@@ -258,7 +244,7 @@ The project can be source-controlled on GitHub, but GitHub Pages cannot host the
 
 ## Contributing
 
-Contributions are welcome for non-commercial research use. By contributing, you agree that your contribution is provided under the same non-commercial project license and does not introduce restricted data, secrets, or commercial-use rights.
+Contributions are welcome under the project license. Contributors retain their copyright and must have the right to submit their work. Contribution terms, third-party material requirements, and verification guidance are described in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md) and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) before opening issues or pull requests.
 

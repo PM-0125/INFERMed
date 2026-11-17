@@ -88,10 +88,14 @@ class PatientContext:
         return bool(
             self.age_years is not None
             or self.sex != "unknown"
+            or self.pregnancy_status != "unknown"
             or self.renal_function != "unknown"
             or self.hepatic_function != "unknown"
             or self.qt_risk != "unknown"
             or self.current_inr is not None
             or self.conditions
             or self.genotypes
+            or self.labs
+            or self.monitoring
+            or self.concurrent_medications
         )

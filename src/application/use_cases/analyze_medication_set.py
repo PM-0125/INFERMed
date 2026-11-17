@@ -1,9 +1,10 @@
 from __future__ import annotations
+import re
 
 import logging
 import uuid
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Callable
 
 from src.application.commands import AnalyzeMedicationSetCommand
@@ -15,6 +16,7 @@ from src.application.interaction_modeling import (
 )
 from src.application.tool_planner import EvidencePlan, ToolPlanner
 from src.application.reasoning_input import build_reasoning_input
+from src.domain.reasoning.interpretation import biological_terms, interpret_pair
 from src.config.settings import Settings, get_settings
 from src.domain.decision.entities import InteractionDecision
 from src.domain.decision.rules import (
@@ -43,6 +45,9 @@ from src.domain.research.services import ResearchHypothesisBuilder
 from src.domain.safety.entities import SafetyReport
 from src.domain.safety.services import ZeroTrustSafetyGate
 from src.infrastructure.persistence.event_store import SQLiteEventStore
+from src.domain.explanation.action_support import enforce_action_support
+from src.domain.evidence.label_passages import select_label_passages
+from src.domain.explanation.presentation import render_citations, present_verification
 
 RagRunner = Callable[..., dict[str, Any]]
 ContextRunner = Callable[..., dict[str, Any]]
@@ -94,7 +99,11 @@ class MedicationSetAnalysis:
     def to_read_model(self) -> dict[str, Any]:
         return {
             "analysis_id": self.analysis_id,
-            "verification": self.verification,
+            "verification": present_verification(
+                self.verification,
+                self.evidence_cards,
+                (self.rag_output.get("answer") or {}).get("audience", "doctor"),
+            ),
             "analysisId": self.analysis_id,
             "request_id": self.request_id,
             "normalized_medications": [item.to_dict() for item in self.medications],
@@ -126,8 +135,8 @@ class AnalyzeMedicationSetUseCase:
     """Medication-set analysis use case with pair-context compatibility.
 
     Production callers should provide `context_runner` and `answer_generator`.
-    That lets the use case retrieve all pair contexts but spend only one final
-    LLM call for the whole medication set. Tests and older callers can still
+    That lets the use case retrieve all pair contexts and generate one medication-set
+    explanation with a bounded audience review. Tests and older callers can still
     provide only `rag_runner`; in that mode the first pair answer is reused.
     """
 
@@ -256,6 +265,30 @@ class AnalyzeMedicationSetUseCase:
                 refresh=command.refresh_evidence,
                 progress=self._progress,
             )
+        # Enrichment can rebuild pair decisions. Apply patient context afterwards
+        # so pair, set, generation and persisted decisions use the same inputs.
+        pair_results = [
+            replace(
+                item,
+                decision=(
+                    replace(
+                        item.decision,
+                        patient_amplifiers=patient_amplifiers_for_decision(
+                            patient_context
+                        ),
+                        missing_patient_factors=missing_patient_factors_for_decision(
+                            patient_context
+                        ),
+                    )
+                    if item.decision is not None
+                    else None
+                ),
+            )
+            for item in (
+                _patient_selected_pair(result, analysis_id, patient_context.to_dict())
+                for result in pair_results
+            )
+        ]
         executed_pairs = [item.pair for item in pair_results]
         executed_pair = executed_pairs[0]
         aggregate_context = build_medication_set_context_from_pair_results(
@@ -425,6 +458,9 @@ class AnalyzeMedicationSetUseCase:
             evidence_cards=evidence_cards,
         )
         context["reasoning_input"]["patient_context"] = patient_context.to_dict()
+        context["reasoning_input"]["pair_interpretations"] = [
+            interpret_pair(result.context, result.pair) for result in pair_results
+        ]
         self._progress(
             "reasoning_ready",
             "Drug profiles, hypotheses and evidence-linked decision prepared.",
@@ -484,7 +520,56 @@ class AnalyzeMedicationSetUseCase:
         )
 
         verification = _deterministic_verification(
-            answer_text, decision, safety_report, evidence_cards
+            answer_text,
+            decision,
+            safety_report,
+            evidence_cards,
+            patient_context.to_dict(),
+        )
+        if answer.get("review"):
+            review = answer["review"]
+            verification["audience_review"] = {
+                key: review.get(key)
+                for key in (
+                    "status",
+                    "attempts",
+                    "findings",
+                    "remaining_findings",
+                    "error_type",
+                )
+            }
+            # Same-model revision is not independent clinical validation.
+            verification["status"] = "review_required"
+        publication = enforce_action_support(
+            answer_text,
+            evidence_cards,
+            decision.drugs,
+            review_status=(answer.get("review") or {}).get("status"),
+            patient_context=patient_context.to_dict(),
+        )
+        draft_claims = verification["claims"]
+        published_verification = _deterministic_verification(
+            publication.text,
+            decision,
+            safety_report,
+            evidence_cards,
+            patient_context.to_dict(),
+        )
+        verification["claims"] = published_verification["claims"]
+        verification["checked_text"] = "published_narrative"
+        verification["publication"] = publication.summary()
+        if answer.get("doctor_contract"):
+            verification["doctor_contract"] = answer["doctor_contract"]
+        if publication.status in {"recommendations_withheld", "review_failed"}:
+            verification["status"] = publication.status
+        answer["publication_audit"] = {
+            "original_text": answer_text,
+            "findings": publication.findings,
+            "draft_claims": draft_claims,
+        }
+        answer["audience"] = command.audience
+        answer["text"] = render_citations(
+            publication.text, evidence_cards, command.audience
         )
         self._progress(
             "verification_completed",
@@ -499,10 +584,10 @@ class AnalyzeMedicationSetUseCase:
             self.event_store.append_explanation_record(
                 explanation_id=explanation_id,
                 analysis_id=analysis_id,
-                answer_text=answer_text,
+                answer_text=answer["text"],
                 verification=verification,
                 model_name=(answer.get("meta") or {}).get("model"),
-                output_hash=stable_hash(answer_text),
+                output_hash=stable_hash(answer["text"]),
             )
             self.event_store.append_analysis_snapshot(
                 analysis_id=analysis_id,
@@ -689,10 +774,14 @@ class AnalyzeMedicationSetUseCase:
         self._progress(
             "answer_generation_started",
             "Generating one evidence-grounded explanation for the medication set.",
-            {"strategy": "single_final_model_call"},
+            {"strategy": "draft_then_bounded_audience_review"},
         )
         answer = self.answer_generator(
-            context, command.audience, patient_context=command.patient_context
+            context,
+            command.audience,
+            patient_context=(context.get("medication_set") or {}).get(
+                "patient_context"
+            ),
         )
         self._progress(
             "answer_generation_completed",
@@ -1056,7 +1145,7 @@ def _decision_from_medication_set_context(
         abstention_reason=(
             None
             if risk_level != "insufficient_evidence"
-            else "No usable evidence returned by active sources."
+            else "Available evidence does not establish clinical severity for this medication set."
         ),
     )
 
@@ -1236,6 +1325,32 @@ def _evidence_cards_from_context(
     clinical_reference = signals.get("clinical_reference") or {}
     pkpd = context.get("pkpd") or {}
 
+    enzyme_profiles = (signals.get("mechanistic") or {}).get("enzymes") or {}
+    for side, drug_name in zip(("a", "b"), pair):
+        roles = enzyme_profiles.get(side) or {}
+        for role in ("inhibitor", "inducer", "substrate"):
+            for protein in sorted(biological_terms(roles.get(role))):
+                cards.append(
+                    _card(
+                        analysis_id,
+                        "Retrieved enzyme profile",
+                        "normalized_context",
+                        "enzyme_role",
+                        f"Retrieved enzyme profile lists {drug_name} as {role} of {protein}.",
+                        "mechanistic",
+                        [drug_name],
+                        payload={
+                            "drug": drug_name,
+                            "protein": protein,
+                            "role": role,
+                            "source_path": f"signals.mechanistic.enzymes.{side}.{role}",
+                        },
+                        limitations=[
+                            "Normalized source role; not independent validation of activity strength, exposure change or clinical effect."
+                        ],
+                    )
+                )
+
     canonical = (pkpd.get("pk_detail") or {}).get("canonical_interaction") or {}
     if canonical:
         claim = str(canonical.get("mechanism") or canonical)
@@ -1268,20 +1383,23 @@ def _evidence_cards_from_context(
             )
         )
 
-    if any(
-        faers.get(key)
-        for key in ("top_reactions_a", "top_reactions_b", "combo_reactions")
+    for key, scope in (
+        ("top_reactions_a", [pair[0]]),
+        ("top_reactions_b", [pair[1]]),
+        ("combo_reactions", pair),
     ):
+        if not faers.get(key):
+            continue
         cards.append(
             _card(
                 analysis_id,
                 "OpenFDA FAERS",
                 "public_api",
                 "adverse_signal",
-                "FAERS reaction rows were returned for this medication set.",
+                f"FAERS {'co-reported' if key == 'combo_reactions' else 'single-drug'} reaction rows for {' + '.join(scope)}.",
                 "pharmacovigilance_signal",
-                pair,
-                payload=faers,
+                scope,
+                payload={"reactions": faers[key], "scope_type": key},
                 limitations=[
                     "FAERS reports are spontaneous reports and cannot establish causality or incidence."
                 ],
@@ -1290,7 +1408,9 @@ def _evidence_cards_from_context(
 
     label_rows = clinical_reference.get("openfda_label") or {}
     for side, drug_name in zip(("a", "b"), pair):
-        label = label_rows.get(side) or {}
+        label = select_label_passages(
+            label_rows.get(side) or {}, pair, context.get("patient_context")
+        )
         sections = label.get("sections") or {}
         if not label.get("found") or not sections:
             continue
@@ -1307,6 +1427,79 @@ def _evidence_cards_from_context(
                 payload=label,
                 limitations=label.get("limitations")
                 or ["Label content is product/version specific."],
+            )
+        )
+
+    for side, drug_name in zip(("a", "b"), pair):
+        label = select_label_passages(
+            (clinical_reference.get("dailymed") or {}).get(side) or {},
+            pair,
+            context.get("patient_context"),
+        )
+        original = label_rows.get(side) or {}
+        if not label.get("found") or not label.get("sections"):
+            continue
+        if (
+            label.get("set_id")
+            and label.get("set_id") in {original.get("set_id"), original.get("setid")}
+            and label.get("spl_version")
+            == str(original.get("spl_version") or original.get("version") or "")
+            and label.get("sections")
+            == select_label_passages(
+                original, pair, context.get("patient_context")
+            ).get("sections")
+        ):
+            continue  # Same underlying label is not independent corroboration.
+        cards.append(
+            _card(
+                analysis_id,
+                "DailyMed SPL",
+                "public_label_api",
+                "label_context",
+                f'{drug_name} DailyMed label {label.get("set_id")} version {label.get("spl_version")}',
+                "label",
+                [drug_name],
+                payload=label,
+                limitations=label.get("limitations") or [],
+            )
+        )
+
+    literature = (
+        (signals.get("research_enrichment") or {}).get("europe_pmc") or {}
+    ).get("articles") or []
+    for article in literature[:5]:
+        abstract = article.get("abstract") or ""
+        if not abstract or len(abstract) > 20000 or article.get("is_retracted"):
+            continue
+        scope = [
+            drug
+            for drug in pair
+            if re.search(r"(?<!\w)" + re.escape(drug) + r"(?!\w)", abstract, re.I)
+        ]
+        if not scope:
+            continue
+        payload = {
+            **article,
+            "passages": [{"section": "abstract", "text": abstract}],
+            "provenance": {
+                "source_url": article.get("url"),
+                "pmid": article.get("pmid"),
+                "doi": article.get("doi"),
+            },
+        }
+        cards.append(
+            _card(
+                analysis_id,
+                "Europe PMC",
+                "public_literature_api",
+                "literature_abstract",
+                article.get("title") or "Retrieved abstract",
+                "insufficient",
+                scope,
+                payload=payload,
+                limitations=[
+                    "Abstract-only evidence; study design, applicability and clinical validity require review. Not a label or prescribing guideline."
+                ],
             )
         )
 
@@ -1378,6 +1571,37 @@ def _evidence_cards_from_context(
             )
         )
     return cards
+
+
+def _patient_selected_pair(item, analysis_id, patient):
+    selected = _select_clinical_passages(item.context, list(item.pair), patient)
+    # Fetch-time cards predate patient selection. Refresh label cards from the
+    # selected source units so generation, verification and audit use one view.
+    # Preserve all enriched non-label cards and the enriched pair decision.
+    labels = [
+        card
+        for card in _evidence_cards_from_context(analysis_id, selected, list(item.pair))
+        if card.claim_type == "label_context"
+    ]
+    cards = [
+        card for card in item.evidence_cards or [] if card.claim_type != "label_context"
+    ] + labels
+    return replace(item, context=selected, evidence_cards=cards)
+
+
+def _select_clinical_passages(context, drugs, patient):
+    selected = deepcopy(context)
+    labels = ((selected.get("signals") or {}).get("clinical_reference") or {}).get(
+        "openfda_label"
+    ) or {}
+    for side, label in labels.items():
+        labels[side] = select_label_passages(label, drugs, patient)
+    daily = ((selected.get("signals") or {}).get("clinical_reference") or {}).get(
+        "dailymed"
+    ) or {}
+    for side, label in daily.items():
+        daily[side] = select_label_passages(label, drugs, patient)
+    return selected
 
 
 def _card(
@@ -1466,7 +1690,7 @@ def _decision_from_context(
         abstention_reason=(
             None
             if risk_level != "insufficient_evidence"
-            else "No usable evidence returned by active sources."
+            else "Available evidence does not establish clinical severity for this pair."
         ),
     )
 
@@ -1504,6 +1728,7 @@ def _deterministic_verification(
     decision: InteractionDecision,
     safety_report: SafetyReport,
     evidence_cards: list[EvidenceCard],
+    patient_context=None,
 ) -> dict[str, Any]:
     return (
         ExplanationVerifier()
@@ -1512,6 +1737,7 @@ def _deterministic_verification(
             decision=decision,
             evidence_cards=evidence_cards,
             safety_report=safety_report,
+            patient_context=patient_context,
         )
         .to_dict()
     )

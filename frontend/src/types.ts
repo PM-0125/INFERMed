@@ -65,8 +65,9 @@ export interface AssessmentSection {
 
 export interface InteractionResult {
   verification?: {
-    status: 'checks_passed' | 'review_required' | 'failed'
-    claims?: Array<{text: string; evidence_ids: string[]; status: string; reasons: string[]}>
+    status: 'checks_passed' | 'review_required' | 'failed' | 'recommendations_withheld' | 'review_failed'
+    publication?: {status: string; withheld_count: number; source_matched_count: number; limitation: string}
+    claims?: Array<{text: string; evidence_ids: string[]; source_labels?: string[]; status: string; reasons: string[]; claim_kind?: string; verification_method?: string; patient_applicability?: {status: string; required_fields: string[]; reasons: string[]; limitation: string; population_differences?: string[]}; source_matches?: Array<{source_name: string; section: string; text: string; context?: string; source_url?: string | null}>}>
     notes?: string[]
   }
   evidenceFreshness?: Array<{pair: string[]; assembledAt?: string; cacheStatus: string}>

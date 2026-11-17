@@ -1102,7 +1102,7 @@
 .narrative-body p { margin-bottom: 8px; }
 .narrative-body p:last-child { margin-bottom: 0; }
 
-.narrative-body .markdown-heading {
+.narrative-body :is(h1, h2, h3, h4, h5, h6) {
   margin: 13px 0 6px;
   color: var(--navy);
   font-size: 13px;
@@ -1110,11 +1110,12 @@
   letter-spacing: .02em;
 }
 
-.narrative-body .markdown-heading:first-child {
+.narrative-body :is(h1, h2, h3, h4, h5, h6):first-child {
   margin-top: 0;
 }
 
-.narrative-body ul {
+.narrative-body ul,
+.narrative-body ol {
   margin: 0 0 8px 0;
   padding-left: 18px;
   display: flex;
@@ -1123,9 +1124,23 @@
 }
 
 .narrative-body li { margin: 0; }
+.narrative-body ul { list-style-type: disc; }
+.narrative-body ol { list-style-type: decimal; }
+.narrative-body li::marker { color: var(--ink-mid); }
 
 .narrative-body strong { color: var(--ink); font-weight: 700; }
 .narrative-body em     { font-style: italic; color: var(--ink-mid); }
+
+.narrative-body { min-width: 0; overflow-wrap: anywhere; }
+.markdown-table-scroll { max-width: 100%; overflow-x: auto; margin: 12px 0; }
+.markdown-table-scroll:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.markdown-table-scroll table { width: 100%; min-width: 420px; border-collapse: collapse; font-size: 14px; line-height: 1.6; }
+.markdown-table-scroll th,
+.markdown-table-scroll td { padding: 10px 12px; border: 1px solid var(--line); text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+.markdown-table-scroll th { min-width: 7rem; color: var(--ink); background: var(--surface-raised); font-weight: 700; }
+.markdown-table-scroll td { color: var(--ink-mid); }
+.narrative-body pre { max-width: 100%; overflow-x: auto; padding: 10px; background: var(--surface-raised); }
+.narrative-body blockquote { margin: 10px 0; padding-left: 12px; border-left: 3px solid var(--line); }
 
 /* ── Follow-up zone ── */
 .followup-zone {
@@ -1257,7 +1272,7 @@
 .thread-msg.user      { border-left: 3px solid var(--blue); }
 .thread-msg.assistant { border-left: 3px solid var(--green); }
 
-.thread-msg strong {
+.thread-msg > strong {
   display: block;
   font-size: 10.5px;
   font-weight: 800;
